@@ -10,7 +10,7 @@ spark.conf.set("spark.sql.shuffle.partitions", "100")
 
 # Generate a large dataset with highly skewed data
 data_gen = (DataGenerator(spark, name="skewed_dataset", rows=10_000_000, partitions=100)
-            .withColumn("id", "string", expr("uuid()"))
+            .withIdOutput()
             .withColumn("partition_key", "string", expr("""
         case
             when rand() < 0.001 then '1'  # 0.1% of data
@@ -50,20 +50,23 @@ skewed_df = df.repartition(100, "partition_key")
 
 # Analyze partition sizes
 def analyze_partitions(df):
-    return df.groupBy(spark.sparkContext.partition_id()).agg(
+    return df.groupBy(expr("spark_partition_id()")).agg(
         count("*").alias("row_count"),
         (size(collect_list("id")) * avg(length("payload"))).alias("estimated_size_bytes")
-    ).orderBy("partition_id")
+    ).orderBy("spark_partition_id")
 
 partition_analysis = analyze_partitions(skewed_df)
 partition_analysis.show(100)
 
 # Simulate processing time differences
-def process_partition(df):
+def process_partition(pandas_df):
+    import pandas as pd
     # Simulate more processing time for larger partitions
-    return df.withColumn("processed_value",
-                         when(col("partition_key").isin("1", "2", "3"), expr("pow(value, 2) * 1000"))
-                         .otherwise(col("value")))
+    pandas_df['processed_value'] = pandas_df.apply(
+        lambda row: row['value']**2 * 1000 if row['partition_key'] in ['1', '2', '3'] else row['value'],
+        axis=1
+    )
+    return pandas_df
 
 print("\nProcessing partitions...")
 processed_df = skewed_df.groupBy("partition_key").applyInPandas(process_partition, skewed_df.schema)
