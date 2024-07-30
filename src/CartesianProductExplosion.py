@@ -1,19 +1,21 @@
 from pyspark.sql import SparkSession
-from dbldatagen import DataGenerator, fakergen
-from pyspark.sql.functions import col, expr
+from dbldatagen import DataGenerator
+from pyspark.sql.functions import expr
 import time
 
 spark = SparkSession.builder.appName("CartesianProductExplosion").getOrCreate()
 
 # Generate two datasets
-users_gen = (DataGenerator(spark, name="users", rowcount=10000, partitions=10)
-             .withColumn("user_id", expr("uuid()"))
-             .withColumn("name", fakergen("name"))
+users_gen = (DataGenerator(spark, name="users", rows=10000, partitions=10)
+             .withIdOutput()
+             .withColumn("user_id", "string", expr("uuid()"))
+             .withColumn("name", "string", expr="concat('User_', cast(id as string))")
              )
 
-products_gen = (DataGenerator(spark, name="products", rowcount=1000, partitions=5)
-                .withColumn("product_id", expr("uuid()"))
-                .withColumn("product_name", fakergen("word"))
+products_gen = (DataGenerator(spark, name="products", rows=1000, partitions=5)
+                .withIdOutput()
+                .withColumn("product_id", "string", expr="uuid()")
+                .withColumn("product_name", "string", expr="concat('Product_', cast(id as string))")
                 )
 
 users_df = users_gen.build()
