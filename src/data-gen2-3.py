@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from dbldatagen import DataGenerator
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, DateType
-from pyspark.sql.functions import col, array, expr
+from pyspark.sql.functions import expr
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("LoanDataGeneration").getOrCreate()
@@ -59,6 +59,7 @@ branch_ids = [row.branch_id for row in branch_df.select("branch_id").collect()]
 underwriter_ids = [row.underwriter_id for row in underwriter_df.select("underwriter_id").collect()]
 loan_types = [row.loan_type for row in loan_type_df.select("loan_type").collect()]
 insurance_types = [row.insurance_type for row in insurance_df.select("insurance_type").collect()]
+
 
 # Define schema for main loan dataset
 loan_schema = StructType([
@@ -129,7 +130,7 @@ loan_data_gen = (DataGenerator(spark, name="loan_data", rows=100000, partitions=
                  .withColumn("total_payments_made", "integer", minValue=0, maxValue=360)
                  .withColumn("remaining_balance", expr("loan_amount - (monthly_payment * total_payments_made)"))
                  .withColumn("last_payment_date", expr("date_sub(current_date(), int(rand() * 30))"))
-                 .withColumn("next_payment_date", expr("date_add(last_payment_date, 30)"))
+                 .withColumn("next_payment_date", expr="date_add(last_payment_date, 30)")
                  .withColumn("days_past_due", "integer", minValue=0, maxValue=90)
                  .withColumn("times_30_days_late", "integer", minValue=0, maxValue=10)
                  .withColumn("times_60_days_late", "integer", minValue=0, maxValue=5)
@@ -139,8 +140,8 @@ loan_data_gen = (DataGenerator(spark, name="loan_data", rows=100000, partitions=
                  .withColumn("loan_to_value_ratio", expr("loan_amount / collateral_value"))
                  .withColumn("origination_fee", expr("loan_amount * 0.01"))
                  .withColumn("application_date", expr("date_sub(origination_date, int(rand() * 30))"))
-                 .withColumn("approval_date", expr("date_add(application_date, int(rand() * 14))"))
-                 .withColumn("funding_date", expr("date_add(approval_date, int(rand() * 7))"))
+                 .withColumn("approval_date", expr="date_add(application_date, int(rand() * 14)")
+                 .withColumn("funding_date", expr="date_add(approval_date, int(rand() * 7)")
                  .withColumnSpec("branch_id", expr(f"array({','.join(repr(id) for id in branch_ids)})[int(rand() * {len(branch_ids)})]"))
                  .withColumnSpec("underwriter_id", expr(f"array({','.join(repr(id) for id in underwriter_ids)})[int(rand() * {len(underwriter_ids)})]"))
                  .withColumnSpec("co_borrower_id", expr(f"array({','.join(repr(id) for id in customer_ids)})[int(rand() * {len(customer_ids)})]"), percentNulls=0.7)
@@ -162,4 +163,4 @@ print(f"All customer_ids valid: {loan_df.join(customer_df, 'customer_id', 'left_
 print(f"All branch_ids valid: {loan_df.join(branch_df, 'branch_id', 'left_anti').count() == 0}")
 print(f"All underwriter_ids valid: {loan_df.join(underwriter_df, 'underwriter_id', 'left_anti').count() == 0}")
 print(f"All loan_types valid: {loan_df.join(loan_type_df, 'loan_type', 'left_anti').count() == 0}")
-print(f"All insurance_types valid: {loan_df.filter(col('insurance_type').isNotNull()).join(insurance_df, 'insurance_type', 'left_anti').count() == 0}")
+print(f"All insurance_types valid: {loan_df.filter('insurance_type IS NOT NULL').join(insurance_df, 'insurance_type', 'left_anti').count() == 0}")")
