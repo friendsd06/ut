@@ -11,18 +11,18 @@ spark.conf.set("spark.sql.shuffle.partitions", "100")
 # Generate a large dataset with highly skewed data
 data_gen = (DataGenerator(spark, name="skewed_dataset", rows=10_000_000, partitions=100)
             .withIdOutput()
-            .withColumn("partition_key", "string", expr("""
+            .withColumn("partition_key", "string", expr="""
         case
-            when rand() < 0.001 then '1'  # 0.1% of data
-            when rand() < 0.01 then '2'   # ~0.9% of data
-            when rand() < 0.1 then '3'    # ~9% of data
-            when rand() < 0.3 then '4'    # ~20% of data
-            when rand() < 0.6 then '5'    # ~30% of data
-            else cast(5 + int(rand() * 95) as string)  # Rest spread across 95 partitions
+            when rand() < 0.001 then '1'  -- 0.1% of data
+            when rand() < 0.01 then '2'   -- ~0.9% of data
+            when rand() < 0.1 then '3'    -- ~9% of data
+            when rand() < 0.3 then '4'    -- ~20% of data
+            when rand() < 0.6 then '5'    -- ~30% of data
+            else cast(5 + int(rand() * 95) as string)  -- Rest spread across 95 partitions
         end
-    """))
-            .withColumn("timestamp", "timestamp", expr("date_sub(current_timestamp(), int(rand() * 365))"))
-            .withColumn("value", "double", expr("""
+    """)
+            .withColumn("timestamp", "timestamp", expr="date_sub(current_timestamp(), int(rand() * 365))")
+            .withColumn("value", "double", expr="""
         case
             when partition_key = '1' then rand() * 1000000
             when partition_key = '2' then rand() * 100000
@@ -31,9 +31,8 @@ data_gen = (DataGenerator(spark, name="skewed_dataset", rows=10_000_000, partiti
             when partition_key = '5' then rand() * 100
             else rand() * 10
         end
-    """))
-            .withColumn("payload", "string", expr("repeat('x', 100 + int(rand() * 900))"))  # Variable-length string to increase row size
-            )
+    """)
+            .withColumn("payload", "string", expr="repeat('x', 100 + int(rand() * 900))"))
 
 # Build the dataset
 df = data_gen.build()
