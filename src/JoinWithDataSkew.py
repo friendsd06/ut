@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from dbldatagen import DataGenerator, fakergen
+from dbldatagen import DataGenerator
 from pyspark.sql.functions import col, expr
 import time
 
@@ -9,26 +9,26 @@ spark.conf.set("spark.executor.memory", "2g")
 spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")  # Disable broadcast joins
 
 # Generate two large datasets with skewed join keys
-left_gen = (DataGenerator(spark, name="left_data", rowcount=50_000_000, partitions=100)
-            .withColumn("id", expr("uuid()"))
-            .withColumn("join_key", expr("""
+left_gen = (DataGenerator(spark, name="left_data", rows=50_000_000, partitions=100)
+            .withIdOutput()
+            .withColumn("join_key", "string", expr="""
         case
             when rand() < 0.05 then 'SKEWED_KEY'
             else concat('KEY_', cast(rand() * 1000000 as int))
         end
-    """))
-            .withColumn("value", expr("rand() * 1000"))
+    """)
+            .withColumn("value", "double", expr="rand() * 1000")
             )
 
-right_gen = (DataGenerator(spark, name="right_data", rowcount=10_000_000, partitions=50)
-             .withColumn("id", expr("uuid()"))
-             .withColumn("join_key", expr("""
+right_gen = (DataGenerator(spark, name="right_data", rows=10_000_000, partitions=50)
+             .withIdOutput()
+             .withColumn("join_key", "string", expr="""
         case
             when rand() < 0.1 then 'SKEWED_KEY'
             else concat('KEY_', cast(rand() * 1000000 as int))
         end
-    """))
-             .withColumn("info", fakergen("text", "max_nb_chars=100"))
+    """)
+             .withColumn("info", "string", expr="concat('Info_', cast(rand() * 1000000 as int))")
              )
 
 left_df = left_gen.build()
