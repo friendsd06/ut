@@ -1,8 +1,6 @@
 from pyspark.sql import SparkSession
-from dbldatagen import DataGenerator, fakergen
-from pyspark.sql.functions import col, expr, when, count, size, collect_list
-import matplotlib.pyplot as plt
-import seaborn as sns
+from dbldatagen import DataGenerator
+from pyspark.sql.functions import col, expr, when, count, size, collect_list, avg, length
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("DataSkewPartitionScenario").getOrCreate()
@@ -11,9 +9,9 @@ spark = SparkSession.builder.appName("DataSkewPartitionScenario").getOrCreate()
 spark.conf.set("spark.sql.shuffle.partitions", "100")
 
 # Generate a large dataset with highly skewed data
-data_gen = (DataGenerator(spark, name="skewed_dataset", rowcount=10_000_000, partitions=100)
-            .withColumn("id", expr("uuid()"))
-            .withColumn("partition_key", expr("""
+data_gen = (DataGenerator(spark, name="skewed_dataset", rows=10_000_000, partitions=100)
+            .withColumn("id", "string", expr("uuid()"))
+            .withColumn("partition_key", "string", expr("""
         case
             when rand() < 0.001 then '1'  # 0.1% of data
             when rand() < 0.01 then '2'   # ~0.9% of data
@@ -23,8 +21,8 @@ data_gen = (DataGenerator(spark, name="skewed_dataset", rowcount=10_000_000, par
             else cast(5 + int(rand() * 95) as string)  # Rest spread across 95 partitions
         end
     """))
-            .withColumn("timestamp", expr("date_sub(current_timestamp(), int(rand() * 365))"))
-            .withColumn("value", expr("""
+            .withColumn("timestamp", "timestamp", expr("date_sub(current_timestamp(), int(rand() * 365))"))
+            .withColumn("value", "double", expr("""
         case
             when partition_key = '1' then rand() * 1000000
             when partition_key = '2' then rand() * 100000
@@ -34,7 +32,7 @@ data_gen = (DataGenerator(spark, name="skewed_dataset", rowcount=10_000_000, par
             else rand() * 10
         end
     """))
-            .withColumn("payload", expr("repeat('x', 100 + int(rand() * 900))"))  # Variable-length string to increase row size
+            .withColumn("payload", "string", expr("repeat('x', 100 + int(rand() * 900))"))  # Variable-length string to increase row size
             )
 
 # Build the dataset
@@ -52,40 +50,13 @@ skewed_df = df.repartition(100, "partition_key")
 
 # Analyze partition sizes
 def analyze_partitions(df):
-    return df.groupBy(spark_partition_id()).agg(
+    return df.groupBy(spark.sparkContext.partition_id()).agg(
         count("*").alias("row_count"),
         (size(collect_list("id")) * avg(length("payload"))).alias("estimated_size_bytes")
-    ).orderBy("spark_partition_id")
+    ).orderBy("partition_id")
 
 partition_analysis = analyze_partitions(skewed_df)
 partition_analysis.show(100)
-
-# Collect partition analysis for visualization
-partition_data = partition_analysis.collect()
-partition_ids = [row['spark_partition_id'] for row in partition_data]
-row_counts = [row['row_count'] for row in partition_data]
-estimated_sizes = [row['estimated_size_bytes'] for row in partition_data]
-
-# Visualize partition sizes
-plt.figure(figsize=(15, 10))
-sns.barplot(x=partition_ids, y=row_counts)
-plt.title('Row Count per Partition')
-plt.xlabel('Partition ID')
-plt.ylabel('Row Count')
-plt.xticks(rotation=90)
-plt.tight_layout()
-plt.savefig('partition_row_counts.png')
-plt.close()
-
-plt.figure(figsize=(15, 10))
-sns.barplot(x=partition_ids, y=estimated_sizes)
-plt.title('Estimated Size per Partition')
-plt.xlabel('Partition ID')
-plt.ylabel('Estimated Size (bytes)')
-plt.xticks(rotation=90)
-plt.tight_layout()
-plt.savefig('partition_sizes.png')
-plt.close()
 
 # Simulate processing time differences
 def process_partition(df):
@@ -106,22 +77,7 @@ processing_times = processed_df.groupBy("partition_key").agg(
 print("\nSimulated processing times per partition:")
 processing_times.show(100)
 
-# Visualize processing times
-processing_data = processing_times.collect()
-partition_keys = [row['partition_key'] for row in processing_data]
-relative_times = [row['relative_processing_time'] for row in processing_data]
-
-plt.figure(figsize=(15, 10))
-sns.barplot(x=partition_keys, y=relative_times)
-plt.title('Relative Processing Time per Partition Key')
-plt.xlabel('Partition Key')
-plt.ylabel('Relative Processing Time')
-plt.xticks(rotation=90)
-plt.tight_layout()
-plt.savefig('processing_times.png')
-plt.close()
-
-print("Analysis complete. Check the generated PNG files for visualizations.")
+print("Analysis complete.")
 
 # Clean up
 spark.catalog.clearCache()
