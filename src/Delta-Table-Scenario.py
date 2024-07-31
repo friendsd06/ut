@@ -1,8 +1,11 @@
+# Databricks notebook source
+
 # COMMAND ----------
 # Step 1: Set up the Spark session
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lit, col
 from delta.tables import DeltaTable
+import os
 
 spark = SparkSession.builder.getOrCreate()
 
@@ -18,13 +21,20 @@ display(df)
 # Step 3: Write the data to an external location (e.g., S3)
 external_path = "s3a://your-bucket/path/to/external/delta/table"
 
-# Write the data using Delta format
-df.write.format("delta").mode("overwrite").save(external_path)
+# Check if the Delta table already exists
+table_exists = DeltaTable.isDeltaTable(spark, external_path)
+
+if not table_exists:
+    # If the table doesn't exist, write the data using Delta format
+    df.write.format("delta").mode("overwrite").save(external_path)
+    print(f"Delta table created at {external_path}")
+else:
+    print(f"Delta table already exists at {external_path}")
 
 # COMMAND ----------
 # Step 4: Create an external table in the metastore
 spark.sql(f"""
-CREATE TABLE external_delta_table
+CREATE TABLE IF NOT EXISTS external_delta_table
 USING DELTA
 LOCATION '{external_path}'
 """)
@@ -43,7 +53,6 @@ updates = [
     (7, "Updated_Name_7", 7500),
     (9, "Updated_Name_9", 9500)
 ]
-
 update_df = spark.createDataFrame(updates, ["id", "name", "value"])
 
 # COMMAND ----------
