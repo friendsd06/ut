@@ -132,3 +132,7 @@ Optimized Merge: Used a more specific update condition in the merge operation, p
 Fine-tuned Delta Configurations: Added more Delta-specific configurations for optimized writes and merges.
     Z-Ordering Within Partitions: Applied Z-ordering by id within each partition, which can improve data locality for queries that filter on both department and id.
 Vacuum with Deletion Vectors: The vacuum operation now benefits from deletion vectors, making it more efficient.
+
+
+These optimizations, especially the use of deletion vectors, can significantly improve performance for large-scale upsert operations and subsequent reads. Deletion vectors allow for more efficient handling of deleted data without immediately rewriting files, which can be particularly beneficial for tables with frequent updates and deletes.
+Remember that the effectiveness of these optimizations can vary based on your specific data patterns and hardware. It's always a good idea to benchmark with representative data volumes and access patterns to fine-tune the configuration for your particular use case.
