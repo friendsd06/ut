@@ -1,7 +1,8 @@
 
-from pyspark.sql.functions import udf, rand, when, lit
+from pyspark.sql.functions import udf, rand, when, lit, array, element_at
 from pyspark.sql.types import StringType, IntegerType
 import uuid
+
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("SimpleSkewedLoanData").getOrCreate()
@@ -26,18 +27,11 @@ def generate_loans(customers_df):
     # Get corporate customer IDs
     corporate_ids = [row.customer_id for row in customers_df.filter(col("type") == "Corporate").collect()]
 
-    # Broadcast the corporate IDs
-    corporate_ids_bc = spark.sparkContext.broadcast(corporate_ids)
-
     # UDF to generate UUID
     uuidUdf = udf(lambda: str(uuid.uuid4()), StringType())
 
-    # UDF to select random corporate ID
-    def select_corporate_id():
-        ids = corporate_ids_bc.value
-        return ids[int(rand() * len(ids))]
-
-    select_corporate_id_udf = udf(select_corporate_id, StringType())
+    # Create an array of corporate IDs
+    corporate_id_array = array([lit(id) for id in corporate_ids])
 
     # Generate base dataframe
     base_df = spark.range(0, 100_000_000)
@@ -46,7 +40,8 @@ def generate_loans(customers_df):
     loans_df = base_df.withColumn("random", rand()) \
         .withColumn("loan_id", uuidUdf()) \
         .withColumn("customer_id",
-                    when(col("random") < 0.98, select_corporate_id_udf())
+                    when(col("random") < 0.98,
+                         element_at(corporate_id_array, (rand() * lit(len(corporate_ids))).cast(IntegerType()) + 1))
                     .otherwise(uuidUdf())) \
         .withColumn("loan_amount",
                     when(col("random") < 0.98, (rand() * 10_000_000).cast(IntegerType()))
