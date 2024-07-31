@@ -3,6 +3,17 @@ from pyspark.sql.functions import col, when, rand, expr
 from delta.tables import DeltaTable
 import uuid
 
+
+
+This script does the following:
+
+Creates a table named employee_table with a proper schema including id, name, age, salary, department, and last_updated date.
+Inserts 1500 initial records into the table.
+Creates a source DataFrame with 1000 records for the upsert operation. These include both updates to existing records and new records.
+Performs a merge operation (upsert) on the target table using the source data. It updates records when the source salary is higher than the target salary, and inserts new records when there's no match.
+Applies performance improvements including repartitioning, caching, and enabling optimizeWrite and autoCompact.
+Verifies the results by showing the final record count and a sample of the data after the upsert.
+
 # Initialize Spark Session
 spark = SparkSession.builder.appName("UpsertExample").getOrCreate()
 
