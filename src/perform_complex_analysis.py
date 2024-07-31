@@ -1,6 +1,7 @@
 # COMMAND ----------
-from pyspark.sql.functions import col, sum, avg, max, min, count, datediff, year, month, when, rank
+from pyspark.sql.functions import col, sum, avg, max, min, count, datediff, year, month, when, rank, current_date
 from pyspark.sql.window import Window
+import time
 
 # Read the data
 customer_df = spark.read.csv(customer_path, header=True, schema=customer_schema)
@@ -33,7 +34,7 @@ def perform_complex_analysis():
 
     # 5. Complex aggregation and filtering
     result = enriched_df.filter(col("loan_status") != "Paid Off") \
-        .groupBy("customer_id", "state", "loan_type", "year(origination_date)") \
+        .groupBy("customer_id", "state", "loan_type", year("origination_date").alias("origination_year")) \
         .agg(
         count("loan_id").alias("active_loans"),
         sum("remaining_balance").alias("total_outstanding_balance"),
@@ -75,7 +76,7 @@ print("Job metrics:")
 for job in spark.sparkContext.statusTracker().getJobIdsForGroup():
     job_data = spark.sparkContext.statusTracker().getJobInfo(job)
     if job_data:
-        print(f"Job ID: {job}, Num Tasks: {job_data.numTasks()}, Num Active Tasks: {job_data.numActiveTasks()}, Num Completed Tasks: {job_data.numCompletedTasks()}")
+        print(f"Job ID: {job}, Num Tasks: {job_data.numTasks}, Num Active Tasks: {job_data.numActiveTasks}, Num Completed Tasks: {job_data.numCompletedTasks}")
 
 # COMMAND ----------
 # Clean up
