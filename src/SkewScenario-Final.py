@@ -1,9 +1,8 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, rand, expr, sum as sum_, count
+from pyspark.sql.functions import col, when, rand, expr, sum as sum_, count, lit
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType, TimestampType
 import uuid
 import time
-
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("LoanDataGeneration").getOrCreate()
@@ -27,11 +26,11 @@ loan_schema = StructType([
 # Generate customer data
 def generate_customers():
     individual_customers = [
-        (str(uuid.uuid4()), f"Individual_{i}", "Individual", expr("current_timestamp() - interval 1 year + interval cast(rand() * 365 as int) day"))
+        (str(uuid.uuid4()), f"Individual_{i}", "Individual", expr("current_timestamp() - interval 1 year + interval cast(rand() * 365 as int) day").cast(TimestampType()))
         for i in range(5_000_000)
     ]
     corporate_customers = [
-        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", expr("current_timestamp() - interval 5 year + interval cast(rand() * 1825 as int) day"))
+        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", expr("current_timestamp() - interval 5 year + interval cast(rand() * 1825 as int) day").cast(TimestampType()))
         for i in range(5)
     ]
     return spark.createDataFrame(individual_customers + corporate_customers, customer_schema)
@@ -41,20 +40,20 @@ def generate_loans(customers_df):
     corporate_ids = [row.customer_id for row in customers_df.filter(col("type") == "Corporate").collect()]
 
     def generate_loan_entry():
-        if rand() < 0.98:  # 98% of loans to corporate customers
+        if rand().cast(DoubleType()) < 0.98:  # 98% of loans to corporate customers
             return (
                 str(uuid.uuid4()),
-                corporate_ids[int(rand() * len(corporate_ids))],
-                rand() * 10_000_000,
-                expr("current_timestamp() - interval cast(rand() * 1825 as int) day"),
+                corporate_ids[int(rand().cast(DoubleType()) * len(corporate_ids))],
+                rand().cast(DoubleType()) * 10_000_000,
+                expr("current_timestamp() - interval cast(rand() * 1825 as int) day").cast(TimestampType()),
                 "Corporate"
             )
         else:
             return (
                 str(uuid.uuid4()),
-                expr("uuid()"),
-                rand() * 10_000,
-                expr("current_timestamp() - interval cast(rand() * 365 as int) day"),
+                str(uuid.uuid4()),  # Generate a random UUID for individual customers
+                rand().cast(DoubleType()) * 10_000,
+                expr("current_timestamp() - interval cast(rand() * 365 as int) day").cast(TimestampType()),
                 "Personal"
             )
 
