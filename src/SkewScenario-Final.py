@@ -1,8 +1,7 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, rand, expr, sum as sum_, count, lit
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType, TimestampType
+from pyspark.sql.functions import col, when, rand, expr, current_timestamp
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 import uuid
-import time
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("LoanDataGeneration").getOrCreate()
@@ -25,39 +24,55 @@ loan_schema = StructType([
 
 # Generate customer data
 def generate_customers():
+    def create_timestamp(days):
+        return expr(f"current_timestamp() - interval 1 year + interval cast(rand() * {days} as int) day").cast(TimestampType())
+
     individual_customers = [
-        (str(uuid.uuid4()), f"Individual_{i}", "Individual", expr("current_timestamp() - interval 1 year + interval cast(rand() * 365 as int) day").cast(TimestampType()))
+        (str(uuid.uuid4()), f"Individual_{i}", "Individual", None)
         for i in range(5_000_000)
     ]
+
     corporate_customers = [
-        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", expr("current_timestamp() - interval 5 year + interval cast(rand() * 1825 as int) day").cast(TimestampType()))
+        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", None)
         for i in range(5)
     ]
-    return spark.createDataFrame(individual_customers + corporate_customers, customer_schema)
+
+    df = spark.createDataFrame(individual_customers + corporate_customers, customer_schema)
+
+    return df.withColumn(
+        "registration_date",
+        when(col("type") == "Individual", create_timestamp(365))
+            .otherwise(create_timestamp(1825))
+    )
 
 # Generate loan data
 def generate_loans(customers_df):
     corporate_ids = [row.customer_id for row in customers_df.filter(col("type") == "Corporate").collect()]
 
     def generate_loan_entry():
-        if rand().cast(DoubleType()) < 0.98:  # 98% of loans to corporate customers
+        if rand() < 0.98:  # 98% of loans to corporate customers
             return (
                 str(uuid.uuid4()),
-                corporate_ids[int(rand().cast(DoubleType()) * len(corporate_ids))],
-                rand().cast(DoubleType()) * 10_000_000,
-                expr("current_timestamp() - interval cast(rand() * 1825 as int) day").cast(TimestampType()),
+                corporate_ids[int(rand() * len(corporate_ids))],
+                rand() * 10_000_000,
+                None,
                 "Corporate"
             )
         else:
             return (
                 str(uuid.uuid4()),
-                str(uuid.uuid4()),  # Generate a random UUID for individual customers
-                rand().cast(DoubleType()) * 10_000,
-                expr("current_timestamp() - interval cast(rand() * 365 as int) day").cast(TimestampType()),
+                str(uuid.uuid4()),  # Random UUID for individual customers
+                rand() * 10_000,
+                None,
                 "Personal"
             )
 
-    return spark.range(0, 100_000_000).rdd.map(lambda x: generate_loan_entry()).toDF(loan_schema)
+    df = spark.range(0, 100_000_000).rdd.map(lambda x: generate_loan_entry()).toDF(loan_schema)
+
+    return df.withColumn(
+        "loan_date",
+        expr("current_timestamp() - interval cast(rand() * 1825 as int) day").cast(TimestampType())
+    )
 
 # Generate and save customer data
 print("Generating customer data...")
@@ -70,3 +85,16 @@ print("Generating loan data...")
 loans_df = generate_loans(customers_df)
 loans_df.write.csv("s3://your-bucket/loans", header=True, mode="overwrite")
 print("Loan data saved to S3")
+
+# Show some statistics
+print("\nCustomer Distribution:")
+customers_df.groupBy("type").count().show()
+
+print("\nLoan Distribution:")
+loans_df.groupBy("loan_type").agg(
+    count("*").alias("loan_count"),
+    expr("sum(loan_amount)").alias("total_loan_amount")
+).show()
+
+# Clean up
+spark.stop()
