@@ -121,3 +121,14 @@ spark.sql(f"ANALYZE TABLE {table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
 
 # Clean up
 spark.catalog.clearCache()
+
+
+Key additional optimizations and features in this version:
+
+Deletion Vectors: Enabled deletion vectors with spark.databricks.delta.deletionVectors.enabled. This optimizes how deletes are handled in Delta Lake, improving performance for delete operations and subsequent reads.
+Table Partitioning: Partitioned the table by department, which can significantly improve query performance for department-based queries.
+    Enhanced Salting: Increased the salt factor and included department in the repartitioning to better distribute data across partitions.
+Optimized Merge: Used a more specific update condition in the merge operation, potentially reducing the amount of data that needs to be updated.
+Fine-tuned Delta Configurations: Added more Delta-specific configurations for optimized writes and merges.
+    Z-Ordering Within Partitions: Applied Z-ordering by id within each partition, which can improve data locality for queries that filter on both department and id.
+Vacuum with Deletion Vectors: The vacuum operation now benefits from deletion vectors, making it more efficient.
