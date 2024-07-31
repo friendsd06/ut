@@ -3,6 +3,15 @@ from pyspark.sql.functions import col, sum, avg, max, min, count, datediff, year
 from pyspark.sql.window import Window
 import time
 
+# Disable AQE and skew join optimization
+spark.conf.set("spark.sql.adaptive.enabled", "false")
+spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "false")
+
+# Verify configurations
+print("AQE enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
+print("Skew join optimization enabled:", spark.conf.get("spark.sql.adaptive.skewJoin.enabled"))
+
+
 # Read the data
 customer_df = spark.read.csv(customer_path, header=True, schema=customer_schema)
 loan_df = spark.read.csv(loan_path, header=True, schema=loan_schema)
@@ -80,4 +89,23 @@ for job in spark.sparkContext.statusTracker().getJobIdsForGroup():
 
 # COMMAND ----------
 # Clean up
+
+# Check if AQE was used
+print("\nChecking if AQE was used:")
+spark.sql("SET spark.sql.adaptive.enabled").show(truncate=False)
+spark.sql("SET spark.sql.adaptive.skewJoin.enabled").show(truncate=False)
+
+# Check for signs of dynamic partition pruning in the explain plan
+explain_string = result_df._jdf.queryExecution().explainString(True)
+if "Dynamic Partition Pruning" in explain_string:
+    print("Dynamic Partition Pruning was used despite being disabled.")
+else:
+    print("Dynamic Partition Pruning was not used, as expected.")
+
+# Check for signs of skew join optimization in the explain plan
+if "SkewedPartitioning" in explain_string:
+    print("Skew join optimization was used despite being disabled.")
+else:
+    print("Skew join optimization was not used, as expected.")
+
 spark.catalog.clearCache()
