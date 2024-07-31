@@ -1,7 +1,8 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, rand, expr, current_timestamp
+from pyspark.sql.functions import col, when, rand, expr, current_timestamp, to_timestamp
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 import uuid
+from datetime import datetime
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("LoanDataGeneration").getOrCreate()
@@ -24,16 +25,15 @@ loan_schema = StructType([
 
 # Generate customer data
 def generate_customers():
-    def create_timestamp(days):
-        return expr(f"current_timestamp() - interval 1 year + interval cast(rand() * {days} as int) day").cast(TimestampType())
+    placeholder_date = datetime.now()  # Use a placeholder date
 
     individual_customers = [
-        (str(uuid.uuid4()), f"Individual_{i}", "Individual", None)
+        (str(uuid.uuid4()), f"Individual_{i}", "Individual", placeholder_date)
         for i in range(5_000_000)
     ]
 
     corporate_customers = [
-        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", None)
+        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", placeholder_date)
         for i in range(5)
     ]
 
@@ -41,13 +41,16 @@ def generate_customers():
 
     return df.withColumn(
         "registration_date",
-        when(col("type") == "Individual", create_timestamp(365))
-            .otherwise(create_timestamp(1825))
+        when(col("type") == "Individual",
+             expr("current_timestamp() - interval 1 year + interval cast(rand() * 365 as int) day"))
+            .otherwise(expr("current_timestamp() - interval 5 year + interval cast(rand() * 1825 as int) day"))
     )
 
 # Generate loan data
 def generate_loans(customers_df):
     corporate_ids = [row.customer_id for row in customers_df.filter(col("type") == "Corporate").collect()]
+
+    placeholder_date = datetime.now()  # Use a placeholder date
 
     def generate_loan_entry():
         if rand() < 0.98:  # 98% of loans to corporate customers
@@ -55,7 +58,7 @@ def generate_loans(customers_df):
                 str(uuid.uuid4()),
                 corporate_ids[int(rand() * len(corporate_ids))],
                 rand() * 10_000_000,
-                None,
+                placeholder_date,
                 "Corporate"
             )
         else:
@@ -63,7 +66,7 @@ def generate_loans(customers_df):
                 str(uuid.uuid4()),
                 str(uuid.uuid4()),  # Random UUID for individual customers
                 rand() * 10_000,
-                None,
+                placeholder_date,
                 "Personal"
             )
 
@@ -71,7 +74,7 @@ def generate_loans(customers_df):
 
     return df.withColumn(
         "loan_date",
-        expr("current_timestamp() - interval cast(rand() * 1825 as int) day").cast(TimestampType())
+        expr("current_timestamp() - interval cast(rand() * 1825 as int) day")
     )
 
 # Generate and save customer data
