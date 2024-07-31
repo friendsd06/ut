@@ -4,6 +4,7 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType, I
 import uuid
 import time
 
+
 # Initialize Spark session
 spark = SparkSession.builder.appName("LoanDataGeneration").getOrCreate()
 
