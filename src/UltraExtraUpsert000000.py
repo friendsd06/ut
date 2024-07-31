@@ -131,3 +131,22 @@ spark.sql(f"ANALYZE TABLE {table_name} COMPUTE STATISTICS FOR COLUMNS id, salary
 
 # Clean up
 spark.catalog.clearCache()
+
+
+
+Key additional optimizations and features in this ultra-optimized version:
+
+Increased Parallelism: Further increased shuffle partitions and default parallelism for better distribution of work.
+Time-based Partitioning: Added time-based partitioning (year and month) along with department partitioning for more efficient querying of time-range data.
+Advanced Salting: Incorporated department into the salt calculation for even better distribution.
+Selective Persistence: Used persist() instead of cache() for more control over caching strategy.
+Optimized Merge Condition: Included partition columns in the merge condition for more efficient merging.
+Transaction Versioning: Added transaction versioning and app ID for better concurrency and monitoring.
+    Granular Optimization: Optimized the table after merge with a condition to focus on non-null departments.
+Shorter Vacuum Period: Reduced the vacuum period to 3 days for more aggressive file management.
+Granular Statistics: Computed statistics for specific important columns instead of all columns.
+Change Data Feed: Enabled Change Data Feed for tracking changes to the table over time.
+Merge Optimizations: Added configurations to optimize insert-only merges and range scans during merges.
+File Size Optimization: Set a maximum file size for Delta Lake to optimize file management.
+
+These advanced optimizations push the limits of what's possible with Delta Lake and Spark. They're designed to handle very large datasets with complex update patterns efficiently. However, remember that the effectiveness of these optimizations can vary based on your specific data patterns, hardware, and usage scenarios. Always test thoroughly with representative data and workloads to ensure these settings are optimal for your particular use case.
