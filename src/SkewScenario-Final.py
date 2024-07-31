@@ -1,5 +1,6 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, rand, expr
+
+from pyspark.sql.functions import udf, rand, when, lit
+from pyspark.sql.types import StringType, IntegerType
 import uuid
 
 # Initialize Spark session
@@ -22,26 +23,40 @@ def generate_customers():
 
 # Generate loan data
 def generate_loans(customers_df):
+    # Get corporate customer IDs
     corporate_ids = [row.customer_id for row in customers_df.filter(col("type") == "Corporate").collect()]
 
-    def generate_loan_entry():
-        if rand() < 0.98:  # 98% of loans to corporate customers
-            return (
-                str(uuid.uuid4()),
-                corporate_ids[int(rand() * len(corporate_ids))],
-                int(rand() * 10_000_000),
-                "Corporate"
-            )
-        else:
-            return (
-                str(uuid.uuid4()),
-                str(uuid.uuid4()),  # Random UUID for individual customers
-                int(rand() * 10_000),
-                "Personal"
-            )
+    # Broadcast the corporate IDs
+    corporate_ids_bc = spark.sparkContext.broadcast(corporate_ids)
 
-    return spark.range(0, 100_000_000).rdd.map(lambda x: generate_loan_entry()).toDF(
-        ["loan_id", "customer_id", "loan_amount", "loan_type"])
+    # UDF to generate UUID
+    uuidUdf = udf(lambda: str(uuid.uuid4()), StringType())
+
+    # UDF to select random corporate ID
+    def select_corporate_id():
+        ids = corporate_ids_bc.value
+        return ids[int(rand() * len(ids))]
+
+    select_corporate_id_udf = udf(select_corporate_id, StringType())
+
+    # Generate base dataframe
+    base_df = spark.range(0, 100_000_000)
+
+    # Generate loans
+    loans_df = base_df.withColumn("random", rand()) \
+        .withColumn("loan_id", uuidUdf()) \
+        .withColumn("customer_id",
+                    when(col("random") < 0.98, select_corporate_id_udf())
+                    .otherwise(uuidUdf())) \
+        .withColumn("loan_amount",
+                    when(col("random") < 0.98, (rand() * 10_000_000).cast(IntegerType()))
+                    .otherwise((rand() * 10_000).cast(IntegerType()))) \
+        .withColumn("loan_type",
+                    when(col("random") < 0.98, lit("Corporate"))
+                    .otherwise(lit("Personal"))) \
+        .select("loan_id", "customer_id", "loan_amount", "loan_type")
+
+    return loans_df
 
 # Generate and save customer data
 print("Generating customer data...")
