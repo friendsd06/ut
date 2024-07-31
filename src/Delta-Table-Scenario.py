@@ -1,16 +1,10 @@
 # Databricks notebook source
 
 # COMMAND ----------
-# Step 1: Set up the Spark session
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import lit, col
-from delta.tables import DeltaTable
-import os
-
-spark = SparkSession.builder.getOrCreate()
+from pyspark.sql.functions import col
 
 # COMMAND ----------
-# Step 2: Create initial data
+# Step 1: Create initial data
 data = [(i, f"Name_{i}", i * 1000) for i in range(1, 11)]
 df = spark.createDataFrame(data, ["id", "name", "value"])
 
@@ -18,26 +12,24 @@ df = spark.createDataFrame(data, ["id", "name", "value"])
 display(df)
 
 # COMMAND ----------
-# Step 3: Write the data to an external location (e.g., S3)
-external_path = "s3a://your-bucket/path/to/external/delta/table"
-
-# Check if the Delta table already exists
-table_exists = DeltaTable.isDeltaTable(spark, external_path)
-
-if not table_exists:
-    # If the table doesn't exist, write the data using Delta format
-    df.write.format("delta").mode("overwrite").save(external_path)
-    print(f"Delta table created at {external_path}")
-else:
-    print(f"Delta table already exists at {external_path}")
+# Step 2: Define the external location
+external_path = "/mnt/your-mount-point/path/to/external/delta/table"
 
 # COMMAND ----------
-# Step 4: Create an external table in the metastore
+# Step 3: Create an external Delta table
 spark.sql(f"""
-CREATE TABLE IF NOT EXISTS external_delta_table
+CREATE TABLE IF NOT EXISTS external_delta_table (
+    id INT,
+    name STRING,
+    value INT
+)
 USING DELTA
 LOCATION '{external_path}'
 """)
+
+# COMMAND ----------
+# Step 4: Write the initial data to the external table
+df.write.format("delta").mode("overwrite").saveAsTable("external_delta_table")
 
 # COMMAND ----------
 # Step 5: Verify the data
@@ -57,9 +49,8 @@ update_df = spark.createDataFrame(updates, ["id", "name", "value"])
 
 # COMMAND ----------
 # Step 7: Perform the merge operation
-delta_table = DeltaTable.forPath(spark, external_path)
+delta_table = DeltaTable.forName(spark, "external_delta_table")
 
-# Perform merge operation
 delta_table.alias("original") \
     .merge(
     update_df.alias("updates"),
@@ -81,3 +72,7 @@ display(updated_df.orderBy("id"))
 # COMMAND ----------
 # Step 9: Check the history of the Delta table
 display(delta_table.history())
+
+# COMMAND ----------
+# Step 10: Verify that the table is external
+spark.sql("DESCRIBE EXTENDED external_delta_table").show(truncate=False)
