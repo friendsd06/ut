@@ -110,3 +110,18 @@ spark.sql(f"ANALYZE TABLE {table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
 
 # Clean up
 spark.catalog.clearCache()
+
+
+Key additional optimizations in this version:
+
+Enhanced Spark Configurations: Added more fine-tuned configurations for adaptive query execution, skew handling, and Delta Lake optimizations.
+Z-Ordering: Applied Z-ordering on the initial table write for better data locality.
+Salting for Skew Handling: Implemented a salting technique on the source data to mitigate potential skew during the merge operation.
+Optimized Initial Write: Added sorting within partitions during the initial table write for better performance.
+    Dynamic Broadcast Join Threshold: Used a dynamic broadcast join threshold instead of a static one for more adaptive join strategies.
+Merge Optimizations: Enabled additional Delta merge optimizations including repartitioning before write.
+Post-merge Operations: Added table vacuuming to clean up old files and analyze table statistics for better query planning.
+Schema Auto-merge: Enabled schema auto-merge for handling potential schema evolution.
+
+These advanced optimizations should provide significant performance improvements, especially for large-scale operations and skewed data distributions. The salting technique, in particular, can be very effective in handling skew during merges.
+Remember that some of these optimizations (like the specific configuration values) might need tuning based on your specific data characteristics and cluster resources. Always test with representative data volumes and monitor performance to find the optimal settings for your use case.
