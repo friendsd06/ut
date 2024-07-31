@@ -2,11 +2,17 @@
 
 # COMMAND ----------
 from pyspark.sql.functions import col
+from pyspark.sql.types import IntegerType, StringType, LongType
 
 # COMMAND ----------
 # Step 1: Create initial data
 data = [(i, f"Name_{i}", i * 1000) for i in range(1, 11)]
 df = spark.createDataFrame(data, ["id", "name", "value"])
+
+# Explicitly cast the columns to ensure correct types
+df = df.withColumn("id", col("id").cast(IntegerType())) \
+    .withColumn("name", col("name").cast(StringType())) \
+    .withColumn("value", col("value").cast(LongType()))
 
 # Display the initial data
 display(df)
@@ -21,7 +27,7 @@ spark.sql(f"""
 CREATE TABLE IF NOT EXISTS external_delta_table (
     id INT,
     name STRING,
-    value INT
+    value BIGINT
 )
 USING DELTA
 LOCATION '{external_path}'
@@ -47,6 +53,11 @@ updates = [
 ]
 update_df = spark.createDataFrame(updates, ["id", "name", "value"])
 
+# Explicitly cast the columns in the update DataFrame
+update_df = update_df.withColumn("id", col("id").cast(IntegerType())) \
+    .withColumn("name", col("name").cast(StringType())) \
+    .withColumn("value", col("value").cast(LongType()))
+
 # COMMAND ----------
 # Step 7: Perform the merge operation
 delta_table = DeltaTable.forName(spark, "external_delta_table")
@@ -68,11 +79,3 @@ delta_table.alias("original") \
 # Step 8: Verify the updates
 updated_df = spark.table("external_delta_table")
 display(updated_df.orderBy("id"))
-
-# COMMAND ----------
-# Step 9: Check the history of the Delta table
-display(delta_table.history())
-
-# COMMAND ----------
-# Step 10: Verify that the table is external
-spark.sql("DESCRIBE EXTENDED external_delta_table").show(truncate=False)
