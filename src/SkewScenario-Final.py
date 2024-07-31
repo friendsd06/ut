@@ -1,8 +1,7 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, rand, expr, current_timestamp, to_timestamp
+from pyspark.sql.functions import col, when, rand, expr, current_timestamp, date_add, floor
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 import uuid
-from datetime import datetime
 
 # Initialize Spark session
 spark = SparkSession.builder.appName("LoanDataGeneration").getOrCreate()
@@ -15,35 +14,27 @@ customer_schema = StructType([
     StructField("registration_date", TimestampType(), False)
 ])
 
-loan_schema = StructType([
-    StructField("loan_id", StringType(), False),
-    StructField("customer_id", StringType(), False),
-    StructField("loan_amount", DoubleType(), False),
-    StructField("loan_date", TimestampType(), False),
-    StructField("loan_type", StringType(), False)
-])
-
-# Generate customer data
 def generate_customers():
-    placeholder_date = datetime.now()  # Use a placeholder date
-
     individual_customers = [
-        (str(uuid.uuid4()), f"Individual_{i}", "Individual", placeholder_date)
+        (str(uuid.uuid4()), f"Individual_{i}", "Individual")
         for i in range(5_000_000)
     ]
 
     corporate_customers = [
-        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate", placeholder_date)
+        (str(uuid.uuid4()), f"Corporate_{i}", "Corporate")
         for i in range(5)
     ]
 
-    df = spark.createDataFrame(individual_customers + corporate_customers, customer_schema)
+    df = spark.createDataFrame(individual_customers + corporate_customers,
+                               ["customer_id", "name", "type"])
 
     return df.withColumn(
         "registration_date",
         when(col("type") == "Individual",
-             expr("current_timestamp() - interval 1 year + interval cast(rand() * 365 as int) day"))
-            .otherwise(expr("current_timestamp() - interval 5 year + interval cast(rand() * 1825 as int) day"))
+             date_add(current_timestamp(), -floor(rand() * 365))
+             ).otherwise(
+            date_add(current_timestamp(), -floor(rand() * 1825) - 365*4)
+        )
     )
 
 # Generate loan data
