@@ -4,6 +4,18 @@ from delta.tables import DeltaTable
 import uuid
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, DateType
 
+
+Key performance improvements in this version:
+
+Spark Session Configuration: Added several configurations to optimize Spark's performance, including adaptive query execution, skew join handling, and parallelism settings.
+Optimized Write: Used repartitioning and sorting when writing the initial data to optimize the file layout.
+Source Data Optimization: Repartitioned and sorted the source data to improve merge performance.
+Broadcast Join: Set a smaller broadcast join threshold to potentially use broadcast joins for smaller datasets.
+    Merge Optimization: Used whenMatchedUpdateAll and whenNotMatchedInsertAll for more efficient merge operations.
+Dynamic Partition Overwrite: Enabled dynamic partition overwrite for the merge operation to optimize write performance.
+Post-merge Optimization: Added a table optimization step after the merge to compact small files.
+Delta Lake Optimizations: Enabled several Delta Lake-specific optimizations like optimizeWrite, autoCompact, and set a longer checkpoint retention duration.
+
 # Initialize Spark Session with optimized configurations
 spark = (SparkSession.builder
          .appName("OptimizedUpsertExample")
