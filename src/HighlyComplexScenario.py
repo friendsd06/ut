@@ -39,14 +39,19 @@ df_large = generate_skewed_data(num_records_large, num_keys_large, skew_factor)
 df_medium1 = generate_skewed_data(num_records_medium, num_keys_medium, skew_factor)
 df_medium2 = generate_skewed_data(num_records_medium, num_keys_medium, skew_factor)
 
+# Alias the DataFrames to avoid ambiguity
+df_large = df_large.alias("large")
+df_medium1 = df_medium1.alias("medium1")
+df_medium2 = df_medium2.alias("medium2")
+
 # Complex query with multiple challenges for AQE
 result = (df_large.join(df_medium1, df_large.key == df_medium1.key)
           .join(df_medium2, df_large.key == df_medium2.key)
-          .withColumn("exploded_data", explode("nested_data"))
-          .groupBy("key", "exploded_data.category")
+          .withColumn("exploded_data", explode(df_large.nested_data))  # Explicitly use df_large.nested_data
+          .groupBy(df_large.key, "exploded_data.category")
           .agg(
     count("*").alias("count"),
-    sum("value").alias("sum_value"),
+    sum(df_large.value).alias("sum_value"),
     sum("exploded_data.score").alias("sum_score")
 )
           .withColumn("ratio", col("sum_value") / col("sum_score"))
