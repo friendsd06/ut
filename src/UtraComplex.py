@@ -1,92 +1,70 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, arrays_zip, when, sum, avg, stddev, percentile_approx, udf
-from pyspark.sql.types import ArrayType, StringType, IntegerType
+from pyspark.sql.functions import col, expr, when, sum, count
 import random
 
-spark = SparkSession.builder.appName("UltraComplexAnalysis").getOrCreate()
+# Initialize Spark Session
+spark = SparkSession.builder.appName("SkewedEcommerceAnalysis").getOrCreate()
 
-# Custom UDF for complex text analysis (simulating NLP)
-@udf(returnType=ArrayType(StringType()))
-def complex_text_analysis(text):
-    # Simulate complex NLP operation
-    return random.sample(['positive', 'negative', 'neutral'] * 3, random.randint(1, 9))
+# Set a large number of shuffle partitions to make skew more apparent
+spark.conf.set("spark.sql.shuffle.partitions", "1000")
 
-# Simulating massive datasets
-users = spark.range(100000000).toDF("user_id") \
-    .withColumn("region", (col("user_id") % 1000).cast("string")) \
-    .withColumn("preferences", arrays_zip(
-    spark.range(10).select((col("id") % 5).alias("category")),
-    spark.range(10).select((col("id") * 0.1).alias("score"))
-))
+# Generate skewed user data
+def generate_skewed_users(num_users, num_influencers):
+    return (spark.range(num_users)
+            .withColumn("user_type", when(col("id") < num_influencers, "influencer").otherwise("regular"))
+            .withColumn("activity_multiplier", when(col("user_type") == "influencer", expr("1000 + rand() * 9000")).otherwise(expr("1 + rand() * 9"))))
 
-products = spark.range(10000000).toDF("product_id") \
-    .withColumn("category", (col("product_id") % 1000).cast("string")) \
-    .withColumn("subcategory", (col("product_id") % 10000).cast("string")) \
-    .withColumn("attributes", arrays_zip(
-    spark.range(20).select(col("id").alias("attr_id")),
-    spark.range(20).select((col("id") * 0.5).alias("attr_value"))
-))
+# Generate skewed product data
+def generate_skewed_products(num_products, num_viral_products):
+    return (spark.range(num_products)
+            .withColumn("product_type", when(col("id") < num_viral_products, "viral").otherwise("regular"))
+            .withColumn("popularity_score", when(col("product_type") == "viral", expr("1000 + rand() * 9000")).otherwise(expr("1 + rand() * 99"))))
 
-orders = spark.range(1000000000).toDF("order_id") \
-    .withColumn("user_id", (col("order_id") % 100000000).cast("long")) \
-    .withColumn("product_id", (col("order_id") % 10000000).cast("long")) \
-    .withColumn("timestamp", col("order_id") + 1600000000) \
-    .withColumn("order_items", arrays_zip(
-    spark.range(5).select(col("id").alias("item_id")),
-    spark.range(5).select((col("id") + 1).alias("quantity"))
-))
+# Generate highly skewed order data
+def generate_skewed_orders(users, products, num_orders):
+    return (spark.range(num_orders)
+            .withColumn("user_id", expr(f"cast(pow(rand(), 2) * {users.count()} as long)"))
+            .withColumn("product_id", expr(f"cast(pow(rand(), 2) * {products.count()} as long)"))
+            .withColumn("quantity", expr("1 + rand() * 10"))
+            .withColumn("price", expr("10 + rand() * 990")))
 
-social_interactions = spark.range(5000000000).toDF("interaction_id") \
-    .withColumn("user_id", (col("interaction_id") % 100000000).cast("long")) \
-    .withColumn("product_id", (col("interaction_id") % 10000000).cast("long")) \
-    .withColumn("interaction_type", (col("interaction_id") % 5).cast("string")) \
-    .withColumn("timestamp", col("interaction_id") + 1600000000) \
-    .withColumn("text_content", (col("interaction_id") % 1000).cast("string"))
+# Generate datasets
+num_users = 1000000
+num_influencers = 100
+num_products = 100000
+num_viral_products = 50
+num_orders = 100000000
 
-events = spark.range(50000000).toDF("event_id") \
-    .withColumn("event_type", (col("event_id") % 100).cast("string")) \
-    .withColumn("timestamp", col("event_id") + 1600000000) \
-    .withColumn("affected_categories", arrays_zip(
-    spark.range(5).select((col("id") % 1000).alias("category")),
-    spark.range(5).select((col("id") * 0.1).alias("impact_score"))
-))
+users = generate_skewed_users(num_users, num_influencers)
+products = generate_skewed_products(num_products, num_viral_products)
+orders = generate_skewed_orders(users, products, num_orders)
 
-# Ultra-complex analysis
-result = users.join(orders, "user_id") \
-    .join(products, "product_id") \
-    .join(social_interactions, ["user_id", "product_id"]) \
-    .join(events, orders.timestamp.between(events.timestamp, events.timestamp + 86400)) \
-    .select(
-    "user_id", "product_id", "region", "category", "subcategory",
-    explode("preferences").alias("pref"),
-    explode("attributes").alias("attr"),
-    explode("order_items").alias("order_item"),
-    "interaction_type", "text_content", "event_type"
+# Perform a skewed join and aggregation
+result = (orders
+          .join(users, "user_id")
+          .join(products, "product_id")
+          .groupBy("user_type", "product_type")
+          .agg(
+    count("*").alias("order_count"),
+    sum("quantity").alias("total_quantity"),
+    sum(col("quantity") * col("price")).alias("total_revenue")
 )
-.withColumn("sentiment", complex_text_analysis(col("text_content")))
-.select(
-    col("region"),
-    col("category"),
-    col("subcategory"),
-    col("pref.category").alias("user_pref_category"),
-    col("pref.score").alias("user_pref_score"),
-    col("attr.attr_id").alias("product_attr_id"),
-    col("attr.attr_value").alias("product_attr_value"),
-    col("order_item.quantity").alias("order_quantity"),
-    col("interaction_type"),
-    explode("sentiment").alias("sentiment"),
-    col("event_type")
-)
-.groupBy("region", "category", "subcategory", "user_pref_category", "product_attr_id", "interaction_type", "sentiment", "event_type")
-.agg(
-    avg("user_pref_score").alias("avg_user_pref_score"),
-    stddev("user_pref_score").alias("stddev_user_pref_score"),
-    sum("order_quantity").alias("total_quantity"),
-    avg("product_attr_value").alias("avg_product_attr_value"),
-    percentile_approx("product_attr_value", 0.5).alias("median_product_attr_value")
-)
-.where(col("total_quantity") > 100)
+          .orderBy(col("total_revenue").desc()))
 
-# Execute and explain
+# Show execution plan
+print("Execution Plan:")
 result.explain(mode="extended")
-result.show(truncate=False)
+
+# Show results
+print("\nResults:")
+result.show()
+
+# Collect statistics to demonstrate skew
+user_order_counts = orders.groupBy("user_id").count().orderBy(col("count").desc())
+product_order_counts = orders.groupBy("product_id").count().orderBy(col("count").desc())
+
+print("\nTop 5 Users by Order Count:")
+user_order_counts.show(5)
+
+print("\nTop 5 Products by Order Count:")
+product_order_counts.show(5)
