@@ -1,72 +1,46 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr, when, sum, count, udf, explode, array, struct, lit, concat
-from pyspark.sql.types import ArrayType, StringType, IntegerType, StructType, StructField
+from pyspark.sql.functions import col, when, lit, rand, explode, array, count, sum
 import random
 
-spark = SparkSession.builder.appName("ComplexSkewScenario").getOrCreate()
+# Initialize Spark Session
+spark = SparkSession.builder.appName("HighSkewScenario").getOrCreate()
 
-# Set a larger number of shuffle partitions
+# Set a large number of shuffle partitions to make skew more apparent
 spark.conf.set("spark.sql.shuffle.partitions", "200")
 
 # Disable broadcast joins to force shuffle joins
 spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
 
-# Complex UDF that AQE can't optimize
-@udf(returnType=ArrayType(StructType([
-    StructField("category", StringType()),
-    StructField("score", IntegerType()),
-    StructField("subcategories", ArrayType(StringType()))
-])))
-def complex_udf(value):
-    random.seed(value)
-    return [{"category": random.choice(["A", "B", "C", "D", "E"]),
-             "score": random.randint(1, 100),
-             "subcategories": [random.choice(["X", "Y", "Z"]) for _ in range(random.randint(1, 5))]}
-            for _ in range(random.randint(1, 10))]
-
-# Generate skewed data
-def generate_skewed_data(num_records, num_partitions, skew_factor):
+# Function to generate highly skewed data
+def generate_skewed_data(num_records, num_keys, skew_percentage):
+    skewed_key = 0
     return (spark.range(num_records)
-            .withColumn("key1", (col("id") % num_partitions).cast("int"))
-            .withColumn("key2", ((col("id") + 1) % num_partitions).cast("int"))
-            .withColumn("value", expr(f"pow(rand(), {skew_factor}) * 1000000"))
-            .withColumn("nested_data", complex_udf(col("value"))))
+            .withColumn("key",
+                        when(rand() < skew_percentage, lit(skewed_key))
+                        .otherwise((col("id") % num_keys).cast("int")))
+            .withColumn("value", when(col("key") == skewed_key, lit(1000000))
+                        .otherwise(rand() * 100))
+            .withColumn("nested_data", array([rand() * 10 for _ in range(10)])))
 
 # Generate datasets
-num_records_large = 10000000  # 10 million
-num_records_medium = 1000000  # 1 million
-num_partitions = 200
-skew_factor = 5
+num_records_large = 50000000  # 50 million
+num_records_small = 1000000   # 1 million
+num_keys = 1000
+skew_percentage = 0.9  # 90% of data goes to one key
 
-df_large = generate_skewed_data(num_records_large, num_partitions, skew_factor)
-df_medium1 = generate_skewed_data(num_records_medium, num_partitions, skew_factor)
-df_medium2 = generate_skewed_data(num_records_medium, num_partitions, skew_factor)
+df_large = generate_skewed_data(num_records_large, num_keys, skew_percentage)
+df_small = generate_skewed_data(num_records_small, num_keys, skew_percentage)
 
-# Additional dataset to join
-df_additional = spark.range(1000).withColumn("key", (col("id") % num_partitions).cast("int"))
+# Cache the smaller dataset
+df_small.cache().count()
 
-# Alias the DataFrames
-df_large = df_large.alias("large")
-df_medium1 = df_medium1.alias("medium1")
-df_medium2 = df_medium2.alias("medium2")
-df_additional = df_additional.alias("additional")
-
-# Complex query with multiple challenges for AQE
-result = (df_large.join(df_medium1, df_large.key1 == df_medium1.key1)
-          .join(df_medium2, df_large.key2 == df_medium2.key1)
-          .join(df_additional, df_large.key1 == df_additional.key)
-          .withColumn("exploded_data", explode(df_large.nested_data))
-          .withColumn("further_exploded", explode("exploded_data.subcategories"))
-          .groupBy(df_large.key1, df_large.key2, "exploded_data.category", "further_exploded")
-          .agg(
-    count("*").alias("count"),
-    sum(df_large.value + df_medium1.value + df_medium2.value).alias("sum_value"),
-    sum("exploded_data.score").alias("sum_score")
-)
-          .withColumn("ratio", col("sum_value") / col("sum_score"))
-          .withColumn("complex_key", concat(col("key1"), lit("_"), col("key2"), lit("_"), col("category"), lit("_"), col("further_exploded")))
-          .filter(col("ratio") > 1000)
-          .orderBy(col("sum_value").desc()))
+# Perform a skewed join operation
+result = (df_large.join(df_small, "key")
+          .withColumn("exploded_data", explode("nested_data"))
+          .groupBy("key")
+          .agg(count("*").alias("count"),
+               sum("value").alias("sum_value"),
+               sum("exploded_data").alias("sum_exploded")))
 
 # Force computation
 print("Starting computation...")
@@ -74,6 +48,10 @@ result.explain(mode="extended")
 result_count = result.count()
 print(f"Result count: {result_count}")
 
+# Show the distribution of data across keys
+print("Data distribution across keys:")
+df_large.groupBy("key").count().orderBy(col("count").desc()).show(10)
+
 # Show a sample of results
 print("Sample results:")
-result.show(10, truncate=False)
+result.orderBy(col("sum_value").desc()).show(10)
