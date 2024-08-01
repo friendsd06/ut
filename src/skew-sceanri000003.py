@@ -31,15 +31,20 @@ skew_percentage = 0.9  # 90% of data goes to one key
 df_large = generate_skewed_data(num_records_large, num_keys, skew_percentage)
 df_small = generate_skewed_data(num_records_small, num_keys, skew_percentage)
 
+# Alias the DataFrames to avoid ambiguity
+df_large = df_large.alias("large")
+df_small = df_small.alias("small")
+
 # Cache the smaller dataset
 df_small.cache().count()
 
 # Perform a skewed join operation
-result = (df_large.join(df_small, "key")
-          .withColumn("exploded_data", explode("nested_data"))
-          .groupBy("key")
+result = (df_large.join(df_small, df_large.key == df_small.key)
+          .withColumn("exploded_data", explode(df_large.nested_data))  # Explicitly use df_large.nested_data
+          .groupBy(df_large.key)
           .agg(count("*").alias("count"),
-               sum("value").alias("sum_value"),
+               sum(df_large.value).alias("sum_value_large"),
+               sum(df_small.value).alias("sum_value_small"),
                sum("exploded_data").alias("sum_exploded")))
 
 # Force computation
@@ -54,4 +59,4 @@ df_large.groupBy("key").count().orderBy(col("count").desc()).show(10)
 
 # Show a sample of results
 print("Sample results:")
-result.orderBy(col("sum_value").desc()).show(10)
+result.orderBy(col("sum_value_large").desc()).show(10)
