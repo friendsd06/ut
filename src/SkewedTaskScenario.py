@@ -1,11 +1,11 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr, when, sum, count, udf, explode, array, struct, to_json, lit
+from pyspark.sql.functions import col, expr, when, sum, count, udf, explode, array, struct, lit
 from pyspark.sql.types import ArrayType, StringType, IntegerType, StructType, StructField
 import random
 
-spark = SparkSession.builder.appName("SkewedTaskScenario").getOrCreate()
+spark = SparkSession.builder.appName("GuaranteedSkewScenario").getOrCreate()
 
-# Set a smaller number of shuffle partitions for this example
+# Set a small number of shuffle partitions to make skew more apparent
 spark.conf.set("spark.sql.shuffle.partitions", "10")
 
 # Disable broadcast joins to force shuffle joins
@@ -21,22 +21,21 @@ def complex_udf(value):
     return [{"category": random.choice(["A", "B", "C", "D", "E"]),
              "score": random.randint(1, 100)} for _ in range(random.randint(1, 10))]
 
-# Generate skewed data with one very large key
-def generate_skewed_data(num_records, num_keys, skewed_key):
+# Generate extremely skewed data
+def generate_skewed_data(num_records, num_partitions):
     return (spark.range(num_records)
-            .withColumn("key", when(col("id") % 10 == 0, lit(skewed_key))
-                        .otherwise((col("id") % num_keys).cast("int")))
-            .withColumn("value", when(col("key") == skewed_key, lit(1000000))
+            .withColumn("key", when(col("id") % num_partitions == 0, lit(0))  # Skewed key
+                        .otherwise((col("id") % num_partitions).cast("int")))
+            .withColumn("value", when(col("key") == 0, lit(1000000))  # Large value for skewed key
                         .otherwise(expr("rand() * 1000")))
             .withColumn("nested_data", complex_udf(col("value"))))
 
 # Generate datasets
-num_records = 100000  # 100,000 records
-num_keys = 100  # 100 keys
-skewed_key = 99  # The key that will have a lot more data
+num_records = 1000000  # 1 million records
+num_partitions = 10
 
-df_main = generate_skewed_data(num_records, num_keys, skewed_key)
-df_lookup = spark.range(num_keys).withColumn("key", col("id").cast("int")).withColumn("info", lit("some_info"))
+df_main = generate_skewed_data(num_records, num_partitions)
+df_lookup = spark.range(num_partitions).withColumn("key", col("id").cast("int")).withColumn("info", lit("some_info"))
 
 # Alias the DataFrames to avoid ambiguity
 df_main = df_main.alias("main")
@@ -67,4 +66,4 @@ result.show(10, truncate=False)
 
 # Show the distribution of data across keys
 print("Data distribution across keys:")
-df_main.groupBy("key").count().orderBy(col("count").desc()).show(5)
+df_main.groupBy("key").count().orderBy(col("count").desc()).show()
