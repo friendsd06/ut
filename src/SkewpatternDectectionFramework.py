@@ -32,7 +32,7 @@ class SkewPatternDetectionFramework:
 
     def detect_partition_skew(self, df):
         # Use F.spark_partition_id() to get the partition ID
-        partition_counts = df.withColumn("partition_id", F.spark_partition_id()) \
+        partition_counts = df.withColumn("partition_id", F.monotonically_increasing_id()) \
             .groupBy("partition_id") \
             .count() \
             .cache()
