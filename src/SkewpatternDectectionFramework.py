@@ -31,7 +31,12 @@ class SkewPatternDetectionFramework:
         }
 
     def detect_partition_skew(self, df):
-        partition_counts = df.groupBy(F.spark_partition_id()).count().cache()
+        # Use F.spark_partition_id() to get the partition ID
+        partition_counts = df.withColumn("partition_id", F.spark_partition_id()) \
+            .groupBy("partition_id") \
+            .count() \
+            .cache()
+
         total_count = df.count()
         max_count = partition_counts.agg(F.max("count")).collect()[0][0]
         skew_factor = max_count / (total_count / partition_counts.count())
@@ -41,7 +46,7 @@ class SkewPatternDetectionFramework:
 
         # Identify partitions that need repartitioning
         partitions_to_repartition = partition_counts.filter(F.col("count") > (total_count / partition_counts.count()) * self.skew_threshold) \
-            .select("spark_partition_id").collect()
+            .select("partition_id").collect()
 
         partition_counts.unpersist()
 
@@ -49,7 +54,7 @@ class SkewPatternDetectionFramework:
             "skew_factor": skew_factor,
             "max_count": max_count,
             "highest_partition": highest_partition,
-            "partitions_to_repartition": [row["spark_partition_id"] for row in partitions_to_repartition]
+            "partitions_to_repartition": [row["partition_id"] for row in partitions_to_repartition]
         }
 
     def detect_temporal_skew(self, df, time_col, window_duration="1 day"):
