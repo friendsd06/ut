@@ -2,9 +2,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, DoubleType, StructType, StructField, IntegerType
 from pyspark.sql.window import Window
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
 
 class AdvancedSkewDetectionFramework:
     def __init__(self, spark):
@@ -56,16 +53,6 @@ class AdvancedSkewDetectionFramework:
         mean, std_dev = stats["mean"], stats["std_dev"]
         return (std_dev / mean) if mean > 0 else 0
 
-    def categorize_skew(self, skew_factor):
-        if skew_factor <= 2:
-            return "Low"
-        elif skew_factor <= 5:
-            return "Moderate"
-        elif skew_factor <= 10:
-            return "High"
-        else:
-            return "Severe"
-
     def detect_temporal_skew(self, df, key_col, time_col, window_duration="1 day"):
         return df.groupBy(F.window(F.col(time_col), window_duration), F.col(key_col)) \
             .count() \
@@ -84,11 +71,23 @@ class AdvancedSkewDetectionFramework:
         cv = self.calculate_coefficient_of_variation(df, key_col)
 
         max_count = value_skew.select(F.max("count")).collect()[0][0]
-        avg_count = df.count() / value_skew.count()
+        total_count = df.count()
+        avg_count = total_count / value_skew.count()
         skew_factor = max_count / avg_count
 
-        categorize_skew_udf = F.udf(self.categorize_skew, StringType())
-        df_with_category = value_skew.withColumn("skew_category", categorize_skew_udf(F.col("count") / avg_count))
+        def categorize_skew(count):
+            local_skew_factor = count / avg_count
+            if local_skew_factor <= 2:
+                return "Low"
+            elif local_skew_factor <= 5:
+                return "Moderate"
+            elif local_skew_factor <= 10:
+                return "High"
+            else:
+                return "Severe"
+
+        categorize_skew_udf = F.udf(categorize_skew, StringType())
+        df_with_category = value_skew.withColumn("skew_category", categorize_skew_udf(F.col("count")))
 
         temporal_skew = None
         if time_col:
@@ -120,17 +119,43 @@ class AdvancedSkewDetectionFramework:
         recommendations = self.generate_recommendations(skew_results)
         return skew_results, recommendations
 
-# Usage
-spark = SparkSession.builder.appName("AdvancedSkewDetection").getOrCreate()
-framework = AdvancedSkewDetectionFramework(spark)
-results, recommendations = framework.run_analysis(
-    input_path="/path/to/input",
-    key_col="customer_id",
-    value_col="order_amount",
-    time_col="order_date"  # Optional
-)
+# Usage example
+if __name__ == "__main__":
+    # Initialize Spark Session
+    spark = SparkSession.builder \
+        .appName("AdvancedSkewDetection") \
+        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
+        .getOrCreate()
 
-print("Analysis complete.")
-print("Recommendations:")
-for rec in recommendations:
-    print(f"- {rec}")
+    # Initialize the framework
+    framework = AdvancedSkewDetectionFramework(spark)
+
+    # Run the analysis
+    results, recommendations = framework.run_analysis(
+        input_path="/path/to/your/delta/table",
+        key_col="your_key_column",
+        value_col="your_value_column",
+        time_col="your_time_column"  # Optional, remove if not needed
+    )
+
+    # Print results
+    print("Skew Analysis Results:")
+    print(f"Gini Coefficient: {results['gini_coefficient']}")
+    print(f"Coefficient of Variation: {results['coefficient_of_variation']}")
+    print(f"Skew Factor: {results['skew_factor']}")
+
+    print("\nRecommendations:")
+    for rec in recommendations:
+        print(f"- {rec}")
+
+    # Show sample of value skew results
+    print("\nSample of Value Skew Results:")
+    results['value_skew'].show(5)
+
+    # Show sample of partition skew results
+    print("\nSample of Partition Skew Results:")
+    results['partition_skew'].show(5)
+
+    # Stop Spark session
+    spark.stop()
