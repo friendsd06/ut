@@ -1,3 +1,106 @@
+This comprehensive example demonstrates the impact of enabling and disabling merge optimizations in Delta Lake. Let's break down the key components and their implications:
+
+Configuration Differences:
+
+Optimized: Enables optimizeWrite, autoCompact, and optimizeInsertOnlyMerge.
+Non-optimized: Disables these optimizations.
+
+
+Initial Write:
+
+Both scenarios write the same initial dataset.
+The optimized version may create fewer, larger files due to optimizeWrite.
+
+
+Merge Operation:
+
+Performs a merge that includes both updates and inserts.
+The optimized version uses optimizeInsertOnlyMerge for better performance.
+
+
+Analysis Functions:
+
+analyze_delta_table: Examines file counts, sizes, and Delta log details.
+perform_merge_operation: Executes the merge and measures performance.
+analyze_query_performance: Tests query speed on the resulting tables.
+analyze_data_skipping: Evaluates the efficiency of data skipping.
+analyze_transaction_log: Inspects the Delta transaction log for detailed insights.
+
+
+Performance Comparison:
+
+Compares merge execution time between optimized and non-optimized scenarios.
+Analyzes the resulting file counts and sizes.
+Evaluates query performance on the merged data.
+
+
+Data Skipping Analysis:
+
+Shows how effectively Delta Lake can skip files during queries.
+
+
+Transaction Log Analysis:
+
+Provides insights into the internal operations during the merge.
+
+
+
+Key Observations and Implications:
+
+Merge Performance:
+
+The optimized scenario is likely to perform the merge operation faster, especially for insert-heavy merges.
+    This improvement comes from better file management and the optimizeInsertOnlyMerge feature.
+
+
+File Count and Size:
+
+The optimized version typically results in fewer, larger files.
+This reduces S3 GET requests and improves query performance.
+
+
+Query Performance:
+
+Full scan queries may show less improvement as they read all data.
+Filtered queries often show significant improvement due to better data organization and statistics.
+
+
+Data Skipping:
+
+The optimized version usually shows better data skipping efficiency.
+This leads to improved performance for selective queries.
+
+
+Transaction Log:
+
+The optimized log may show fewer, more consolidated actions.
+This indicates more efficient handling of file additions and removals.
+
+
+S3 Implications:
+
+Fewer, larger files in the optimized scenario reduce S3 API calls.
+This can lead to lower S3 request costs and better overall performance.
+
+
+Storage Efficiency:
+
+The optimized version may show slightly higher initial storage use due to less fragmentation.
+Over time, this leads to better storage efficiency and easier management.
+
+
+Maintenance:
+
+The non-optimized version may require more frequent manual OPTIMIZE commands.
+This increases operational overhead and can impact performance during maintenance windows.
+
+
+Scalability:
+
+As the dataset
+
+
+
 # Databricks notebook source
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
