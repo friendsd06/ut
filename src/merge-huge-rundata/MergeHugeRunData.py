@@ -44,7 +44,8 @@ def create_schema():
 def generate_data(spark, num_records, start_id=0):
     """Generate sample data with the given number of records, distributed equally across 6 cob_dates"""
     df = spark.range(start_id, start_id + num_records) \
-        .withColumn("cob_date", expr("to_date(date_sub(current_date(), (id % 6) + 1))")) \
+        .withColumn("date_offset", (col("id") % 6 + 1).cast("int")) \
+        .withColumn("cob_date", expr("date_sub(current_date(), date_offset)")) \
         .withColumn("slice", concat(lit("SLICE_"), ((col("id") % 5) + 1).cast("string"))) \
         .withColumn("name", concat(lit("Name_"), col("id").cast("string"))) \
         .withColumn("value", (col("id") % 1000).cast("double")) \
@@ -58,6 +59,9 @@ def generate_data(spark, num_records, start_id=0):
     # Add 44 attribute columns
     for i in range(1, 45):
         df = df.withColumn(f"attr_{i}", concat(lit(f"Attr{i}_"), (col("id") % 100).cast("string")))
+
+    # Drop the temporary date_offset column
+    df = df.drop("date_offset")
 
     return df
 
