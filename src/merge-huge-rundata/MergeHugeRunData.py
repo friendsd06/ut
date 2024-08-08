@@ -6,6 +6,11 @@ from delta.tables import DeltaTable
 
 # ========================
 # Spark Session Setup
+
+spark.conf.set("spark.databricks.delta.optimizeWrite.enabled", "false")
+spark.conf.set("spark.databricks.delta.autoCompact.enabled", "false")
+spark.conf.set("spark.sql.shuffle.partitions", "4")  # Set low for demonstration
+spark.conf.set("spark.sql.files.maxRecordsPerFile", 25)
 # ========================
 
 def create_spark_session():
