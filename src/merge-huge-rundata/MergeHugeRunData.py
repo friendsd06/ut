@@ -43,11 +43,8 @@ def create_schema():
 
 def generate_data(spark, num_records, start_id=0):
     """Generate sample data with the given number of records, distributed equally across 6 cob_dates"""
-    # Generate 6 consecutive dates starting from yesterday
-    cob_dates = [date_add(current_date(), -i) for i in range(1, 7)]
-
     df = spark.range(start_id, start_id + num_records) \
-        .withColumn("cob_date", expr(f"element_at(array{cob_dates}, (id % 6) + 1)")) \
+        .withColumn("cob_date", expr("date_sub(current_date(), (id % 6) + 1)")) \
         .withColumn("slice", concat(lit("SLICE_"), ((col("id") % 5) + 1).cast("string"))) \
         .withColumn("name", concat(lit("Name_"), col("id").cast("string"))) \
         .withColumn("value", (col("id") % 1000).cast("double")) \
