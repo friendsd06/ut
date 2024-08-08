@@ -1,6 +1,6 @@
 import time
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, rand, when, concat, lit, current_timestamp, expr
+from pyspark.sql.functions import col, expr, concat, lit, current_timestamp, when, date_add, current_date
 from pyspark.sql.types import StructType, StructField, IntegerType, StringType, DoubleType, DateType, TimestampType
 from delta.tables import DeltaTable
 
@@ -42,12 +42,15 @@ def create_schema():
 # ========================
 
 def generate_data(spark, num_records, start_id=0):
-    """Generate sample data with the given number of records"""
+    """Generate sample data with the given number of records, distributed equally across 6 cob_dates"""
+    # Generate 6 consecutive dates starting from yesterday
+    cob_dates = [date_add(current_date(), -i) for i in range(1, 7)]
+
     df = spark.range(start_id, start_id + num_records) \
-        .withColumn("cob_date", expr("date_sub(current_date(), cast(rand() * 30 as int))")) \
-        .withColumn("slice", concat(lit("SLICE_"), (rand() * 5 + 1).cast("int").cast("string"))) \
+        .withColumn("cob_date", expr(f"element_at(array{cob_dates}, (id % 6) + 1)")) \
+        .withColumn("slice", concat(lit("SLICE_"), ((col("id") % 5) + 1).cast("string"))) \
         .withColumn("name", concat(lit("Name_"), col("id").cast("string"))) \
-        .withColumn("value", rand() * 1000) \
+        .withColumn("value", (col("id") % 1000).cast("double")) \
         .withColumn("category", when(col("id") % 5 == 0, "A")
                     .when(col("id") % 5 == 1, "B")
                     .when(col("id") % 5 == 2, "C")
@@ -57,7 +60,7 @@ def generate_data(spark, num_records, start_id=0):
 
     # Add 44 attribute columns
     for i in range(1, 45):
-        df = df.withColumn(f"attr_{i}", concat(lit(f"Attr{i}_"), (rand() * 100).cast("int").cast("string")))
+        df = df.withColumn(f"attr_{i}", concat(lit(f"Attr{i}_"), (col("id") % 100).cast("string")))
 
     return df
 
