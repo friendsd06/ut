@@ -1,0 +1,41 @@
+Subject: Important: Ongoing Data Problems Hurting Our Work
+Dear [Manager's Name],
+I'm writing about a big problem that's making our work much harder. We keep getting bad data from the Reference Data Team, and it's causing a lot of trouble.
+The Problem:
+
+The data often has duplicate entries.
+Sometimes important information is missing (we call these "null values").
+We can't tell if the data has actually changed since the last update.
+
+How This Hurts Us:
+
+Our Spark programs run slowly and might give wrong results.
+We waste a lot of time fixing these problems.
+We often have to redo all our work, even when nothing important has changed.
+Our team is spending too much time putting out fires instead of doing useful work.
+
+What We Think Will Help:
+We want the Reference Data Team to give us a report with every data update. This report should tell us:
+
+How many entries are in the data
+How many duplicates there are
+How many pieces of missing information there are
+What's changed since the last update
+When the last big change happened
+
+We also want to agree on what's "okay" for duplicates and missing information. If there are too many problems, they should fix the data before sending it to us.
+Why This Will Help:
+
+We'll know about problems before they cause trouble.
+We won't waste time redoing work when we don't need to.
+Our programs will work better and faster.
+We'll all know who's responsible for what.
+We can focus on doing good work instead of always fixing problems.
+
+What to Do Next:
+
+Can we set up a meeting with the Reference Data Team soon?
+We need to agree on what should be in the report and what level of problems is okay.
+We could try this new way of working for a month and see if it helps.
+
+This is really important because right now, we're wasting a lot of time and effort. I'm happy to talk more about this anytime.
