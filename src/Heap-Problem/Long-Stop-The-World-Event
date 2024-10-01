@@ -1,0 +1,32 @@
+Color Scheme:
+
+We use a gradient from cool blues (Day 1) to warm reds (Day 4) to visually represent the increasing severity of the situation.
+The processedQuotes Queue is in a soft teal to make it stand out.
+Minor GC and Full GC operations are in green and orange respectively, making them distinct from the main flow.
+
+
+Structure:
+
+The diagram maintains the day-by-day progression from top to bottom.
+The processedQuotes Queue and GC Operations are separated into their own subgraphs for clarity.
+
+
+Connections:
+
+Continuous growth from the processedQuotes Queue is shown affecting each day.
+GC operations are linked to their respective impacts on different stages.
+
+
+Readability:
+
+Each day's subgraph uses a consistent color, making it easy to distinguish between stages.
+Text is kept in dark colors for maximum contrast against the pastel backgrounds.
+
+
+
+Key Points for Presentation:
+
+Explain the continuous growth of the processedQuotes Queue and its impact on memory usage over time.
+Highlight how Minor GC operations are sufficient early on, but Full GC becomes necessary as memory pressure increases.
+Point out the progression from normal operation (blue) to unresponsive state (red), emphasizing the correlation between heap usage, GC frequency, and application performance.
+Discuss the onset of GC thrashing and long Stop-the-World (STW) pauses in the final stage.
