@@ -1,0 +1,50 @@
+Key Points about GC Thrashing and Long STW Pauses:
+
+Cause:
+
+Continuous object allocation (e.g., from the growing processedQuotes queue) without adequate cleanup.
+Objects promoted to Old Generation faster than they can be collected.
+
+
+GC Thrashing Characteristics:
+
+The JVM spends more time performing GC than executing application code.
+Each GC cycle frees less memory, leading to more frequent GC invocations.
+The application struggles to make progress between GC cycles.
+
+
+Long STW Pauses:
+
+Full GC operations pause all application threads to perform a complete heap cleanup.
+As the heap size and number of live objects increase, these pauses become longer.
+In the final stage, STW pauses can last several seconds, causing severe application unresponsiveness.
+
+
+Impact on Application:
+
+Response times become extremely high and unpredictable.
+Throughput drops significantly as the application spends most time in GC.
+Users experience long periods of unresponsiveness, making the application unusable.
+
+
+Negative Feedback Loop:
+
+Long GC pauses lead to more work accumulating (e.g., more incoming stock quotes).
+This accumulated work creates more objects when GC finishes, immediately triggering another GC cycle.
+The situation worsens with each cycle, eventually leading to complete application failure.
+
+
+Memory Fragmentation:
+
+Repeated GC cycles can lead to heap fragmentation, especially in the Old Generation.
+Fragmentation makes it harder for the GC to find contiguous memory spaces for new allocations, exacerbating the problem.
+
+
+
+To prevent reaching this final stage of GC thrashing and long STW pauses:
+
+Implement proper memory management (e.g., bounded queues, regular data cleanup).
+Optimize object lifecycles to reduce pressure on the Old Generation.
+Consider using GC algorithms designed for large heaps and low pause times (e.g., G1GC, ZGC).
+Monitor GC activity closely and set up alerts for increasing GC frequency and duration.
+Implement backpressure mechanisms to control the inflow of data when the system is under stress.
