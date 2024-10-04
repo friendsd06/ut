@@ -1,0 +1,26 @@
+Do You Need to Pay Extra for Delta Sharing Server?
+
+Databricks-Hosted Delta Sharing:
+
+Included in your Databricks subscription.
+No additional cost for the sharing service itself.
+You pay for compute when processing or querying data.
+Self-Hosted Delta Sharing Server:
+
+Yes, you'll incur costs for the infrastructure.
+Compute Choices:
+Use cloud instances (AWS, Azure, GCP) that match your performance needs.
+Choose instances with high I/O throughput for better performance.
+Best Option:
+For most, the Databricks-managed service is the best due to ease of use and integration.
+Self-hosted is ideal if you need greater control or have specific compliance requirements.
+Recommendations
+
+For Ease and Efficiency:
+
+Use Delta Sharing with Databricks if you're already on their platform.
+Benefit from integrated security, scalability, and support.
+For Custom Needs:
+
+Develop a Custom Java Service if you need specialized data handling.
+Be prepared for additional costs and maintenance efforts.
