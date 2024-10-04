@@ -24,3 +24,26 @@ For Custom Needs:
 
 Develop a Custom Java Service if you need specialized data handling.
 Be prepared for additional costs and maintenance efforts.
+
+
+====================================================================
+
+
+Do You Need a Separate Delta Sharing Instance?
+
+Integrated within Databricks
+
+No Separate Instance Required: If you're using Databricks, you do not need to set up a separate Delta Sharing server or instance. Delta Sharing is fully integrated into the Databricks platform.
+
+How It Works:
+
+Data Providers: You can create shares directly within your Databricks workspace. This involves selecting the data you want to share and specifying who can access it.
+Data Recipients: Recipients can access the shared data using their existing Databricks workspace or compatible clients that support the Delta Sharing protocol.
+Using Open-Source Delta Sharing Server
+
+When a Separate Instance is Needed:
+External Sharing: If you need to share data with organizations or users who do not use Databricks, you might consider deploying the open-source Delta Sharing Server.
+Custom Requirements: Organizations with specific compliance, security, or infrastructure needs may opt for a separate server.
+Considerations:
+Infrastructure Costs: Deploying a separate Delta Sharing Server will incur additional costs related to infrastructure and maintenance (e.g., cloud instances, storage, networking).
+Management Overhead: You'll be responsible for managing the server, including updates, security patches, and scalability.
