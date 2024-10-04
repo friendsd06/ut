@@ -47,3 +47,15 @@ Custom Requirements: Organizations with specific compliance, security, or infras
 Considerations:
 Infrastructure Costs: Deploying a separate Delta Sharing Server will incur additional costs related to infrastructure and maintenance (e.g., cloud instances, storage, networking).
 Management Overhead: You'll be responsible for managing the server, including updates, security patches, and scalability.
+
+
+
+
+Recommendations
+
+Stick with Integrated Delta Sharing: If you're already on Databricks and your recipients can access Databricks or compatible clients, it's simplest and most cost-effective to use the integrated Delta Sharing feature.
+
+Consider a Separate Server When:
+
+Recipients Are Not on Databricks: If the data recipients cannot use Databricks, deploying the open-source server allows them to access the data using other tools.
+Specific Compliance Needs: Organizations that require strict control over their data sharing infrastructure might prefer a self-managed server.
