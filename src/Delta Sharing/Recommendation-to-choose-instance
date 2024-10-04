@@ -1,0 +1,65 @@
+Recommended Compute Options for Delta Sharing
+Serverless SQL Warehouse
+
+Description: A fully managed, auto-scaling compute resource optimized for SQL workloads in Databricks.
+Best For:
+Variable or unpredictable workloads.
+Minimizing management overhead.
+Quick setup without configuring clusters.
+Benefits:
+Auto Scaling: Automatically adjusts resources based on demand.
+Cost Efficiency: Pay only for the compute time you use; no charges when idle.
+Ease of Use: No need to manage infrastructure or cluster configurations.
+Performance: Optimized for SQL queries and supports Photon for accelerated query performance.
+Considerations:
+Cold Start Latency: Initial queries may have slight delays due to startup time.
+Regional Availability: Ensure Serverless SQL is available in your Databricks region.
+Classic SQL Warehouse (Formerly SQL Endpoint)
+
+Description: User-managed SQL compute resources with customizable configurations.
+Best For:
+Predictable workloads with consistent usage patterns.
+Requirements for specific configurations or instance types.
+Benefits:
+Customization: Choose specific instance types, sizes, and configurations.
+Fixed Resources: Provides consistent performance with allocated resources.
+Control: Greater control over scaling policies and cluster settings.
+Considerations:
+Management Overhead: Requires manual management of cluster resources.
+Cost: Billed when running, even if idle (unless auto-stop is configured).
+Dedicated Compute Cluster
+
+Description: Standard Databricks clusters configured specifically for Delta Sharing workloads.
+Best For:
+Advanced use cases requiring custom configurations or specific libraries.
+Workloads needing to run custom code or User Defined Functions (UDFs).
+Benefits:
+Flexibility: Configure node types, sizes, and environment settings.
+Granular Control: Adjust compute and memory resources to match workload requirements.
+Considerations:
+Complexity: More complex to set up and manage than SQL Warehouses.
+Cost: Potentially higher costs if not optimized properly.
+
+
+
+Factors to Consider When Choosing an Instance Type
+Workload Characteristics
+
+Data Size: Larger datasets may require instances with higher memory and compute capabilities.
+Concurrency: High levels of simultaneous data access may benefit from auto-scaling features.
+Query Complexity: Complex queries may require instances with better CPU performance or features like Photon acceleration.
+Performance Requirements
+
+Latency: If low latency is critical, choose instances with higher performance specifications.
+Throughput: For high data throughput, instances with better network and disk I/O performance are beneficial.
+Cost Considerations
+
+Budget: Determine your budget for compute resources.
+Billing Model: Serverless options charge based on usage, while dedicated clusters may incur costs even when idle.
+Management Overhead
+
+Ease of Management: Serverless options reduce management tasks.
+Customization Needs: For specific configurations, a Classic SQL Warehouse or dedicated cluster may be more appropriate.
+Regional Availability
+
+Check Availability: Ensure your chosen compute option is available in your Databricks region.
