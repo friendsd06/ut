@@ -1,0 +1,126 @@
+Assumptions and Considerations
+Data Volume: 550 GB of data transferred daily.
+Compute Environment: Both solutions will use AWS for compute resources.
+Compute Instances: We'll select efficient AWS instance types suitable for handling the data transfer.
+Time Frame: Costs will be calculated on a monthly basis (30 days).
+Data Transfer Costs: We'll include AWS data transfer (egress) costs for data sent out to the internet.
+Storage Costs: Assume data is stored in Amazon S3 for both scenarios.
+Databricks Subscription: Already in place, so no additional subscription costs for Delta Sharing.
+
+
+
+1. Cost Calculation for Delta Sharing
+a. Compute Costs
+
+Delta Sharing Compute Usage:
+
+In Delta Sharing, data is stored in cloud storage (S3).
+Compute costs are minimal for the data provider since the recipients incur compute costs when querying the data.
+However, the provider might need a compute resource to manage sharing configurations and metadata.
+Compute Instance Selection:
+
+We'll assume a small Databricks Serverless SQL Warehouse is used to handle any necessary compute tasks.
+For simplicity, let's estimate using an AWS equivalent instance type, such as m5.large (2 vCPUs, 8 GiB RAM).
+Compute Cost Estimation:
+
+Hourly Cost of m5.large: Approximately $0.096 per hour.
+Usage Duration: Since the compute resource is minimally used, we'll estimate 4 hours per day for tasks like managing shares and occasional metadata operations.
+Monthly Compute Cost:
+Daily Compute Cost: 4 hours/day * $0.096/hour = $0.384 per day
+Monthly Compute Cost: $0.384/day * 30 days = $11.52 per month
+b. Data Transfer Costs
+
+Data Transfer Out (Egress):
+
+AWS charges for data transferred out to the internet.
+Total Monthly Data Transfer: 550 GB/day * 30 days = 16,500 GB per month
+AWS Data Transfer Pricing:
+
+First 10 TB (10,240 GB): $0.09 per GB
+Next 40 TB: $0.085 per GB
+Calculating Data Transfer Costs:
+
+First 10,240 GB:
+10,240 GB * $0.09/GB = $921.60
+Remaining Data (16,500 GB - 10,240 GB = 6,260 GB):
+6,260 GB * $0.085/GB = $532.10
+Total Data Transfer Cost:
+$921.60 + $532.10 = $1,453.70 per month
+c. Storage Costs
+
+Amazon S3 Storage Costs:
+Assume data is stored in S3 Standard storage.
+S3 Standard Storage Cost: Approximately $0.023 per GB per month.
+Total Data Stored: Since 550 GB is being transferred daily, we can assume a steady state of 550 GB stored, unless data accumulates.
+Monthly Storage Cost:
+550 GB * $0.023/GB = $12.65 per month
+d. Total Cost for Delta Sharing
+
+Compute Cost: $11.52 per month
+Data Transfer Cost: $1,453.70 per month
+Storage Cost: $12.65 per month
+Total Monthly Cost: $11.52 + $1,453.70 + $12.65 = $1,477.87
+
+
+--------------------------------------
+
+
+2. Cost Calculation for Custom Java Service
+a. Compute Costs
+
+Compute Instance Selection:
+
+For transferring 550 GB daily, we'll need a robust EC2 instance.
+Choose an m5.xlarge instance (4 vCPUs, 16 GiB RAM).
+Hourly Cost of m5.xlarge: Approximately $0.192 per hour.
+Compute Usage Estimation:
+
+Assume the service runs 24/7 to handle data processing and transfers.
+Monthly Compute Cost:
+$0.192/hour * 24 hours/day * 30 days = $138.24 per month
+b. Data Transfer Costs
+
+Data Transfer Out (Egress):
+Same as Delta Sharing since data volume is the same.
+Total Data Transfer Cost: $1,453.70 per month
+c. Storage Costs
+
+Amazon S3 Storage Costs:
+Data needs to be stored for the service to access.
+Monthly Storage Cost: Same as Delta Sharing, $12.65 per month
+d. Additional Costs
+
+Development and Maintenance Costs:
+Initial development cost for the Custom Java Service.
+Ongoing maintenance and operational overhead.
+For this comparison, we'll consider an estimated monthly maintenance cost.
+Assumed Maintenance Cost: Let's estimate $500 per month for developer time and system management.
+e. Total Cost for Custom Java Service
+
+Compute Cost: $138.24 per month
+Data Transfer Cost: $1,453.70 per month
+Storage Cost: $12.65 per month
+Maintenance Cost: $500 per month
+Total Monthly Cost: $138.24 + $1,453.70 + $12.65 + $500 = $2,104.59
+3. Cost Comparison
+Delta Sharing Total Monthly Cost: $1,477.87
+Custom Java Service Total Monthly Cost: $2,104.59
+Difference: $2,104.59 - $1,477.87 = $626.72
+
+Result: Using Delta Sharing is approximately $626.72 less expensive per month compared to a Custom Java Service for transferring 550 GB of data daily.
+
+
+
+4. Analysis and Considerations
+Delta Sharing Advantages:
+
+Lower Compute Costs: Minimal compute resources needed on the provider's side.
+Reduced Maintenance: Managed service with less operational overhead.
+Scalability: Designed to handle large data volumes efficiently.
+Security and Compliance: Built-in features for secure data sharing.
+Custom Java Service Challenges:
+
+Higher Compute Costs: Requires a dedicated instance running continuously.
+Maintenance Overhead: Additional costs for development and ongoing maintenance.
+Potential Performance Issues: Custom code may not be as optimized for large-scale data transfer.
+Security Implementation: Must ensure robust security measures are in place.
