@@ -1,0 +1,375 @@
+import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+public class OptimizedShardedFileDatabase {
+    private static final String DB_DIR = "database";
+    private static final String INDEX_FILE = "index.txt";
+    private static final String LOG_FILE = "database_log.txt";
+    private static final String WAL_FILE = "wal.txt";
+    private static final String BACKUP_DIR = "backups";
+    private static final int SHARD_COUNT = 4;
+    private final ConcurrentHashMap<String, String> indexMap = new ConcurrentHashMap<>();
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final Map<String, String> cache = new ConcurrentHashMap<>(); // Simple in-memory cache
+    private final Deque<Transaction> transactionLog = new ArrayDeque<>(); // Transaction log for ACID properties
+    private long lastBackupTime = 0;
+
+    public OptimizedShardedFileDatabase() {
+        loadIndex();
+        replayWAL();
+    }
+
+    // Load the index from the file for quick access to records
+    private void loadIndex() {
+        lock.writeLock().lock();
+        try (BufferedReader reader = new BufferedReader(new FileReader(INDEX_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                indexMap.put(parts[0], parts[1]);
+            }
+        } catch (IOException e) {
+            System.out.println("Index file not found, starting fresh.");
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // Save the index to a file
+    private void saveIndex() {
+        lock.writeLock().lock();
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(INDEX_FILE))) {
+            for (Map.Entry<String, String> entry : indexMap.entrySet()) {
+                writer.write(entry.getKey() + "," + entry.getValue());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // Write-Ahead Log (WAL) for ensuring data consistency
+    private void writeToWAL(String operation, String key, String value) {
+        lock.writeLock().lock();
+        try (BufferedWriter walWriter = new BufferedWriter(new FileWriter(WAL_FILE, true))) {
+            walWriter.write(operation + "," + key + "," + (value == null ? "" : value));
+            walWriter.newLine();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // Replay the WAL to recover from an incomplete transaction
+    private void replayWAL() {
+        lock.writeLock().lock();
+        try (BufferedReader walReader = new BufferedReader(new FileReader(WAL_FILE))) {
+            String line;
+            while ((line = walReader.readLine()) != null) {
+                String[] parts = line.split(",", 3);
+                String operation = parts[0];
+                String key = parts[1];
+                String value = parts.length > 2 ? parts[2] : null;
+
+                switch (operation) {
+                    case "WRITE":
+                        write(key, value);
+                        break;
+                    case "DELETE":
+                        delete(key);
+                        break;
+                }
+            }
+            // Clear WAL after successful replay
+            Files.deleteIfExists(Paths.get(WAL_FILE));
+        } catch (IOException e) {
+            System.out.println("WAL file not found, starting fresh.");
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // ACID Transactions
+    public void beginTransaction() {
+        transactionLog.push(new Transaction());
+    }
+
+    public void commitTransaction() {
+        if (transactionLog.isEmpty()) {
+            System.out.println("No active transaction to commit.");
+            return;
+        }
+        Transaction transaction = transactionLog.pop();
+        transaction.commit();
+    }
+
+    public void rollbackTransaction() {
+        if (transactionLog.isEmpty()) {
+            System.out.println("No active transaction to rollback.");
+            return;
+        }
+        Transaction transaction = transactionLog.pop();
+        transaction.rollback();
+    }
+
+    private class Transaction {
+        private final Map<String, String> writeLog = new HashMap<>(); // Log of changes made in the transaction
+
+        public void write(String key, String value) {
+            writeLog.put(key, value);
+        }
+
+        public void commit() {
+            for (Map.Entry<String, String> entry : writeLog.entrySet()) {
+                OptimizedShardedFileDatabase.this.write(entry.getKey(), entry.getValue());
+            }
+        }
+
+        public void rollback() {
+            System.out.println("Transaction rolled back.");
+        }
+    }
+
+    // Write a new record to the database
+    public void write(String key, String value) {
+        Transaction currentTransaction = transactionLog.peek();
+        if (currentTransaction != null) {
+            currentTransaction.write(key, value);
+        } else {
+            executor.submit(() -> {
+                lock.writeLock().lock();
+                try {
+                    // Write to WAL before actual write
+                    writeToWAL("WRITE", key, value);
+
+                    String shardFile = getShardFile(key);
+                    Path path = Paths.get(shardFile);
+                    Path markerFile = Paths.get(shardFile + ".$c");
+
+                    // Create marker file for atomic write
+                    Files.createFile(markerFile);
+
+                    try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+                        byte[] data = (key + "=" + value + "\n").getBytes();
+                        ByteBuffer buffer = ByteBuffer.wrap(data);
+                        fileChannel.write(buffer);
+                        indexMap.put(key, shardFile + ":" + (fileChannel.size() - data.length));
+                        cache.put(key, value); // Update cache
+                        saveIndex();
+                        logOperation("WRITE", key);
+                    }
+
+                    // Sync file and remove marker
+                    Files.delete(markerFile);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            });
+        }
+    }
+
+    // Read a record by key
+    public Future<String> read(String key) {
+        return executor.submit(() -> {
+            lock.readLock().lock();
+            try {
+                if (cache.containsKey(key)) {
+                    logOperation("READ", key);
+                    return cache.get(key);
+                }
+                String index = indexMap.get(key);
+                if (index == null) {
+                    return null;
+                }
+                String[] parts = index.split(":");
+                String shardFile = parts[0];
+                long filePointer = Long.parseLong(parts[1]);
+                Path path = Paths.get(shardFile);
+                Path markerFile = Paths.get(shardFile + ".$c");
+
+                // Check if there is a pending marker file
+                if (Files.exists(markerFile)) {
+                    throw new IOException("Data corruption detected: marker file exists.");
+                }
+
+                try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.READ)) {
+                    MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, filePointer, fileChannel.size() - filePointer);
+                    StringBuilder sb = new StringBuilder();
+                    while (buffer.hasRemaining()) {
+                        sb.append((char) buffer.get());
+                    }
+                    String line = sb.toString().split("\n")[0];
+                    if (line != null && line.startsWith(key + "=")) {
+                        String value = line.split("=", 2)[1];
+                        cache.put(key, value); // Update cache
+                        logOperation("READ", key);
+                        return value;
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                lock.readLock().unlock();
+            }
+            return null;
+        });
+    }
+
+    // Update a record by key
+    public void update(String key, String newValue) {
+        Transaction currentTransaction = transactionLog.peek();
+        if (currentTransaction != null) {
+            currentTransaction.write(key, newValue);
+        } else {
+            executor.submit(() -> {
+                lock.writeLock().lock();
+                try {
+                    if (indexMap.containsKey(key)) {
+                        write(key, newValue);
+                        logOperation("UPDATE", key);
+                    } else {
+                        System.out.println("Key not found: " + key);
+                    }
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            });
+        }
+    }
+
+    // Delete a record by key
+    public void delete(String key) {
+        Transaction currentTransaction = transactionLog.peek();
+        if (currentTransaction != null) {
+            currentTransaction.write(key, null); // Mark for deletion
+        } else {
+            executor.submit(() -> {
+                lock.writeLock().lock();
+                try {
+                    if (indexMap.containsKey(key)) {
+                        // Write to WAL before actual delete
+                        writeToWAL("DELETE", key, null);
+
+                        Path shardFile = Paths.get(getShardFile(key));
+                        Path markerFile = Paths.get(shardFile.toString() + ".$c");
+
+                        // Create marker file for atomic delete
+                        Files.createFile(markerFile);
+
+                        indexMap.remove(key);
+                        cache.remove(key);
+                        saveIndex();
+                        logOperation("DELETE", key);
+
+                        // Sync file and remove marker
+                        Files.delete(markerFile);
+                    } else {
+                        System.out.println("Key not found: " + key);
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            });
+        }
+    }
+
+    // Fetch all records in the database
+    public Future<Map<String, String>> fetchAll() {
+        return executor.submit(() -> {
+            lock.readLock().lock();
+            Map<String, String> allRecords = new ConcurrentHashMap<>(cache); // Start with cached records
+            try {
+                for (int i = 0; i < SHARD_COUNT; i++) {
+                    String shardFile = DB_DIR + "/shard_" + i + ".txt";
+                    Path path = Paths.get(shardFile);
+                    Path markerFile = Paths.get(shardFile + ".$c");
+
+                    // Check if there is a pending marker file
+                    if (Files.exists(markerFile)) {
+                        throw new IOException("Data corruption detected: marker file exists.");
+                    }
+
+                    if (Files.exists(path)) {
+                        try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.READ)) {
+                            MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileChannel.size());
+                            StringBuilder sb = new StringBuilder();
+                            while (buffer.hasRemaining()) {
+                                sb.append((char) buffer.get());
+                            }
+                            String[] lines = sb.toString().split("\n");
+                            for (String line : lines) {
+                                String[] parts = line.split("=", 2);
+                                if (parts.length == 2) {
+                                    allRecords.putIfAbsent(parts[0], parts[1]);
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                lock.readLock().unlock();
+            }
+            logOperation("FETCH_ALL", "ALL_KEYS");
+            return allRecords;
+        });
+    }
+
+    // Snapshotting for point-in-time backups
+    public void createSnapshot() {
+        lock.writeLock().lock();
+        try {
+            String snapshotDir = BACKUP_DIR + "/snapshot_" + System.currentTimeMillis();
+            Files.createDirectories(Paths.get(snapshotDir));
+            for (int i = 0; i < SHARD_COUNT; i++) {
+                String shardFile = DB_DIR + "/shard_" + i + ".txt";
+                Path shardPath = Paths.get(shardFile);
+                if (Files.exists(shardPath)) {
+                    Files.copy(shardPath, Paths.get(snapshotDir, "shard_" + i + ".txt"), StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            Files.copy(Paths.get(INDEX_FILE), Paths.get(snapshotDir, INDEX_FILE), StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("Snapshot created at: " + snapshotDir);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // Incremental backups
+    public void incrementalBackup() {
+        lock.writeLock().lock();
+        try {
+            long currentTime = System.currentTimeMillis();
+            String backupDir = BACKUP_DIR + "/incremental_" + currentTime;
+            Files.createDirectories(Paths.get(backupDir));
+            for (int i = 0; i < SHARD_COUNT; i++) {
+                String shardFile = DB_DIR + "/shard_" + i + ".txt";
+                Path shardPath = Paths.get(shardFile);
+                if (Files.exists(shardPath) && Files.getLastModifiedTime(shardPath).toMillis() > lastBackupTime) {
+                    Files.copy(shardPath, Paths.get(backupDir, "shard_" + i + ".txt"), StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            Files.copy(Paths.get(INDEX_FILE), Paths.get(backupDir, INDEX_FILE), StandardCopyOption.REPLACE_EXISTING);
+            lastBackupTime = currentTime;
+            System.out.println("Incremental backup created at: " + backupDir);
+        }

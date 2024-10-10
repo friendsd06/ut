@@ -1,0 +1,302 @@
+In the current implementation, CopyOnWriteArrayList is used for the drivers and riders lists. Here are the reasons and an analysis of whether this is the most optimized choice:
+
+Why CopyOnWriteArrayList?
+Thread-Safety: CopyOnWriteArrayList is thread-safe and does not require explicit synchronization, which helps avoid potential race conditions when multiple threads read and modify the list.
+Concurrency Overhead: It is ideal for scenarios where read operations significantly outnumber modifications. In the ride-sharing application, drivers and riders are generally added infrequently compared to how often they are read for matching rides, making CopyOnWriteArrayList a reasonable choice.
+No Lock Contention: By creating a copy of the list on modifications, CopyOnWriteArrayList helps in avoiding lock contention, which would occur in more write-intensive data structures. This is useful for the high-read frequency context in the ride-sharing scenario.
+Potential Downsides
+Memory Usage: When modifications (such as adding or removing elements) occur, CopyOnWriteArrayList creates a new copy of the underlying array, leading to increased memory consumption.
+Performance Cost for Writes: For applications with frequent modifications, CopyOnWriteArrayList can be inefficient due to the cost of copying the entire list on each modification.
+Optimized Alternatives
+ConcurrentHashMap for Driver/Rider Management:
+
+Instead of using CopyOnWriteArrayList, a ConcurrentHashMap can be used to manage drivers and riders. This would allow constant-time reads and writes while also ensuring thread safety. We can map drivers by their ID or vehicle information.
+ConcurrentLinkedQueue or ConcurrentSkipListSet:
+
+For lists that involve frequent inserts and removals, ConcurrentLinkedQueue is suitable for FIFO operations with low contention. ConcurrentSkipListSet provides sorted access with efficient concurrent inserts and reads.
+Custom Synchronization:
+
+Using ReentrantReadWriteLock for manually handling read and write locks could provide better control. This approach would ensure that multiple reads can happen simultaneously but only one write can occur at a time, reducing the overhead of copying entire lists.
+Recommendation
+ConcurrentHashMap: Replace CopyOnWriteArrayList with ConcurrentHashMap to store drivers and riders, allowing direct lookup by driver/rider ID and avoiding the overhead of copying on each modification.
+Custom Locking Mechanism: If finer control is needed for read-heavy scenarios, consider using ReentrantReadWriteLock to balance reads and writes more efficiently.
+Would you like me to implement these optimizations? Let me know if you'd like a detailed update with code changes.
+
+
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.*;
+import java.time.LocalDateTime;
+import java.util.stream.Collectors;
+
+class RideSharingApp {
+    public static void main(String[] args) {
+        RideSharingService rideSharingService = new RideSharingService();
+
+        // Adding drivers
+        rideSharingService.addDriver("John Doe", "Car-1234", 4.8, "Sedan", new Location(12.971598, 77.594566));
+        rideSharingService.addDriver("Jane Smith", "Car-5678", 4.9, "SUV", new Location(12.935242, 77.624432));
+        rideSharingService.addDriver("Mike Johnson", "Car-9101", 4.5, "Hatchback", new Location(12.927923, 77.627108));
+
+        // Rider requesting ride
+        String riderId = UUID.randomUUID().toString();
+        rideSharingService.requestRide(riderId, "Pickup Location", "Dropoff Location", "SUV", new Location(12.934567, 77.610116));
+
+        // Viewing ride history
+        rideSharingService.viewRideHistory(riderId);
+
+        // Adding feedback for the ride
+        rideSharingService.addFeedback(riderId, 5.0, "Great ride!");
+
+        // Viewing driver details
+        rideSharingService.viewDriverDetails();
+
+        // Driver availability status
+        rideSharingService.toggleDriverAvailability("Car-5678", false);
+
+        // Canceling a ride
+        rideSharingService.cancelRide(riderId);
+
+        // Viewing ride history after cancellation
+        rideSharingService.viewRideHistory(riderId);
+    }
+}
+
+class Location {
+    double latitude;
+    double longitude;
+
+    public Location(double latitude, double longitude) {
+        this.latitude = latitude;
+        this.longitude = longitude;
+    }
+
+    public double distanceTo(Location other) {
+        // Haversine formula to calculate distance between two locations
+        final int EARTH_RADIUS = 6371; // Radius of the earth in km
+        double latDistance = Math.toRadians(other.latitude - this.latitude);
+        double lonDistance = Math.toRadians(other.longitude - this.longitude);
+        double a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2)
+                + Math.cos(Math.toRadians(this.latitude)) * Math.cos(Math.toRadians(other.latitude))
+                * Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return EARTH_RADIUS * c; // Distance in km
+    }
+}
+
+class Driver {
+    String id;
+    String name;
+    String vehicleInfo;
+    boolean isAvailable;
+    double rating;
+    String vehicleType;
+    int totalRides;
+    double totalRating;
+    double earnings;
+    Location currentLocation;
+
+    public Driver(String name, String vehicleInfo, double rating, String vehicleType, Location currentLocation) {
+        this.id = UUID.randomUUID().toString();
+        this.name = name;
+        this.vehicleInfo = vehicleInfo;
+        this.isAvailable = true;
+        this.rating = rating;
+        this.vehicleType = vehicleType;
+        this.totalRides = 0;
+        this.totalRating = rating;
+        this.earnings = 0.0;
+        this.currentLocation = currentLocation;
+    }
+
+    public void setAvailable(boolean available) {
+        this.isAvailable = available;
+    }
+
+    public void updateRating(double newRating) {
+        this.totalRides++;
+        this.totalRating += newRating;
+        this.rating = totalRating / totalRides;
+    }
+
+    public void addEarnings(double amount) {
+        this.earnings += amount;
+    }
+}
+
+class Rider {
+    String id;
+    String pickupLocation;
+    String dropoffLocation;
+    String preferredVehicleType;
+    Location currentLocation;
+
+    public Rider(String id, String pickupLocation, String dropoffLocation, String preferredVehicleType, Location currentLocation) {
+        this.id = id;
+        this.pickupLocation = pickupLocation;
+        this.dropoffLocation = dropoffLocation;
+        this.preferredVehicleType = preferredVehicleType;
+        this.currentLocation = currentLocation;
+    }
+}
+
+class Ride {
+    String rideId;
+    String riderId;
+    String driverId;
+    String pickupLocation;
+    String dropoffLocation;
+    LocalDateTime rideStartTime;
+    LocalDateTime rideEndTime;
+    double fare;
+    boolean isCancelled;
+
+    public Ride(String riderId, String driverId, String pickupLocation, String dropoffLocation) {
+        this.rideId = UUID.randomUUID().toString();
+        this.riderId = riderId;
+        this.driverId = driverId;
+        this.pickupLocation = pickupLocation;
+        this.dropoffLocation = dropoffLocation;
+        this.rideStartTime = LocalDateTime.now();
+        this.isCancelled = false;
+    }
+
+    public void endRide() {
+        this.rideEndTime = LocalDateTime.now();
+        this.fare = calculateFare();
+    }
+
+    private double calculateFare() {
+        // Enhanced fare calculation logic based on time and distance (mocked)
+        Random random = new Random();
+        double distance = 5.0 + (10.0 * random.nextDouble()); // Mock distance between 5 and 15 km
+        double baseFare = 30.0;
+        double farePerKm = 10.0;
+        return baseFare + (farePerKm * distance);
+    }
+
+    public void cancelRide() {
+        this.isCancelled = true;
+    }
+}
+
+class RideSharingService {
+    private List<Driver> drivers;
+    private List<Rider> riders;
+    private Map<String, Ride> rideHistory;
+    private Lock rideLock;
+    private ExecutorService executorService;
+
+    public RideSharingService() {
+        this.drivers = new CopyOnWriteArrayList<>();
+        this.riders = new CopyOnWriteArrayList<>();
+        this.rideHistory = new ConcurrentHashMap<>();
+        this.rideLock = new ReentrantLock();
+        this.executorService = Executors.newCachedThreadPool();
+    }
+
+    public void addDriver(String name, String vehicleInfo, double rating, String vehicleType, Location currentLocation) {
+        Driver driver = new Driver(name, vehicleInfo, rating, vehicleType, currentLocation);
+        drivers.add(driver);
+        System.out.println("Driver added: " + name + " with vehicle " + vehicleInfo + " (" + vehicleType + ") and rating " + rating);
+    }
+
+    public void requestRide(String riderId, String pickupLocation, String dropoffLocation, String preferredVehicleType, Location riderLocation) {
+        Rider rider = new Rider(riderId, pickupLocation, dropoffLocation, preferredVehicleType, riderLocation);
+        riders.add(rider);
+
+        rideLock.lock();
+        try {
+            Optional<Driver> availableDriver = findAvailableDriver(preferredVehicleType, riderLocation);
+            if (availableDriver.isPresent()) {
+                Driver driver = availableDriver.get();
+                driver.setAvailable(false);
+                Ride ride = new Ride(riderId, driver.id, pickupLocation, dropoffLocation);
+                ride.endRide();
+                rideHistory.put(riderId, ride);
+                driver.setAvailable(true);
+                driver.updateRating(5.0);  // Update driver rating after ride (default rating for simplicity)
+                driver.addEarnings(ride.fare);
+                System.out.println("Ride confirmed: Driver " + driver.name + " assigned to Rider " + rider.id);
+                System.out.println("Ride fare: " + ride.fare);
+            } else {
+                System.out.println("No drivers available at the moment. Please try again later.");
+            }
+        } finally {
+            rideLock.unlock();
+        }
+    }
+
+    private Optional<Driver> findAvailableDriver(String preferredVehicleType, Location riderLocation) {
+        return drivers.stream()
+                .filter(driver -> driver.isAvailable && driver.vehicleType.equalsIgnoreCase(preferredVehicleType))
+                .min(Comparator.comparingDouble(driver -> driver.currentLocation.distanceTo(riderLocation)));
+    }
+
+    public void viewRideHistory(String riderId) {
+        Ride ride = rideHistory.get(riderId);
+        if (ride != null) {
+            if (ride.isCancelled) {
+                System.out.println("Ride History for Rider " + riderId + ": The ride was cancelled.");
+            } else {
+                System.out.println("Ride History for Rider " + riderId + ":");
+                System.out.println("Driver ID: " + ride.driverId);
+                System.out.println("Pickup Location: " + ride.pickupLocation);
+                System.out.println("Dropoff Location: " + ride.dropoffLocation);
+                System.out.println("Ride Start Time: " + ride.rideStartTime);
+                System.out.println("Ride End Time: " + ride.rideEndTime);
+                System.out.println("Fare: " + ride.fare);
+            }
+        } else {
+            System.out.println("No ride history available for Rider " + riderId);
+        }
+    }
+
+    public void addFeedback(String riderId, double rating, String comments) {
+        Ride ride = rideHistory.get(riderId);
+        if (ride != null && !ride.isCancelled) {
+            Optional<Driver> driver = drivers.stream().filter(d -> d.id.equals(ride.driverId)).findFirst();
+            driver.ifPresent(d -> d.updateRating(rating));
+            System.out.println("Feedback added for Driver " + ride.driverId + ": Rating = " + rating + ", Comments = " + comments);
+        } else {
+            System.out.println("No ride history available for Rider " + riderId + " to add feedback.");
+        }
+    }
+
+    public void viewDriverDetails() {
+        System.out.println("Driver Details:");
+        for (Driver driver : drivers) {
+            System.out.println("Driver ID: " + driver.id);
+            System.out.println("Name: " + driver.name);
+            System.out.println("Vehicle Info: " + driver.vehicleInfo);
+            System.out.println("Rating: " + driver.rating);
+            System.out.println("Total Rides: " + driver.totalRides);
+            System.out.println("Available: " + driver.isAvailable);
+            System.out.println("Earnings: " + driver.earnings);
+            System.out.println("Location: (" + driver.currentLocation.latitude + ", " + driver.currentLocation.longitude + ")");
+            System.out.println();
+        }
+    }
+
+    public void toggleDriverAvailability(String vehicleInfo, boolean availability) {
+        Optional<Driver> driver = drivers.stream().filter(d -> d.vehicleInfo.equals(vehicleInfo)).findFirst();
+        driver.ifPresent(d -> {
+            d.setAvailable(availability);
+            System.out.println("Driver " + d.name + " availability set to: " + availability);
+        });
+    }
+
+    public void cancelRide(String riderId) {
+        Ride ride = rideHistory.get(riderId);
+        if (ride != null && !ride.isCancelled) {
+            ride.cancelRide();
+            System.out.println("Ride for Rider " + riderId + " has been cancelled.");
+        } else {
+            System.out.println("No active ride available for Rider " + riderId + " to cancel.");
+        }
+    }
+
+    public List<Driver> getAvailableDrivers() {
+        return drivers.stream().filter(driver -> driver.isAvailable).collect(Collectors.toList());
+    }
+}

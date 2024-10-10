@@ -1,0 +1,146 @@
+I've enhanced the queuing system to include features like message visibility timeout, message deletion, and unique message IDs.
+Let me know if you need further customizations or more advanced features, such as dead-letter queues or delayed message delivery.
+
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.UUID;
+
+class Message {
+    private final String id;
+    private final String body;
+    private long visibilityTimeout;
+
+    public Message(String body, long visibilityTimeout) {
+        this.id = UUID.randomUUID().toString();
+        this.body = body;
+        this.visibilityTimeout = visibilityTimeout;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public String getBody() {
+        return body;
+    }
+
+    public long getVisibilityTimeout() {
+        return visibilityTimeout;
+    }
+
+    public void setVisibilityTimeout(long visibilityTimeout) {
+        this.visibilityTimeout = visibilityTimeout;
+    }
+}
+
+class AdvancedMessageQueue {
+    private final Queue<Message> queue = new LinkedList<>();
+    private final int capacity;
+    private final Lock lock = new ReentrantLock();
+    private final Condition notFull = lock.newCondition();
+    private final Condition notEmpty = lock.newCondition();
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
+    public AdvancedMessageQueue(int capacity) {
+        this.capacity = capacity;
+    }
+
+    public void sendMessage(String message, long visibilityTimeout) throws InterruptedException {
+        lock.lock();
+        try {
+            while (queue.size() == capacity) {
+                notFull.await();
+            }
+            Message msg = new Message(message, visibilityTimeout);
+            queue.add(msg);
+            System.out.println("Message sent: " + msg.getBody() + " (ID: " + msg.getId() + ")");
+            notEmpty.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public Message receiveMessage() throws InterruptedException {
+        lock.lock();
+        try {
+            while (queue.isEmpty()) {
+                notEmpty.await();
+            }
+            Message message = queue.poll();
+            System.out.println("Message received: " + message.getBody() + " (ID: " + message.getId() + ")");
+            scheduleMessageVisibilityTimeout(message);
+            return message;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void scheduleMessageVisibilityTimeout(Message message) {
+        scheduler.schedule(() -> {
+            lock.lock();
+            try {
+                if (message.getVisibilityTimeout() > 0) {
+                    System.out.println("Message visibility timeout expired: " + message.getBody() + " (ID: " + message.getId() + ")");
+                    queue.add(message);
+                    notEmpty.signalAll();
+                }
+            } finally {
+                lock.unlock();
+            }
+        }, message.getVisibilityTimeout(), TimeUnit.MILLISECONDS);
+    }
+
+    public void deleteMessage(Message message) {
+        lock.lock();
+        try {
+            System.out.println("Message deleted: " + message.getBody() + " (ID: " + message.getId() + ")");
+            message.setVisibilityTimeout(0); // Mark message as processed
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+
+public class AdvancedQueueSystem {
+    public static void main(String[] args) {
+        AdvancedMessageQueue messageQueue = new AdvancedMessageQueue(10);
+        ExecutorService executorService = Executors.newFixedThreadPool(4);
+
+        // Producers
+        Runnable producer = () -> {
+            for (int i = 0; i < 20; i++) {
+                try {
+                    messageQueue.sendMessage("Message " + i, 5000); // 5-second visibility timeout
+                    Thread.sleep(100); // Simulate delay
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+
+        // Consumers
+        Runnable consumer = () -> {
+            for (int i = 0; i < 10; i++) {
+                try {
+                    Message message = messageQueue.receiveMessage();
+                    Thread.sleep(150); // Simulate processing time
+                    messageQueue.deleteMessage(message);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+
+        // Execute producers and consumers
+        executorService.execute(producer);
+        executorService.execute(producer);
+        executorService.execute(consumer);
+        executorService.execute(consumer);
+
+        executorService.shutdown();
+    }
+}

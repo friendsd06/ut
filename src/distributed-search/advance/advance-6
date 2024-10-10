@@ -1,0 +1,313 @@
+This optimized version of the Distributed Search System incorporates several improvements:
+
+Improved modularity: Interfaces have been introduced for Indexer, Searcher, and DistributedStorage, allowing for easier extension and testing.
+Enhanced concurrency: The system now uses concurrent data structures throughout, improving performance in multi-threaded environments.
+Better exception handling: All operations that might throw exceptions are now properly handled, with logging for better traceability.
+Improved storage mechanism: The system now uses Java NIO for file operations, which is more efficient. Each component can persist and load its state independently.
+Loose coupling: The main components (Indexer, Searcher, DistributedStorage) are now more loosely coupled, interacting primarily through interfaces.
+Optimized search: The search algorithms have been improved for better performance, especially for large datasets.
+Immutability: The Document class is now immutable, which is safer in concurrent environments.
+Type safety: Generics are used more extensively to improve type safety.
+Logging: Comprehensive logging has been added throughout the system for better observability.
+Time-based filtering: The system now uses java.time.Instant for more precise and easier-to-use time-based filtering.
+
+This version is fully runnable and demonstrates the core functionality of the distributed search system. It's more production-ready, with improved error handling, better concurrency support, and a more flexible architecture.
+Would you like me to explain any specific part of this optimized version in more detail?
+
+// Optimized Distributed Search System
+
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
+import java.util.logging.*;
+import java.security.*;
+import java.time.Instant;
+
+// Document class
+class Document implements Serializable {
+    private static final long serialVersionUID = 1L;
+    private final String id;
+    private final String content;
+    private final Instant timestamp;
+
+    public Document(String id, String content) {
+        this.id = id;
+        this.content = content;
+        this.timestamp = Instant.now();
+    }
+
+    // Getters
+    public String getId() { return id; }
+    public String getContent() { return content; }
+    public Instant getTimestamp() { return timestamp; }
+}
+
+// IndexEntry class for efficient storage
+class IndexEntry implements Serializable {
+    private static final long serialVersionUID = 1L;
+    private final String word;
+    private final Set<String> documentIds;
+
+    public IndexEntry(String word, Set<String> documentIds) {
+        this.word = word;
+        this.documentIds = new ConcurrentSkipListSet<>(documentIds);
+    }
+
+    // Getters and methods
+    public String getWord() { return word; }
+    public Set<String> getDocumentIds() { return Collections.unmodifiableSet(documentIds); }
+    public void addDocumentId(String docId) { documentIds.add(docId); }
+    public void removeDocumentId(String docId) { documentIds.remove(docId); }
+    public boolean isEmpty() { return documentIds.isEmpty(); }
+}
+
+// Indexer interface
+interface Indexer {
+    void indexDocument(Document doc);
+    void removeDocument(String docId);
+    Optional<Document> getDocument(String docId);
+    Set<String> getDocumentIds(String word);
+    void persistState() throws IOException;
+    void loadState() throws IOException, ClassNotFoundException;
+}
+
+// Concrete Indexer implementation
+class ConcurrentIndexer implements Indexer, Serializable {
+    private static final long serialVersionUID = 1L;
+    private static final Logger logger = Logger.getLogger(ConcurrentIndexer.class.getName());
+    private final Map<String, IndexEntry> index;
+    private final Map<String, Document> documentStore;
+    private final String persistencePath;
+
+    public ConcurrentIndexer(String persistencePath) {
+        this.index = new ConcurrentHashMap<>();
+        this.documentStore = new ConcurrentHashMap<>();
+        this.persistencePath = persistencePath;
+    }
+
+    @Override
+    public void indexDocument(Document doc) {
+        documentStore.put(doc.getId(), doc);
+        Arrays.stream(doc.getContent().toLowerCase().split("\\W+"))
+              .forEach(word -> index.computeIfAbsent(word, w -> new IndexEntry(w, new HashSet<>()))
+                                    .addDocumentId(doc.getId()));
+        logger.info("Document indexed: " + doc.getId());
+    }
+
+    @Override
+    public void removeDocument(String docId) {
+        Document doc = documentStore.remove(docId);
+        if (doc != null) {
+            Arrays.stream(doc.getContent().toLowerCase().split("\\W+"))
+                  .forEach(word -> {
+                      IndexEntry entry = index.get(word);
+                      if (entry != null) {
+                          entry.removeDocumentId(docId);
+                          if (entry.isEmpty()) {
+                              index.remove(word);
+                          }
+                      }
+                  });
+            logger.info("Document removed: " + docId);
+        }
+    }
+
+    @Override
+    public Optional<Document> getDocument(String docId) {
+        return Optional.ofNullable(documentStore.get(docId));
+    }
+
+    @Override
+    public Set<String> getDocumentIds(String word) {
+        IndexEntry entry = index.get(word.toLowerCase());
+        return (entry != null) ? entry.getDocumentIds() : Collections.emptySet();
+    }
+
+    @Override
+    public void persistState() throws IOException {
+        try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(Paths.get(persistencePath)))) {
+            oos.writeObject(this);
+            logger.info("Indexer state persisted to " + persistencePath);
+        }
+    }
+
+    @Override
+    public void loadState() throws IOException, ClassNotFoundException {
+        try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(Paths.get(persistencePath)))) {
+            ConcurrentIndexer loaded = (ConcurrentIndexer) ois.readObject();
+            this.index.putAll(loaded.index);
+            this.documentStore.putAll(loaded.documentStore);
+            logger.info("Indexer state loaded from " + persistencePath);
+        }
+    }
+}
+
+// Searcher interface
+interface Searcher {
+    List<String> search(String query);
+    List<String> searchWithRanking(String query);
+    List<Document> searchWithFilters(String query, Instant startTime, Instant endTime);
+}
+
+// Concrete Searcher implementation
+class ConcurrentSearcher implements Searcher {
+    private static final Logger logger = Logger.getLogger(ConcurrentSearcher.class.getName());
+    private final Indexer indexer;
+
+    public ConcurrentSearcher(Indexer indexer) {
+        this.indexer = indexer;
+    }
+
+    @Override
+    public List<String> search(String query) {
+        return Arrays.stream(query.toLowerCase().split("\\W+"))
+                     .flatMap(word -> indexer.getDocumentIds(word).stream())
+                     .distinct()
+                     .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<String> searchWithRanking(String query) {
+        Map<String, Long> ranking = Arrays.stream(query.toLowerCase().split("\\W+"))
+                                          .flatMap(word -> indexer.getDocumentIds(word).stream())
+                                          .collect(Collectors.groupingBy(docId -> docId, Collectors.counting()));
+
+        return ranking.entrySet().stream()
+                      .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                      .map(Map.Entry::getKey)
+                      .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<Document> searchWithFilters(String query, Instant startTime, Instant endTime) {
+        return searchWithRanking(query).stream()
+                                       .map(docId -> indexer.getDocument(docId))
+                                       .filter(Optional::isPresent)
+                                       .map(Optional::get)
+                                       .filter(doc -> !doc.getTimestamp().isBefore(startTime) && !doc.getTimestamp().isAfter(endTime))
+                                       .collect(Collectors.toList());
+    }
+}
+
+// DistributedStorage interface
+interface DistributedStorage {
+    void storeIndex(int nodeId, Indexer indexer);
+    Optional<Indexer> retrieveIndexer(int nodeId);
+    List<Indexer> getAllIndexers();
+    void persistState() throws IOException;
+    void loadState() throws IOException, ClassNotFoundException;
+}
+
+// Concrete DistributedStorage implementation
+class ConcurrentDistributedStorage implements DistributedStorage, Serializable {
+    private static final long serialVersionUID = 1L;
+    private static final Logger logger = Logger.getLogger(ConcurrentDistributedStorage.class.getName());
+    private final Map<Integer, Indexer> distributedIndexers;
+    private final String persistencePath;
+
+    public ConcurrentDistributedStorage(String persistencePath) {
+        this.distributedIndexers = new ConcurrentHashMap<>();
+        this.persistencePath = persistencePath;
+    }
+
+    @Override
+    public void storeIndex(int nodeId, Indexer indexer) {
+        distributedIndexers.put(nodeId, indexer);
+        logger.info("Index stored for node: " + nodeId);
+    }
+
+    @Override
+    public Optional<Indexer> retrieveIndexer(int nodeId) {
+        return Optional.ofNullable(distributedIndexers.get(nodeId));
+    }
+
+    @Override
+    public List<Indexer> getAllIndexers() {
+        return new ArrayList<>(distributedIndexers.values());
+    }
+
+    @Override
+    public void persistState() throws IOException {
+        try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(Paths.get(persistencePath)))) {
+            oos.writeObject(this);
+            logger.info("Distributed storage state persisted to " + persistencePath);
+        }
+    }
+
+    @Override
+    public void loadState() throws IOException, ClassNotFoundException {
+        try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(Paths.get(persistencePath)))) {
+            ConcurrentDistributedStorage loaded = (ConcurrentDistributedStorage) ois.readObject();
+            this.distributedIndexers.putAll(loaded.distributedIndexers);
+            logger.info("Distributed storage state loaded from " + persistencePath);
+        }
+    }
+}
+
+// Main class to demonstrate the system
+public class DistributedSearchSystem {
+    private static final Logger logger = Logger.getLogger(DistributedSearchSystem.class.getName());
+
+    public static void main(String[] args) {
+        try {
+            // Initialize storage and indexers
+            DistributedStorage storage = new ConcurrentDistributedStorage("distributed_storage.ser");
+            Indexer indexer1 = new ConcurrentIndexer("indexer1.ser");
+            Indexer indexer2 = new ConcurrentIndexer("indexer2.ser");
+
+            // Index documents
+            indexer1.indexDocument(new Document("1", "This is a sample document"));
+            indexer1.indexDocument(new Document("2", "Another example document for indexing"));
+            indexer2.indexDocument(new Document("3", "This document is stored in another node"));
+            indexer2.indexDocument(new Document("4", "This is yet another sample document"));
+
+            // Store indexes
+            storage.storeIndex(1, indexer1);
+            storage.storeIndex(2, indexer2);
+
+            // Persist states
+            storage.persistState();
+            indexer1.persistState();
+            indexer2.persistState();
+
+            // Simulate system restart
+            DistributedStorage loadedStorage = new ConcurrentDistributedStorage("distributed_storage.ser");
+            loadedStorage.loadState();
+
+            // Create searcher
+            Searcher searcher = new ConcurrentSearcher(new ConcurrentIndexer("dummy.ser") {
+                @Override
+                public Set<String> getDocumentIds(String word) {
+                    return loadedStorage.getAllIndexers().stream()
+                                        .flatMap(indexer -> indexer.getDocumentIds(word).stream())
+                                        .collect(Collectors.toSet());
+                }
+
+                @Override
+                public Optional<Document> getDocument(String docId) {
+                    return loadedStorage.getAllIndexers().stream()
+                                        .map(indexer -> indexer.getDocument(docId))
+                                        .filter(Optional::isPresent)
+                                        .findFirst()
+                                        .orElse(Optional.empty());
+                }
+            });
+
+            // Perform searches
+            System.out.println("Search results for 'sample': " + searcher.search("sample"));
+            System.out.println("Search results for 'document': " + searcher.search("document"));
+            System.out.println("Ranked search results for 'sample document': " + searcher.searchWithRanking("sample document"));
+
+            Instant now = Instant.now();
+            System.out.println("Filtered search results for 'sample': " +
+                searcher.searchWithFilters("sample", now.minusSeconds(3600), now)
+                        .stream().map(Document::getId).collect(Collectors.toList()));
+
+        } catch (IOException | ClassNotFoundException e) {
+            logger.severe("An error occurred: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}

@@ -1,0 +1,483 @@
+This optimized version of the LeaderboardSystem uses only core Java features while maintaining high performance, scalability, and robustness. Here are the key improvements and optimizations:
+
+Concurrency:
+
+Uses ConcurrentHashMap for thread-safe team storage.
+Implements ConcurrentSkipListMap for the leaderboard, allowing efficient concurrent access and updates.
+Utilizes parallel streams for bulk operations on teams and leaderboard updates.
+Employs ReadWriteLock for the top teams cache to allow concurrent reads while ensuring thread-safety during updates.
+
+
+Performance:
+
+
+Certainly. I'll provide an in-depth explanation of each data structure used in the optimized LeaderboardSystem, along with alternatives and the reasoning behind these choices.
+
+ConcurrentHashMap (in TeamRepository)
+
+Used for: Storing Team objects with their IDs as keys.
+Why it's used:
+
+Thread-safe: Allows multiple threads to read and write concurrently without external synchronization.
+High performance: Provides better concurrency than Hashtable or synchronized HashMap.
+Scalability: Partitions internally to reduce contention.
+
+Alternatives and why they weren't chosen:
+a) HashMap: Not thread-safe. Would require external synchronization, potentially becoming a bottleneck.
+b) Hashtable: Thread-safe but uses coarse-grained locking, which can lead to contention.
+c) SynchronizedMap: Similar issues to Hashtable.
+Depth: ConcurrentHashMap uses a technique called "lock striping" to divide the map into segments, each with its own lock. This allows multiple threads to write to different segments simultaneously, greatly improving concurrency. For read operations, it doesn't use locks at all (in Java 8+), instead relying on volatile variables and CAS (Compare-and-Swap) operations.
+
+ConcurrentSkipListMap (in LeaderboardManager)
+
+Used for: Maintaining the leaderboard with teams sorted by points.
+Why it's used:
+
+Thread-safe: Allows concurrent access and modifications.
+Always sorted: Maintains elements in sorted order, crucial for a leaderboard.
+Efficient operations: O(log N) time complexity for most operations.
+
+Alternatives and why they weren't chosen:
+a) TreeMap: Not thread-safe. Would require external synchronization.
+b) SynchronizedSortedMap: Uses coarse-grained locking, potentially becoming a bottleneck.
+c) PriorityQueue: Not thread-safe and doesn't allow efficient access to elements other than the top one.
+Depth: ConcurrentSkipListMap is based on the skip list data structure. It maintains multiple layers of linked lists, with each higher layer being a sublist of the layer beneath it. This structure allows for fast search, insert, and delete operations. The "concurrent" aspect is achieved through lock-free algorithms, using atomic operations for updates.
+
+ConcurrentHashMap (for topTeamsCache in LeaderboardManager)
+
+Used for: Caching top N teams for quick retrieval.
+Why it's used:
+
+Thread-safe: Allows concurrent reads and writes.
+Fast access: Provides O(1) average time complexity for get operations.
+
+Alternatives and why they weren't chosen:
+a) HashMap with synchronization: Would be less efficient due to coarse-grained locking.
+b) Custom cache implementation: Could be more memory-efficient but would require more complex code.
+Depth: This cache uses integer keys (N) to store lists of top N teams. The ConcurrentHashMap allows multiple threads to read the cache without locking, while still providing thread-safe updates when necessary.
+
+ReadWriteLock (for topTeamsCache in LeaderboardManager)
+
+Used for: Protecting access to the topTeamsCache.
+Why it's used:
+
+Allows multiple concurrent reads: Multiple threads can read the cache simultaneously.
+Exclusive write access: Ensures cache updates are thread-safe.
+
+Alternatives and why they weren't chosen:
+a) Synchronized methods: Would not allow concurrent reads, reducing performance.
+b) ReentrantLock: Doesn't distinguish between read and write operations, potentially reducing concurrency.
+Depth: The ReadWriteLock uses two locks: a read lock and a write lock. Multiple threads can acquire the read lock simultaneously, allowing concurrent reads. The write lock is exclusive, ensuring that cache updates are safe and consistent.
+
+AtomicInteger (in CustomThreadFactory and RewardManager)
+
+Used for: Thread-safe incrementing of counters.
+Why it's used:
+
+Thread-safe: Allows multiple threads to increment the counter without race conditions.
+Lock-free: Uses atomic operations, which are generally more efficient than locks for simple operations.
+
+Alternatives and why they weren't chosen:
+a) Regular int with synchronized methods: Would be less efficient due to locking overhead.
+b) LongAdder: More efficient for high-contention scenarios, but might be overkill for this use case.
+Depth: AtomicInteger uses CPU-specific atomic instructions (like compare-and-swap) to perform thread-safe operations without the need for locks. This makes it very efficient for simple atomic operations like incrementing a counter.
+
+volatile (for points and reward in Team class)
+
+Used for: Ensuring visibility of updates to these fields across threads.
+Why it's used:
+
+Guarantees visibility: When one thread updates a volatile variable, all other threads see the updated value.
+Prevents reordering: Provides happens-before relationship, crucial for the Java Memory Model.
+
+Alternatives and why they weren't chosen:
+a) Synchronized methods: Would provide thread-safety but at a higher performance cost.
+b) AtomicInteger (for points): Could be used but might be overkill if atomic operations aren't needed.
+Depth: The volatile keyword ensures that reads and writes to these variables go directly to main memory, rather than CPU caches. This guarantees that all threads see the most up-to-date value, which is crucial for the consistency of the leaderboard.
+These data structures and concurrency tools work together to create a system that can handle high concurrency while maintaining data consistency and performance. The choices reflect a balance between thread-safety,
+performance, and code complexity, optimized for the specific requirements of a large-scale leaderboard system.
+
+
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
+import java.util.logging.*;
+import java.util.stream.Collectors;
+
+public class LeaderboardSystem {
+    private static final Logger LOGGER = Logger.getLogger(LeaderboardSystem.class.getName());
+
+    private final LeaderboardConfig config;
+    private final TeamRepository teamRepository;
+    private final LeaderboardManager leaderboardManager;
+    private final RewardManager rewardManager;
+    private final ScheduledExecutorService scheduler;
+    private final MetricsCollector metricsCollector;
+
+    public LeaderboardSystem(LeaderboardConfig config) {
+        this.config = config;
+        this.teamRepository = new TeamRepository(config);
+        this.leaderboardManager = new LeaderboardManager(config);
+        this.rewardManager = new RewardManager(config);
+        this.scheduler = Executors.newScheduledThreadPool(config.getThreadPoolSize(), new CustomThreadFactory());
+        this.metricsCollector = new MetricsCollector();
+    }
+
+    public void start() {
+        try {
+            LOGGER.info("Starting LeaderboardSystem...");
+            teamRepository.initializeTeams();
+            leaderboardManager.calculateInitialPoints(teamRepository.getTeams());
+            startScheduledTasks();
+            Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
+            LOGGER.info("LeaderboardSystem started successfully.");
+        } catch (Exception e) {
+            LOGGER.severe("Failed to start LeaderboardSystem: " + e.getMessage());
+            shutdown();
+        }
+    }
+
+    private void startScheduledTasks() {
+        scheduler.scheduleAtFixedRate(leaderboardManager::updateCache, 0, config.getCacheRefreshInterval(), TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> leaderboardManager.updateLeaderboard(teamRepository.getTeams()), 0, config.getLeaderboardUpdateInterval(), TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(this::distributeRewards, 0, config.getRewardDistributionInterval(), TimeUnit.MINUTES);
+        scheduler.scheduleAtFixedRate(metricsCollector::collectMetrics, 0, config.getMetricsCollectionInterval(), TimeUnit.MINUTES);
+    }
+
+    public List<TeamDto> getTopTeams(int n) {
+        try {
+            return leaderboardManager.getTopTeams(n)
+                .stream()
+                .map(TeamDto::fromTeam)
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            LOGGER.warning("Failed to get top teams: " + e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private void distributeRewards() {
+        try {
+            LOGGER.info("Starting reward distribution...");
+            rewardManager.distributeRewards(leaderboardManager.getLeaderboard());
+            LOGGER.info("Reward distribution completed.");
+        } catch (Exception e) {
+            LOGGER.severe("Failed to distribute rewards: " + e.getMessage());
+        }
+    }
+
+    public void shutdown() {
+        LOGGER.info("Shutting down LeaderboardSystem...");
+        try {
+            scheduler.shutdown();
+            if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+            teamRepository.shutdown();
+            leaderboardManager.shutdown();
+            metricsCollector.shutdown();
+        } catch (InterruptedException e) {
+            LOGGER.severe("Error during shutdown: " + e.getMessage());
+            Thread.currentThread().interrupt();
+        }
+        LOGGER.info("LeaderboardSystem shutdown complete.");
+    }
+
+    public static void main(String[] args) {
+        LeaderboardConfig config = new LeaderboardConfig();
+        LeaderboardSystem system = new LeaderboardSystem(config);
+        system.start();
+    }
+}
+
+class LeaderboardConfig {
+    private static final int DEFAULT_TOTAL_TEAMS = 1_000_000;
+    private static final int DEFAULT_THREAD_POOL_SIZE = Runtime.getRuntime().availableProcessors();
+    private static final int DEFAULT_CACHE_REFRESH_INTERVAL = 5;
+    private static final int DEFAULT_LEADERBOARD_UPDATE_INTERVAL = 1;
+    private static final int DEFAULT_REWARD_DISTRIBUTION_INTERVAL = 60;
+    private static final int DEFAULT_METRICS_COLLECTION_INTERVAL = 5;
+    private static final int DEFAULT_TOP_1_PERCENT = 10_000;
+    private static final int DEFAULT_TOP_5_PERCENT = 50_000;
+
+    private final int totalTeams;
+    private final int threadPoolSize;
+    private final int cacheRefreshInterval;
+    private final int leaderboardUpdateInterval;
+    private final int rewardDistributionInterval;
+    private final int metricsCollectionInterval;
+    private final int top1Percent;
+    private final int top5Percent;
+
+    public LeaderboardConfig() {
+        this(DEFAULT_TOTAL_TEAMS, DEFAULT_THREAD_POOL_SIZE, DEFAULT_CACHE_REFRESH_INTERVAL,
+             DEFAULT_LEADERBOARD_UPDATE_INTERVAL, DEFAULT_REWARD_DISTRIBUTION_INTERVAL,
+             DEFAULT_METRICS_COLLECTION_INTERVAL, DEFAULT_TOP_1_PERCENT, DEFAULT_TOP_5_PERCENT);
+    }
+
+    public LeaderboardConfig(int totalTeams, int threadPoolSize, int cacheRefreshInterval,
+                             int leaderboardUpdateInterval, int rewardDistributionInterval,
+                             int metricsCollectionInterval, int top1Percent, int top5Percent) {
+        this.totalTeams = totalTeams;
+        this.threadPoolSize = threadPoolSize;
+        this.cacheRefreshInterval = cacheRefreshInterval;
+        this.leaderboardUpdateInterval = leaderboardUpdateInterval;
+        this.rewardDistributionInterval = rewardDistributionInterval;
+        this.metricsCollectionInterval = metricsCollectionInterval;
+        this.top1Percent = top1Percent;
+        this.top5Percent = top5Percent;
+    }
+
+    // Getters for all fields (omitted for brevity)
+}
+
+class TeamRepository {
+    private static final Logger LOGGER = Logger.getLogger(TeamRepository.class.getName());
+    private final ConcurrentHashMap<Integer, Team> teams;
+    private final int totalTeams;
+
+    public TeamRepository(LeaderboardConfig config) {
+        this.totalTeams = config.getTotalTeams();
+        this.teams = new ConcurrentHashMap<>(totalTeams);
+    }
+
+    public void initializeTeams() {
+        LOGGER.info("Initializing teams...");
+        IntStream.range(1, totalTeams + 1)
+            .parallel()
+            .forEach(i -> teams.put(i, new Team(i, "Team " + i)));
+        LOGGER.info("Teams initialized.");
+    }
+
+    public Map<Integer, Team> getTeams() {
+        return teams;
+    }
+
+    public Team getTeam(int id) {
+        return teams.get(id);
+    }
+
+    public void shutdown() {
+        // No specific shutdown needed for ConcurrentHashMap
+    }
+}
+
+class LeaderboardManager {
+    private static final Logger LOGGER = Logger.getLogger(LeaderboardManager.class.getName());
+    private final ConcurrentSkipListMap<Team, Integer> leaderboard;
+    private final Map<Integer, List<Team>> topTeamsCache;
+    private final ReadWriteLock topTeamsCacheLock;
+    private final Random random;
+
+    public LeaderboardManager(LeaderboardConfig config) {
+        this.leaderboard = new ConcurrentSkipListMap<>((t1, t2) -> {
+            int pointsComparison = Integer.compare(t2.getPoints(), t1.getPoints());
+            return pointsComparison != 0 ? pointsComparison : Integer.compare(t1.getId(), t2.getId());
+        });
+        this.topTeamsCache = new ConcurrentHashMap<>();
+        this.topTeamsCacheLock = new ReentrantReadWriteLock();
+        this.random = new Random();
+    }
+
+    public void calculateInitialPoints(Map<Integer, Team> teams) {
+        LOGGER.info("Calculating initial points...");
+        teams.values().parallelStream().forEach(this::calculateAndSetInitialPoints);
+        LOGGER.info("Initial points calculated.");
+    }
+
+    private void calculateAndSetInitialPoints(Team team) {
+        int basePoints = random.nextInt(1000);
+        int captainBonus = (int) (basePoints * 0.2);
+        int viceCaptainBonus = (int) (basePoints * 0.1);
+        team.setPoints(basePoints + captainBonus + viceCaptainBonus);
+        leaderboard.put(team, team.getPoints());
+    }
+
+    public void updateLeaderboard(Map<Integer, Team> teams) {
+        try {
+            teams.values().parallelStream().forEach(this::updateTeamPoints);
+            LOGGER.info("Leaderboard updated.");
+        } catch (Exception e) {
+            LOGGER.severe("Error updating leaderboard: " + e.getMessage());
+        }
+    }
+
+    private void updateTeamPoints(Team team) {
+        leaderboard.compute(team, (k, v) -> {
+            int pointsChange = random.nextInt(200) - 100;
+            int newPoints = Math.max(0, team.getPoints() + pointsChange);
+            team.setPoints(newPoints);
+            return newPoints;
+        });
+    }
+
+    public void updateCache() {
+        try {
+            topTeamsCacheLock.writeLock().lock();
+            topTeamsCache.clear();
+            LOGGER.info("Leaderboard cache updated.");
+        } finally {
+            topTeamsCacheLock.writeLock().unlock();
+        }
+    }
+
+    public List<Team> getTopTeams(int n) {
+        try {
+            topTeamsCacheLock.readLock().lock();
+            return topTeamsCache.computeIfAbsent(n, k ->
+                leaderboard.keySet().stream()
+                    .limit(n)
+                    .collect(Collectors.toList())
+            );
+        } finally {
+            topTeamsCacheLock.readLock().unlock();
+        }
+    }
+
+    public ConcurrentSkipListMap<Team, Integer> getLeaderboard() {
+        return leaderboard;
+    }
+
+    public void shutdown() {
+        // No specific shutdown needed
+    }
+}
+
+class RewardManager {
+    private static final Logger LOGGER = Logger.getLogger(RewardManager.class.getName());
+    private final int top1Percent;
+    private final int top5Percent;
+    private final int totalTeams;
+
+    public RewardManager(LeaderboardConfig config) {
+        this.top1Percent = config.getTop1Percent();
+        this.top5Percent = config.getTop5Percent();
+        this.totalTeams = config.getTotalTeams();
+    }
+
+    public void distributeRewards(ConcurrentSkipListMap<Team, Integer> leaderboard) {
+        try {
+            AtomicInteger rank = new AtomicInteger(1);
+            leaderboard.keySet().parallelStream().forEach(team -> {
+                int currentRank = rank.getAndIncrement();
+                if (currentRank <= top1Percent) {
+                    team.setReward("High Reward");
+                } else if (currentRank <= top5Percent) {
+                    team.setReward("Medium Reward");
+                } else if (currentRank <= (totalTeams / 2)) {
+                    team.setReward("Low Reward");
+                }
+            });
+            LOGGER.info("Rewards distributed to teams.");
+        } catch (Exception e) {
+            LOGGER.severe("Error distributing rewards: " + e.getMessage());
+        }
+    }
+}
+
+class Team {
+    private final int id;
+    private final String name;
+    private volatile int points;
+    private volatile String reward;
+
+    public Team(int id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public int getPoints() {
+        return points;
+    }
+
+    public void setPoints(int points) {
+        this.points = points;
+    }
+
+    public String getReward() {
+        return reward;
+    }
+
+    public void setReward(String reward) {
+        this.reward = reward;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Team team = (Team) o;
+        return id == team.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
+}
+
+class TeamDto {
+    private final int id;
+    private final String name;
+    private final int points;
+    private final String reward;
+
+    private TeamDto(int id, String name, int points, String reward) {
+        this.id = id;
+        this.name = name;
+        this.points = points;
+        this.reward = reward;
+    }
+
+    public static TeamDto fromTeam(Team team) {
+        return new TeamDto(team.getId(), team.getName(), team.getPoints(), team.getReward());
+    }
+
+    // Getters (omitted for brevity)
+}
+
+class CustomThreadFactory implements ThreadFactory {
+    private static final AtomicInteger poolNumber = new AtomicInteger(1);
+    private final ThreadGroup group;
+    private final AtomicInteger threadNumber = new AtomicInteger(1);
+    private final String namePrefix;
+
+    CustomThreadFactory() {
+        SecurityManager s = System.getSecurityManager();
+        group = (s != null) ? s.getThreadGroup() : Thread.currentThread().getThreadGroup();
+        namePrefix = "pool-" + poolNumber.getAndIncrement() + "-thread-";
+    }
+
+    public Thread newThread(Runnable r) {
+        Thread t = new Thread(group, r, namePrefix + threadNumber.getAndIncrement(), 0);
+        if (t.isDaemon())
+            t.setDaemon(false);
+        if (t.getPriority() != Thread.NORM_PRIORITY)
+            t.setPriority(Thread.NORM_PRIORITY);
+        return t;
+    }
+}
+
+class MetricsCollector {
+    private static final Logger LOGGER = Logger.getLogger(MetricsCollector.class.getName());
+
+    public void collectMetrics() {
+        // Implement metrics collection logic
+        LOGGER.info("Metrics collected.");
+    }
+
+    public void shutdown() {
+        // Implement shutdown logic for metrics collector
+    }
+}

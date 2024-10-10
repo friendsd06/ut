@@ -1,0 +1,105 @@
+
+Sure! Here's an example of a simple parking lot management system written in core Java. It manages vehicle parking, allocation, and removal for a single parking lot.
+
+Parking Lot App
+This example represents a simple parking lot management application with the following features:
+
+Park a car in a specific slot.
+Remove a car from a specific slot.
+Display the current status of the parking lot.
+It uses a HashMap to store the slot number and the car parked in it. Let me know if you'd like to add more features or have questions about this implementation!
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Scanner;
+
+class ParkingLot {
+    private final int capacity;
+    private final Map<Integer, String> parkedCars;
+
+    public ParkingLot(int capacity) {
+        this.capacity = capacity;
+        this.parkedCars = new HashMap<>();
+    }
+
+    // Park a car in the parking lot
+    public boolean parkCar(int slot, String carNumber) {
+        if (slot < 1 || slot > capacity) {
+            System.out.println("Invalid slot number. Choose a slot between 1 and " + capacity);
+            return false;
+        }
+        if (parkedCars.containsKey(slot)) {
+            System.out.println("Slot " + slot + " is already occupied.");
+            return false;
+        }
+        parkedCars.put(slot, carNumber);
+        System.out.println("Car " + carNumber + " parked at slot " + slot);
+        return true;
+    }
+
+    // Remove a car from the parking lot
+    public boolean removeCar(int slot) {
+        if (!parkedCars.containsKey(slot)) {
+            System.out.println("No car found at slot " + slot);
+            return false;
+        }
+        String carNumber = parkedCars.remove(slot);
+        System.out.println("Car " + carNumber + " removed from slot " + slot);
+        return true;
+    }
+
+    // Display current parking status
+    public void displayStatus() {
+        System.out.println("Current Parking Status:");
+        for (int i = 1; i <= capacity; i++) {
+            if (parkedCars.containsKey(i)) {
+                System.out.println("Slot " + i + ": " + parkedCars.get(i));
+            } else {
+                System.out.println("Slot " + i + ": Empty");
+            }
+        }
+    }
+}
+
+public class ParkingLotApp {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        System.out.print("Enter the capacity of the parking lot: ");
+        int capacity = scanner.nextInt();
+
+        ParkingLot parkingLot = new ParkingLot(capacity);
+        while (true) {
+            System.out.println("\nChoose an action:");
+            System.out.println("1. Park a car");
+            System.out.println("2. Remove a car");
+            System.out.println("3. Display parking lot status");
+            System.out.println("4. Exit");
+            System.out.print("Your choice: ");
+            int choice = scanner.nextInt();
+
+            switch (choice) {
+                case 1:
+                    System.out.print("Enter slot number to park the car: ");
+                    int slotToPark = scanner.nextInt();
+                    System.out.print("Enter car number: ");
+                    String carNumber = scanner.next();
+                    parkingLot.parkCar(slotToPark, carNumber);
+                    break;
+                case 2:
+                    System.out.print("Enter slot number to remove the car: ");
+                    int slotToRemove = scanner.nextInt();
+                    parkingLot.removeCar(slotToRemove);
+                    break;
+                case 3:
+                    parkingLot.displayStatus();
+                    break;
+                case 4:
+                    System.out.println("Exiting...");
+                    scanner.close();
+                    System.exit(0);
+                default:
+                    System.out.println("Invalid choice. Please choose a valid action.");
+            }
+        }
+    }
+}

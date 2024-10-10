@@ -1,0 +1,95 @@
+Sure! Here's an implementation example of a basic queuing system similar to Amazon SQS using core Java. The system includes a producer-consumer pattern where messages can be added to a queue and later processed.
+
+Java Queuing System
+This implementation uses a MessageQueue class with sendMessage() and receiveMessage() methods, managing the queue using locks and conditions for thread safety. It simulates a basic queuing system with producers adding messages and consumers processing them.
+
+If you need more advanced features like visibility timeout, message retention, or delayed delivery, let me know, and we can extend this implementation further!
+
+
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+class MessageQueue {
+    private final Queue<String> queue = new LinkedList<>();
+    private final int capacity;
+    private final Lock lock = new ReentrantLock();
+    private final Condition notFull = lock.newCondition();
+    private final Condition notEmpty = lock.newCondition();
+
+    public MessageQueue(int capacity) {
+        this.capacity = capacity;
+    }
+
+    public void sendMessage(String message) throws InterruptedException {
+        lock.lock();
+        try {
+            while (queue.size() == capacity) {
+                notFull.await();
+            }
+            queue.add(message);
+            System.out.println("Message sent: " + message);
+            notEmpty.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public String receiveMessage() throws InterruptedException {
+        lock.lock();
+        try {
+            while (queue.isEmpty()) {
+                notEmpty.await();
+            }
+            String message = queue.poll();
+            System.out.println("Message received: " + message);
+            notFull.signalAll();
+            return message;
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+
+public class SimpleQueueSystem {
+    public static void main(String[] args) {
+        MessageQueue messageQueue = new MessageQueue(10);
+        ExecutorService executorService = Executors.newFixedThreadPool(4);
+
+        // Producers
+        Runnable producer = () -> {
+            for (int i = 0; i < 20; i++) {
+                try {
+                    messageQueue.sendMessage("Message " + i);
+                    Thread.sleep(100); // Simulate delay
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+
+        // Consumers
+        Runnable consumer = () -> {
+            for (int i = 0; i < 10; i++) {
+                try {
+                    messageQueue.receiveMessage();
+                    Thread.sleep(150); // Simulate processing time
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+
+        // Execute producers and consumers
+        executorService.execute(producer);
+        executorService.execute(producer);
+        executorService.execute(consumer);
+        executorService.execute(consumer);
+
+        executorService.shutdown();
+    }
+}

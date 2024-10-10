@@ -1,0 +1,103 @@
+
+Edited
+I've added more advanced features, including driver ratings, vehicle types, and rider preferences for vehicle types.
+The ride matching now considers the preferred vehicle type and driver ratings. Let me know if you need further enhancements or additional features!
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+class RideSharingApp {
+    public static void main(String[] args) {
+        RideSharingService rideSharingService = new RideSharingService();
+
+        // Adding drivers
+        rideSharingService.addDriver("John Doe", "Car-1234", 4.8, "Sedan");
+        rideSharingService.addDriver("Jane Smith", "Car-5678", 4.9, "SUV");
+        rideSharingService.addDriver("Mike Johnson", "Car-9101", 4.5, "Hatchback");
+
+        // Rider requesting ride
+        String riderId = UUID.randomUUID().toString();
+        rideSharingService.requestRide(riderId, "Pickup Location", "Dropoff Location", "SUV");
+    }
+}
+
+class Driver {
+    String id;
+    String name;
+    String vehicleInfo;
+    boolean isAvailable;
+    double rating;
+    String vehicleType;
+
+    public Driver(String name, String vehicleInfo, double rating, String vehicleType) {
+        this.id = UUID.randomUUID().toString();
+        this.name = name;
+        this.vehicleInfo = vehicleInfo;
+        this.isAvailable = true;
+        this.rating = rating;
+        this.vehicleType = vehicleType;
+    }
+
+    public void setAvailable(boolean available) {
+        this.isAvailable = available;
+    }
+}
+
+class Rider {
+    String id;
+    String pickupLocation;
+    String dropoffLocation;
+    String preferredVehicleType;
+
+    public Rider(String id, String pickupLocation, String dropoffLocation, String preferredVehicleType) {
+        this.id = id;
+        this.pickupLocation = pickupLocation;
+        this.dropoffLocation = dropoffLocation;
+        this.preferredVehicleType = preferredVehicleType;
+    }
+}
+
+class RideSharingService {
+    private List<Driver> drivers;
+    private List<Rider> riders;
+
+    public RideSharingService() {
+        this.drivers = new ArrayList<>();
+        this.riders = new ArrayList<>();
+    }
+
+    public void addDriver(String name, String vehicleInfo, double rating, String vehicleType) {
+        Driver driver = new Driver(name, vehicleInfo, rating, vehicleType);
+        drivers.add(driver);
+        System.out.println("Driver added: " + name + " with vehicle " + vehicleInfo + " (" + vehicleType + ") and rating " + rating);
+    }
+
+    public void requestRide(String riderId, String pickupLocation, String dropoffLocation, String preferredVehicleType) {
+        Rider rider = new Rider(riderId, pickupLocation, dropoffLocation, preferredVehicleType);
+        riders.add(rider);
+
+        Optional<Driver> availableDriver = findAvailableDriver(preferredVehicleType);
+        if (availableDriver.isPresent()) {
+            Driver driver = availableDriver.get();
+            driver.setAvailable(false);
+            System.out.println("Ride confirmed: Driver " + driver.name + " assigned to Rider " + rider.id);
+        } else {
+            System.out.println("No drivers available at the moment. Please try again later.");
+        }
+    }
+
+    private Optional<Driver> findAvailableDriver(String preferredVehicleType) {
+        return drivers.stream()
+                .filter(driver -> driver.isAvailable && driver.vehicleType.equalsIgnoreCase(preferredVehicleType))
+                .sorted(Comparator.comparingDouble(driver -> -driver.rating))
+                .findFirst();
+    }
+
+    public List<Driver> getAvailableDrivers() {
+        return drivers.stream().filter(driver -> driver.isAvailable).collect(Collectors.toList());
+    }
+}

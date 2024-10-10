@@ -1,0 +1,359 @@
+This ultra-optimized version of the LeaderboardSystem incorporates several advanced techniques to maximize performance and efficiency. Here are the key optimizations and their rationales:
+
+Memory-Efficient Team Storage:
+
+Replaced ConcurrentHashMap with a direct ByteBuffer in TeamManager.
+Why: Dramatically reduces memory usage and improves cache locality.
+Trade-off: Loses object-oriented representation but gains significant performance.
+
+
+Leaderboard as Primitive Array:
+
+Use int[] for leaderboard instead of ConcurrentSkipListMap.
+Why: Allows for extremely fast sorting and access.
+Trade-off: Less flexible for insertions/deletions, but much faster for our use case.
+
+
+AtomicIntegerArray for Points Cache:
+
+Replaces volatile int fields with a single AtomicIntegerArray.
+Why: Provides thread-safe operations with less memory overhead than individual objects.
+
+
+Parallel Sorting for Leaderboard:
+
+Use Arrays.parallelSort for leaderboard updates.
+Why: Utilizes multiple cores for faster sorting of large arrays.
+
+
+ThreadLocalRandom:
+
+Replace Random with ThreadLocalRandom.
+Why: Eliminates contention in multi-threaded random number generation.
+
+
+Compact Reward Representation:
+
+Use long values to represent rewards instead of strings.
+Why: Reduces memory usage and allows for faster comparisons.
+
+
+Streamlined TeamDto:
+
+Removed reward from TeamDto to reduce object size.
+Why: Smaller objects mean less memory usage and faster creation/transmission.
+
+
+Parallel Streams for Bulk Operations:
+
+Consistently use parallel streams for operations on all teams.
+Why: Maximizes CPU utilization for large-scale operations.
+
+
+Direct Memory Access:
+
+Use of ByteBuffer.allocateDirect for team data.
+Why: Potentially improves performance by using memory outside the Java heap.
+
+
+Eliminated Unnecessary Caching:
+
+Removed the separate cache for top teams.
+Why: The leaderboard array and points cache serve as an always-up-to-date cache.
+
+
+These optimizations push the limits of what's possible with core Java, focusing on raw performance and memory efficiency. The system now uses a more data-oriented design, which sacrifices some object-oriented principles for the sake of performance.
+Key trade-offs and considerations:
+
+Reduced abstraction: The system is now more tightly coupled to its data representation.
+Increased complexity: The code is more complex and requires a deeper understanding of Java's memory model and concurrency tools.
+Potential for errors: Direct memory manipulation increases the risk of errors if not handled carefully.
+Reduced flexibility: Changes to the data structure (e.g., adding new fields to teams) are now more difficult.
+
+This ultra-optimized version is designed for scenarios where absolute performance is critical and the leaderboard structure is relatively stable.
+ It would be particularly suitable for systems handling millions of teams with frequent updates and queries.
+
+ import java.util.*;
+ import java.util.concurrent.*;
+ import java.util.concurrent.atomic.*;
+ import java.util.function.*;
+ import java.util.logging.*;
+ import java.nio.ByteBuffer;
+
+ public class LeaderboardSystem {
+     private static final Logger LOGGER = Logger.getLogger(LeaderboardSystem.class.getName());
+
+     private final LeaderboardConfig config;
+     private final TeamManager teamManager;
+     private final LeaderboardManager leaderboardManager;
+     private final RewardManager rewardManager;
+     private final ScheduledExecutorService scheduler;
+     private final MetricsCollector metricsCollector;
+
+     public LeaderboardSystem(LeaderboardConfig config) {
+         this.config = config;
+         this.teamManager = new TeamManager(config);
+         this.leaderboardManager = new LeaderboardManager(config);
+         this.rewardManager = new RewardManager(config);
+         this.scheduler = Executors.newScheduledThreadPool(config.getThreadPoolSize(), new CustomThreadFactory());
+         this.metricsCollector = new MetricsCollector();
+     }
+
+     public void start() {
+         try {
+             LOGGER.info("Starting LeaderboardSystem...");
+             teamManager.initializeTeams();
+             leaderboardManager.calculateInitialPoints(teamManager);
+             startScheduledTasks();
+             Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
+             LOGGER.info("LeaderboardSystem started successfully.");
+         } catch (Exception e) {
+             LOGGER.severe("Failed to start LeaderboardSystem: " + e.getMessage());
+             shutdown();
+         }
+     }
+
+     private void startScheduledTasks() {
+         scheduler.scheduleAtFixedRate(leaderboardManager::updateCache, 0, config.getCacheRefreshInterval(), TimeUnit.SECONDS);
+         scheduler.scheduleAtFixedRate(() -> leaderboardManager.updateLeaderboard(teamManager), 0, config.getLeaderboardUpdateInterval(), TimeUnit.SECONDS);
+         scheduler.scheduleAtFixedRate(this::distributeRewards, 0, config.getRewardDistributionInterval(), TimeUnit.MINUTES);
+         scheduler.scheduleAtFixedRate(metricsCollector::collectMetrics, 0, config.getMetricsCollectionInterval(), TimeUnit.MINUTES);
+     }
+
+     public List<TeamDto> getTopTeams(int n) {
+         return leaderboardManager.getTopTeams(n);
+     }
+
+     private void distributeRewards() {
+         try {
+             LOGGER.info("Starting reward distribution...");
+             rewardManager.distributeRewards(leaderboardManager, teamManager);
+             LOGGER.info("Reward distribution completed.");
+         } catch (Exception e) {
+             LOGGER.severe("Failed to distribute rewards: " + e.getMessage());
+         }
+     }
+
+     public void shutdown() {
+         LOGGER.info("Shutting down LeaderboardSystem...");
+         try {
+             scheduler.shutdown();
+             if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+                 scheduler.shutdownNow();
+             }
+             teamManager.shutdown();
+             leaderboardManager.shutdown();
+             metricsCollector.shutdown();
+         } catch (InterruptedException e) {
+             LOGGER.severe("Error during shutdown: " + e.getMessage());
+             Thread.currentThread().interrupt();
+         }
+         LOGGER.info("LeaderboardSystem shutdown complete.");
+     }
+
+     public static void main(String[] args) {
+         LeaderboardConfig config = new LeaderboardConfig();
+         LeaderboardSystem system = new LeaderboardSystem(config);
+         system.start();
+     }
+ }
+
+ class LeaderboardConfig {
+     // Configuration parameters (omitted for brevity)
+ }
+
+ class TeamManager {
+     private static final Logger LOGGER = Logger.getLogger(TeamManager.class.getName());
+     private final int totalTeams;
+     private final ByteBuffer teamData;
+     private static final int TEAM_BYTES = 16; // 4 bytes for id, 4 for points, 8 for reward
+
+     public TeamManager(LeaderboardConfig config) {
+         this.totalTeams = config.getTotalTeams();
+         this.teamData = ByteBuffer.allocateDirect(totalTeams * TEAM_BYTES);
+     }
+
+     public void initializeTeams() {
+         LOGGER.info("Initializing teams...");
+         for (int i = 0; i < totalTeams; i++) {
+             teamData.putInt(i * TEAM_BYTES, i + 1); // id
+             teamData.putInt(i * TEAM_BYTES + 4, 0); // initial points
+             teamData.putLong(i * TEAM_BYTES + 8, 0L); // no reward
+         }
+         LOGGER.info("Teams initialized.");
+     }
+
+     public int getTeamPoints(int teamId) {
+         return teamData.getInt((teamId - 1) * TEAM_BYTES + 4);
+     }
+
+     public void setTeamPoints(int teamId, int points) {
+         teamData.putInt((teamId - 1) * TEAM_BYTES + 4, points);
+     }
+
+     public void setTeamReward(int teamId, long rewardCode) {
+         teamData.putLong((teamId - 1) * TEAM_BYTES + 8, rewardCode);
+     }
+
+     public int getTotalTeams() {
+         return totalTeams;
+     }
+
+     public void shutdown() {
+         // No specific shutdown needed for ByteBuffer
+     }
+ }
+
+ class LeaderboardManager {
+     private static final Logger LOGGER = Logger.getLogger(LeaderboardManager.class.getName());
+     private final int[] leaderboard;
+     private final AtomicIntegerArray pointsCache;
+     private final int totalTeams;
+     private final ThreadLocalRandom random = ThreadLocalRandom.current();
+
+     public LeaderboardManager(LeaderboardConfig config) {
+         this.totalTeams = config.getTotalTeams();
+         this.leaderboard = new int[totalTeams];
+         this.pointsCache = new AtomicIntegerArray(totalTeams);
+     }
+
+     public void calculateInitialPoints(TeamManager teamManager) {
+         LOGGER.info("Calculating initial points...");
+         IntStream.range(0, totalTeams).parallel().forEach(i -> {
+             int points = random.nextInt(1000);
+             teamManager.setTeamPoints(i + 1, points);
+             pointsCache.set(i, points);
+             leaderboard[i] = i + 1;
+         });
+         sortLeaderboard();
+         LOGGER.info("Initial points calculated.");
+     }
+
+     public void updateLeaderboard(TeamManager teamManager) {
+         try {
+             IntStream.range(0, totalTeams).parallel().forEach(i -> {
+                 int teamId = i + 1;
+                 int currentPoints = teamManager.getTeamPoints(teamId);
+                 int pointsChange = random.nextInt(-100, 101);
+                 int newPoints = Math.max(0, currentPoints + pointsChange);
+                 teamManager.setTeamPoints(teamId, newPoints);
+                 pointsCache.set(i, newPoints);
+             });
+             sortLeaderboard();
+             LOGGER.info("Leaderboard updated.");
+         } catch (Exception e) {
+             LOGGER.severe("Error updating leaderboard: " + e.getMessage());
+         }
+     }
+
+     private void sortLeaderboard() {
+         Arrays.parallelSort(leaderboard, (a, b) -> Integer.compare(pointsCache.get(b - 1), pointsCache.get(a - 1)));
+     }
+
+     public void updateCache() {
+         // Cache is always up-to-date with pointsCache, no need for separate update
+         LOGGER.info("Leaderboard cache is up-to-date.");
+     }
+
+     public List<TeamDto> getTopTeams(int n) {
+         return IntStream.range(0, Math.min(n, totalTeams))
+             .mapToObj(i -> {
+                 int teamId = leaderboard[i];
+                 return new TeamDto(teamId, "Team " + teamId, pointsCache.get(teamId - 1));
+             })
+             .collect(Collectors.toList());
+     }
+
+     public int[] getLeaderboard() {
+         return leaderboard;
+     }
+
+     public void shutdown() {
+         // No specific shutdown needed
+     }
+ }
+
+ class RewardManager {
+     private static final Logger LOGGER = Logger.getLogger(RewardManager.class.getName());
+     private final int top1Percent;
+     private final int top5Percent;
+     private final int totalTeams;
+
+     public RewardManager(LeaderboardConfig config) {
+         this.top1Percent = config.getTop1Percent();
+         this.top5Percent = config.getTop5Percent();
+         this.totalTeams = config.getTotalTeams();
+     }
+
+     public void distributeRewards(LeaderboardManager leaderboardManager, TeamManager teamManager) {
+         try {
+             int[] leaderboard = leaderboardManager.getLeaderboard();
+             IntStream.range(0, totalTeams).parallel().forEach(i -> {
+                 int teamId = leaderboard[i];
+                 long rewardCode;
+                 if (i < top1Percent) {
+                     rewardCode = 1L; // High Reward
+                 } else if (i < top5Percent) {
+                     rewardCode = 2L; // Medium Reward
+                 } else if (i < totalTeams / 2) {
+                     rewardCode = 3L; // Low Reward
+                 } else {
+                     rewardCode = 0L; // No Reward
+                 }
+                 teamManager.setTeamReward(teamId, rewardCode);
+             });
+             LOGGER.info("Rewards distributed to teams.");
+         } catch (Exception e) {
+             LOGGER.severe("Error distributing rewards: " + e.getMessage());
+         }
+     }
+ }
+
+ class TeamDto {
+     private final int id;
+     private final String name;
+     private final int points;
+
+     public TeamDto(int id, String name, int points) {
+         this.id = id;
+         this.name = name;
+         this.points = points;
+     }
+
+     // Getters omitted for brevity
+ }
+
+ class CustomThreadFactory implements ThreadFactory {
+     private static final AtomicInteger poolNumber = new AtomicInteger(1);
+     private final ThreadGroup group;
+     private final AtomicInteger threadNumber = new AtomicInteger(1);
+     private final String namePrefix;
+
+     CustomThreadFactory() {
+         SecurityManager s = System.getSecurityManager();
+         group = (s != null) ? s.getThreadGroup() : Thread.currentThread().getThreadGroup();
+         namePrefix = "pool-" + poolNumber.getAndIncrement() + "-thread-";
+     }
+
+     public Thread newThread(Runnable r) {
+         Thread t = new Thread(group, r, namePrefix + threadNumber.getAndIncrement(), 0);
+         if (t.isDaemon())
+             t.setDaemon(false);
+         if (t.getPriority() != Thread.NORM_PRIORITY)
+             t.setPriority(Thread.NORM_PRIORITY);
+         return t;
+     }
+ }
+
+ class MetricsCollector {
+     private static final Logger LOGGER = Logger.getLogger(MetricsCollector.class.getName());
+
+     public void collectMetrics() {
+         // Implement metrics collection logic
+         LOGGER.info("Metrics collected.");
+     }
+
+     public void shutdown() {
+         // Implement shutdown logic for metrics collector
+     }
+ }

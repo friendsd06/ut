@@ -1,0 +1,15 @@
+Subject: Update on Delays in Preprod Build Deployment
+
+Hi Team,
+
+I wanted to provide an update on why our preprod build deployments are taking longer than expected recently. We’ve noticed a few recurring issues that are impacting the process:
+
+Julee Issues: Occasionally, builds get stuck due to problems with Julee. We’re actively monitoring this and working on solutions.
+
+ECR Cache Configuration: We’ve identified a pattern where deployments fail when certain ECR cache-related configurations are missing. This leads to an ECR Cache Instance Creation Error, which halts the build.
+
+Calico Pod Crashes: After encountering the ECR Cache error a few times, we’ve seen Calico pods crash. Unfortunately, the Calico pod image gets cached, and when we retry, it crashes again due to this cached image.
+
+To resolve this, we’ve had to disable the ECR cache and retry the build multiple times, often taking 2-3 attempts to achieve a successful deployment.
+
+We’re continuing to investigate these issues to find a more permanent solution. Thank you for your patience, and I’ll keep you updated on our progress.

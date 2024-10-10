@@ -1,0 +1,413 @@
+This world-class implementation of the Distributed Search System incorporates several advanced features and best practices:
+
+Scalability: Uses Akka Cluster for distributed computing, allowing easy scaling of the system.
+High Performance: Utilizes Apache Lucene for efficient indexing and searching.
+Fault Tolerance: Implements ZooKeeper for distributed locking and coordination.
+Asynchron
+
+package com.worldclass.search;
+
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.*;
+import java.util.stream.*;
+import java.time.*;
+import java.util.logging.*;
+import java.security.*;
+import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.datatype.jsr310.*;
+import io.reactivex.rxjava3.core.*;
+import io.reactivex.rxjava3.schedulers.*;
+import org.apache.lucene.analysis.standard.*;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
+import org.apache.zookeeper.*;
+import akka.actor.*;
+import akka.cluster.*;
+import akka.pattern.*;
+import akka.util.*;
+import scala.concurrent.duration.*;
+
+public class WorldClassDistributedSearchSystem {
+
+    private static final Logger LOGGER = Logger.getLogger(WorldClassDistributedSearchSystem.class.getName());
+
+    public static void main(String[] args) {
+        LOGGER.info("Initializing World-Class Distributed Search System...");
+        DistributedSearchCluster cluster = DistributedSearchCluster.create();
+        cluster.start();
+        LOGGER.info("System initialized and ready for operations.");
+    }
+}
+
+interface Document {
+    String getId();
+    String getContent();
+    Instant getTimestamp();
+    long getVersion();
+    Map<String, String> getMetadata();
+    Document updateContent(String newContent);
+}
+
+class DocumentImpl implements Document, Serializable {
+    private static final long serialVersionUID = 1L;
+    private final String id;
+    private final String content;
+    private final Instant timestamp;
+    private final long version;
+    private final Map<String, String> metadata;
+
+    @JsonCreator
+    public DocumentImpl(
+            @JsonProperty("id") String id,
+            @JsonProperty("content") String content,
+            @JsonProperty("timestamp") Instant timestamp,
+            @JsonProperty("version") long version,
+            @JsonProperty("metadata") Map<String, String> metadata) {
+        this.id = id;
+        this.content = content;
+        this.timestamp = timestamp;
+        this.version = version;
+        this.metadata = new ConcurrentHashMap<>(metadata);
+    }
+
+    @Override public String getId() { return id; }
+    @Override public String getContent() { return content; }
+    @Override public Instant getTimestamp() { return timestamp; }
+    @Override public long getVersion() { return version; }
+    @Override public Map<String, String> getMetadata() { return Collections.unmodifiableMap(metadata); }
+
+    @Override
+    public Document updateContent(String newContent) {
+        return new DocumentImpl(id, newContent, Instant.now(), version + 1, new HashMap<>(metadata));
+    }
+}
+
+interface Index extends AutoCloseable {
+    void addDocument(Document doc);
+    void updateDocument(Document doc);
+    void deleteDocument(String id);
+    Optional<Document> getDocument(String id);
+    List<Document> search(Query query);
+    void commit();
+    void optimize();
+}
+
+class LuceneIndex implements Index {
+    private final Directory directory;
+    private final IndexWriter writer;
+    private final SearcherManager searcherManager;
+
+    public LuceneIndex(Path indexPath) throws IOException {
+        directory = FSDirectory.open(indexPath);
+        IndexWriterConfig config = new IndexWriterConfig(new StandardAnalyzer());
+        writer = new IndexWriter(directory, config);
+        searcherManager = new SearcherManager(writer, null);
+    }
+
+    @Override
+    public void addDocument(Document doc) {
+        try {
+            writer.addDocument(convertToLuceneDocument(doc));
+            writer.commit();
+            searcherManager.maybeRefresh();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to add document", e);
+        }
+    }
+
+    @Override
+    public void updateDocument(Document doc) {
+        try {
+            writer.updateDocument(new Term("id", doc.getId()), convertToLuceneDocument(doc));
+            writer.commit();
+            searcherManager.maybeRefresh();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to update document", e);
+        }
+    }
+
+    @Override
+    public void deleteDocument(String id) {
+        try {
+            writer.deleteDocuments(new Term("id", id));
+            writer.commit();
+            searcherManager.maybeRefresh();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to delete document", e);
+        }
+    }
+
+    @Override
+    public Optional<Document> getDocument(String id) {
+        try {
+            IndexSearcher searcher = searcherManager.acquire();
+            try {
+                TopDocs tops = searcher.search(new TermQuery(new Term("id", id)), 1);
+                if (tops.scoreDocs.length > 0) {
+                    org.apache.lucene.document.Document luceneDoc = searcher.doc(tops.scoreDocs[0].doc);
+                    return Optional.of(convertFromLuceneDocument(luceneDoc));
+                }
+                return Optional.empty();
+            } finally {
+                searcherManager.release(searcher);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to get document", e);
+        }
+    }
+
+    @Override
+    public List<Document> search(Query query) {
+        try {
+            IndexSearcher searcher = searcherManager.acquire();
+            try {
+                TopDocs tops = searcher.search(query, 100); // Limit to top 100 results
+                List<Document> results = new ArrayList<>();
+                for (ScoreDoc scoreDoc : tops.scoreDocs) {
+                    org.apache.lucene.document.Document luceneDoc = searcher.doc(scoreDoc.doc);
+                    results.add(convertFromLuceneDocument(luceneDoc));
+                }
+                return results;
+            } finally {
+                searcherManager.release(searcher);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to perform search", e);
+        }
+    }
+
+    @Override
+    public void commit() {
+        try {
+            writer.commit();
+            searcherManager.maybeRefresh();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to commit index", e);
+        }
+    }
+
+    @Override
+    public void optimize() {
+        try {
+            writer.forceMerge(1);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to optimize index", e);
+        }
+    }
+
+    @Override
+    public void close() throws Exception {
+        searcherManager.close();
+        writer.close();
+        directory.close();
+    }
+
+    private org.apache.lucene.document.Document convertToLuceneDocument(Document doc) {
+        org.apache.lucene.document.Document luceneDoc = new org.apache.lucene.document.Document();
+        luceneDoc.add(new StringField("id", doc.getId(), Field.Store.YES));
+        luceneDoc.add(new TextField("content", doc.getContent(), Field.Store.YES));
+        luceneDoc.add(new LongPoint("timestamp", doc.getTimestamp().toEpochMilli()));
+        luceneDoc.add(new NumericDocValuesField("version", doc.getVersion()));
+        doc.getMetadata().forEach((key, value) ->
+            luceneDoc.add(new StringField(key, value, Field.Store.YES)));
+        return luceneDoc;
+    }
+
+    private Document convertFromLuceneDocument(org.apache.lucene.document.Document luceneDoc) {
+        String id = luceneDoc.get("id");
+        String content = luceneDoc.get("content");
+        Instant timestamp = Instant.ofEpochMilli(Long.parseLong(luceneDoc.get("timestamp")));
+        long version = Long.parseLong(luceneDoc.get("version"));
+        Map<String, String> metadata = new HashMap<>();
+        luceneDoc.getFields().stream()
+            .filter(field -> !Arrays.asList("id", "content", "timestamp", "version").contains(field.name()))
+            .forEach(field -> metadata.put(field.name(), field.stringValue()));
+        return new DocumentImpl(id, content, timestamp, version, metadata);
+    }
+}
+
+interface DistributedLock {
+    boolean acquire(String lockName, Duration timeout);
+    void release(String lockName);
+}
+
+class ZooKeeperDistributedLock implements DistributedLock {
+    private final ZooKeeper zk;
+    private final String lockPath;
+
+    public ZooKeeperDistributedLock(String zkConnectString, String lockPath) throws IOException {
+        this.zk = new ZooKeeper(zkConnectString, 3000, event -> {});
+        this.lockPath = lockPath;
+    }
+
+    @Override
+    public boolean acquire(String lockName, Duration timeout) {
+        String path = lockPath + "/" + lockName;
+        try {
+            zk.create(path, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+            return true;
+        } catch (KeeperException.NodeExistsException e) {
+            return false;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to acquire lock", e);
+        }
+    }
+
+    @Override
+    public void release(String lockName) {
+        String path = lockPath + "/" + lockName;
+        try {
+            zk.delete(path, -1);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to release lock", e);
+        }
+    }
+}
+
+interface ClusterManager {
+    void join();
+    void leave();
+    boolean isMaster();
+    List<String> getMembers();
+}
+
+class AkkaClusterManager implements ClusterManager {
+    private final ActorSystem system;
+    private final Cluster cluster;
+
+    public AkkaClusterManager(String systemName, String seedNodes) {
+        Config config = ConfigFactory.parseString("akka.cluster.seed-nodes = [" + seedNodes + "]")
+                .withFallback(ConfigFactory.load());
+        system = ActorSystem.create(systemName, config);
+        cluster = Cluster.get(system);
+    }
+
+    @Override
+    public void join() {
+        cluster.join(cluster.selfAddress());
+    }
+
+    @Override
+    public void leave() {
+        cluster.leave(cluster.selfAddress());
+    }
+
+    @Override
+    public boolean isMaster() {
+        return cluster.state().getMembers().iterator().next().address().equals(cluster.selfAddress());
+    }
+
+    @Override
+    public List<String> getMembers() {
+        return StreamSupport.stream(cluster.state().getMembers().spliterator(), false)
+                .map(member -> member.address().toString())
+                .collect(Collectors.toList());
+    }
+}
+
+class DistributedSearchCluster {
+    private final ClusterManager clusterManager;
+    private final DistributedLock distributedLock;
+    private final Map<String, Index> shards;
+    private final ExecutorService executorService;
+
+    private DistributedSearchCluster(ClusterManager clusterManager, DistributedLock distributedLock) {
+        this.clusterManager = clusterManager;
+        this.distributedLock = distributedLock;
+        this.shards = new ConcurrentHashMap<>();
+        this.executorService = Executors.newWorkStealingPool();
+    }
+
+    public static DistributedSearchCluster create() {
+        try {
+            ClusterManager clusterManager = new AkkaClusterManager("DistributedSearchSystem", "akka://DistributedSearchSystem@127.0.0.1:2551");
+            DistributedLock distributedLock = new ZooKeeperDistributedLock("localhost:2181", "/distributed-search-locks");
+            return new DistributedSearchCluster(clusterManager, distributedLock);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create DistributedSearchCluster", e);
+        }
+    }
+
+    public void start() {
+        clusterManager.join();
+        if (clusterManager.isMaster()) {
+            initializeShards();
+        }
+        startHttpServer();
+    }
+
+    private void initializeShards() {
+        // In a real-world scenario, shard initialization would be more complex
+        // and would likely involve some form of configuration management
+        for (int i = 0; i < 4; i++) {
+            String shardId = "shard-" + i;
+            try {
+                shards.put(shardId, new LuceneIndex(Paths.get("/tmp/index-" + shardId)));
+            } catch (IOException e) {
+                LOGGER.severe("Failed to initialize shard " + shardId + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private void startHttpServer() {
+        // In a production system, we would start a proper HTTP server here
+        // For simplicity, we'll just log that we're ready to accept requests
+        LOGGER.info("HTTP server started and ready to accept requests");
+    }
+
+    public CompletableFuture<List<Document>> search(String query) {
+        return CompletableFuture.supplyAsync(() -> {
+            List<CompletableFuture<List<Document>>> futures = shards.values().stream()
+                .map(index -> CompletableFuture.supplyAsync(() -> index.search(new TermQuery(new Term("content", query))), executorService))
+                .collect(Collectors.toList());
+
+            return futures.stream()
+                .flatMap(future -> future.join().stream())
+                .sorted(Comparator.comparing(Document::getTimestamp).reversed())
+                .collect(Collectors.toList());
+        }, executorService);
+    }
+
+    public CompletableFuture<Void> indexDocument(Document document) {
+        return CompletableFuture.runAsync(() -> {
+            String shardId = selectShard(document.getId());
+            Index shard = shards.get(shardId);
+            if (shard != null) {
+                shard.addDocument(document);
+            } else {
+                throw new RuntimeException("Shard not found: " + shardId);
+            }
+        }, executorService);
+    }
+
+    private String selectShard(String documentId) {
+        // Simple hash-based shard selection
+        int shardIndex = Math.abs(documentId.hashCode() % shards.size());
+        return "shard-" + shardIndex;
+    }
+
+    public void shutdown() {
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        clusterManager.leave();
+        shards.values().forEach(index -> {
+            try {
+                index.close();
+            } catch (Exception e) {
+                LOGGER.warning("Failed to close index: " + e.getMessage());
+            }
+        });
+    }
+}

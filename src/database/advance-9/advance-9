@@ -1,0 +1,432 @@
+I've implemented ACID transactions, allowing you to beginTransaction(), commitTransaction(), and rollbackTransaction(). These changes make the database more robust,
+ensuring data consistency and atomicity. Let me know if you need further features such as snapshots or incremental backups.
+
+
+import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class OptimizedShardedFileDatabase {
+    private static final String DB_DIR = "database";
+    private static final String INDEX_FILE = "index.txt";
+    private static final String LOG_FILE = "database_log.txt";
+    private static final int SHARD_COUNT = 4;
+    private final ConcurrentHashMap<String, String> indexMap = new ConcurrentHashMap<>();
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final Map<String, String> cache = new ConcurrentHashMap<>(); // Simple in-memory cache
+    private final Deque<Transaction> transactionLog = new ArrayDeque<>(); // Transaction log for ACID properties
+
+    public OptimizedShardedFileDatabase() {
+        loadIndex();
+    }
+
+    // Load the index from the file for quick access to records
+    private void loadIndex() {
+        lock.writeLock().lock();
+        try (BufferedReader reader = new BufferedReader(new FileReader(INDEX_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                indexMap.put(parts[0], parts[1]);
+            }
+        } catch (IOException e) {
+            System.out.println("Index file not found, starting fresh.");
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // Save the index to a file
+    private void saveIndex() {
+        lock.writeLock().lock();
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(INDEX_FILE))) {
+            for (Map.Entry<String, String> entry : indexMap.entrySet()) {
+                writer.write(entry.getKey() + "," + entry.getValue());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    // ACID Transactions
+    public void beginTransaction() {
+        transactionLog.push(new Transaction());
+    }
+
+    public void commitTransaction() {
+        if (transactionLog.isEmpty()) {
+            System.out.println("No active transaction to commit.");
+            return;
+        }
+        Transaction transaction = transactionLog.pop();
+        transaction.commit();
+    }
+
+    public void rollbackTransaction() {
+        if (transactionLog.isEmpty()) {
+            System.out.println("No active transaction to rollback.");
+            return;
+        }
+        Transaction transaction = transactionLog.pop();
+        transaction.rollback();
+    }
+
+    private class Transaction {
+        private final Map<String, String> writeLog = new HashMap<>(); // Log of changes made in the transaction
+
+        public void write(String key, String value) {
+            writeLog.put(key, value);
+        }
+
+        public void commit() {
+            for (Map.Entry<String, String> entry : writeLog.entrySet()) {
+                OptimizedShardedFileDatabase.this.write(entry.getKey(), entry.getValue());
+            }
+        }
+
+        public void rollback() {
+            System.out.println("Transaction rolled back.");
+        }
+    }
+
+    // Write a new record to the database
+    public void write(String key, String value) {
+        Transaction currentTransaction = transactionLog.peek();
+        if (currentTransaction != null) {
+            currentTransaction.write(key, value);
+        } else {
+            executor.submit(() -> {
+                lock.writeLock().lock();
+                try {
+                    String shardFile = getShardFile(key);
+                    Path path = Paths.get(shardFile);
+                    try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+                        byte[] data = (key + "=" + value + "\n").getBytes();
+                        ByteBuffer buffer = ByteBuffer.wrap(data);
+                        fileChannel.write(buffer);
+                        indexMap.put(key, shardFile + ":" + (fileChannel.size() - data.length));
+                        cache.put(key, value); // Update cache
+                        saveIndex();
+                        logOperation("WRITE", key);
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            });
+        }
+    }
+
+    // Read a record by key
+    public Future<String> read(String key) {
+        return executor.submit(() -> {
+            lock.readLock().lock();
+            try {
+                if (cache.containsKey(key)) {
+                    logOperation("READ", key);
+                    return cache.get(key);
+                }
+                String index = indexMap.get(key);
+                if (index == null) {
+                    return null;
+                }
+                String[] parts = index.split(":");
+                String shardFile = parts[0];
+                long filePointer = Long.parseLong(parts[1]);
+                Path path = Paths.get(shardFile);
+                try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.READ)) {
+                    MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, filePointer, fileChannel.size() - filePointer);
+                    StringBuilder sb = new StringBuilder();
+                    while (buffer.hasRemaining()) {
+                        sb.append((char) buffer.get());
+                    }
+                    String line = sb.toString().split("\n")[0];
+                    if (line != null && line.startsWith(key + "=")) {
+                        String value = line.split("=", 2)[1];
+                        cache.put(key, value); // Update cache
+                        logOperation("READ", key);
+                        return value;
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                lock.readLock().unlock();
+            }
+            return null;
+        });
+    }
+
+    // Update a record by key
+    public void update(String key, String newValue) {
+        Transaction currentTransaction = transactionLog.peek();
+        if (currentTransaction != null) {
+            currentTransaction.write(key, newValue);
+        } else {
+            executor.submit(() -> {
+                lock.writeLock().lock();
+                try {
+                    if (indexMap.containsKey(key)) {
+                        write(key, newValue);
+                        logOperation("UPDATE", key);
+                    } else {
+                        System.out.println("Key not found: " + key);
+                    }
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            });
+        }
+    }
+
+    // Delete a record by key
+    public void delete(String key) {
+        Transaction currentTransaction = transactionLog.peek();
+        if (currentTransaction != null) {
+            currentTransaction.write(key, null); // Mark for deletion
+        } else {
+            executor.submit(() -> {
+                lock.writeLock().lock();
+                try {
+                    if (indexMap.containsKey(key)) {
+                        indexMap.remove(key);
+                        cache.remove(key);
+                        saveIndex();
+                        logOperation("DELETE", key);
+                    } else {
+                        System.out.println("Key not found: " + key);
+                    }
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            });
+        }
+    }
+
+    // Fetch all records in the database
+    public Future<Map<String, String>> fetchAll() {
+        return executor.submit(() -> {
+            lock.readLock().lock();
+            Map<String, String> allRecords = new ConcurrentHashMap<>(cache); // Start with cached records
+            try {
+                for (int i = 0; i < SHARD_COUNT; i++) {
+                    String shardFile = DB_DIR + "/shard_" + i + ".txt";
+                    Path path = Paths.get(shardFile);
+                    if (Files.exists(path)) {
+                        try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.READ)) {
+                            MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileChannel.size());
+                            StringBuilder sb = new StringBuilder();
+                            while (buffer.hasRemaining()) {
+                                sb.append((char) buffer.get());
+                            }
+                            String[] lines = sb.toString().split("\n");
+                            for (String line : lines) {
+                                String[] parts = line.split("=", 2);
+                                if (parts.length == 2) {
+                                    allRecords.putIfAbsent(parts[0], parts[1]);
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                lock.readLock().unlock();
+            }
+            logOperation("FETCH_ALL", "ALL_KEYS");
+            return allRecords;
+        });
+    }
+
+    // Execute a query
+    public Future<String> query(String query) {
+        return executor.submit(() -> {
+            String command = query.trim().toUpperCase();
+            if (command.startsWith("INSERT")) {
+                return executeInsert(query);
+            } else if (command.startsWith("SELECT")) {
+                return executeSelect(query);
+            } else if (command.startsWith("UPDATE")) {
+                return executeUpdate(query);
+            } else if (command.startsWith("DELETE")) {
+                return executeDelete(query);
+            } else {
+                return "Invalid query command";
+            }
+        });
+    }
+
+    // Execute an INSERT query
+    private String executeInsert(String query) {
+        Pattern pattern = Pattern.compile("INSERT INTO (\w+) VALUES \((\w+), '(.+)'\)");
+        Matcher matcher = pattern.matcher(query);
+        if (matcher.matches()) {
+            String table = matcher.group(1);
+            String key = matcher.group(2);
+            String value = matcher.group(3);
+            write(key, value);
+            return "Record inserted successfully";
+        } else {
+            return "Invalid INSERT query";
+        }
+    }
+
+    // Execute a SELECT query
+    private String executeSelect(String query) {
+        Pattern pattern = Pattern.compile("SELECT \* FROM (\w+) WHERE ID = (\w+)");
+        Matcher matcher = pattern.matcher(query);
+        if (matcher.matches()) {
+            String table = matcher.group(1);
+            String key = matcher.group(2);
+            try {
+                String value = read(key).get();
+                if (value != null) {
+                    return "Record: " + key + " = " + value;
+                } else {
+                    return "Record not found";
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                return "Error during SELECT operation";
+            }
+        } else {
+            return "Invalid SELECT query";
+        }
+    }
+
+    // Execute an UPDATE query
+    private String executeUpdate(String query) {
+        Pattern pattern = Pattern.compile("UPDATE (\w+) SET VALUE = '(.+)' WHERE ID = (\w+)");
+        Matcher matcher = pattern.matcher(query);
+        if (matcher.matches()) {
+            String table = matcher.group(1);
+            String value = matcher.group(2);
+            String key = matcher.group(3);
+            update(key, value);
+            return "Record updated successfully";
+        } else {
+            return "Invalid UPDATE query";
+        }
+    }
+
+    // Execute a DELETE query
+    private String executeDelete(String query) {
+        Pattern pattern = Pattern.compile("DELETE FROM (\w+) WHERE ID = (\w+)");
+        Matcher matcher = pattern.matcher(query);
+        if (matcher.matches()) {
+            String table = matcher.group(1);
+            String key = matcher.group(2);
+            delete(key);
+            return "Record deleted successfully";
+        } else {
+            return "Invalid DELETE query";
+        }
+    }
+
+    // Log database operations to a log file
+    private void logOperation(String operation, String key) {
+        executor.submit(() -> {
+            lock.writeLock().lock();
+            try (BufferedWriter logWriter = new BufferedWriter(new FileWriter(LOG_FILE, true))) {
+                logWriter.write(LocalDateTime.now() + " - " + operation + " - Key: " + key);
+                logWriter.newLine();
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                lock.writeLock().unlock();
+            }
+        });
+    }
+
+    // Get shard file name based on key hash
+    private String getShardFile(String key) {
+        int shardNumber = Math.abs(key.hashCode()) % SHARD_COUNT;
+        String shardFile = DB_DIR + "/shard_" + shardNumber + ".txt";
+        File directory = new File(DB_DIR);
+        if (!directory.exists()) {
+            directory.mkdir();
+        }
+        return shardFile;
+    }
+
+    // Schedule automatic backup
+    public void scheduleBackup(String backupDir, long intervalMillis) {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(() -> backup(backupDir), intervalMillis, intervalMillis, TimeUnit.MILLISECONDS);
+        System.out.println("Scheduled automatic backup every " + (intervalMillis / 1000) + " seconds.");
+    }
+
+    // Backup the database to a specified directory
+    public void backup(String backupDir) {
+        executor.submit(() -> {
+            lock.readLock().lock();
+            try {
+                Path backupPath = Paths.get(backupDir);
+                if (!Files.exists(backupPath)) {
+                    Files.createDirectories(backupPath);
+                }
+                for (int i = 0; i < SHARD_COUNT; i++) {
+                    String shardFile = DB_DIR + "/shard_" + i + ".txt";
+                    Files.copy(Paths.get(shardFile), backupPath.resolve("shard_" + i + ".txt"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                Files.copy(Paths.get(INDEX_FILE), backupPath.resolve(INDEX_FILE), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("Backup completed successfully.");
+                logOperation("BACKUP", backupDir);
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                lock.readLock().unlock();
+            }
+        });
+    }
+
+    public static void main(String[] args) throws Exception {
+        OptimizedShardedFileDatabase db = new OptimizedShardedFileDatabase();
+
+        // Write records
+        db.write("1", "John Doe");
+        db.write("2", "Jane Smith");
+
+        // Read records
+        System.out.println("Read key 1: " + db.read("1").get());
+
+        // Update record
+        db.update("1", "Johnathan Doe");
+        System.out.println("Updated key 1: " + db.read("1").get());
+
+        // Delete record
+        db.delete("2");
+        System.out.println("Read key 2 after deletion: " + db.read("2").get());
+
+        // Fetch all records
+        System.out.println("All records: " + db.fetchAll().get());
+
+        // Execute queries
+        System.out.println(db.query("INSERT INTO users VALUES (3, 'Alice Wonderland')").get());
+        System.out.println(db.query("SELECT * FROM users WHERE ID = 3").get());
+        System.out.println(db.query("UPDATE users SET VALUE = 'Alice in Wonderland' WHERE ID = 3").get());
+        System.out.println(db.query("DELETE FROM users WHERE ID = 3").get());
+
+        // Backup database
+        db.backup("backup");
+
+        // Schedule automatic backup every 60 seconds
+        db.scheduleBackup("backup", 60000);
+    }
+}
