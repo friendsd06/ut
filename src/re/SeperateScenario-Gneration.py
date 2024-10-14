@@ -56,3 +56,17 @@ CREATE TABLE IF NOT EXISTS loan_data_external (
 USING DELTA
 LOCATION '{delta_path}'
 """)
+
+# Define schema explicitly
+schema = StructType([
+    StructField("loan_id", IntegerType(), True),
+    StructField("customer_id", IntegerType(), True),
+    StructField("amount", DoubleType(), True),
+    StructField("interest_rate", DoubleType(), True),
+    StructField("term", IntegerType(), True),
+    StructField("loan_type", StringType(), True),
+    StructField("status", StringType(), True),
+    StructField("disbursed_date", StringType(), True),  # Use StringType if generating as string dates
+    StructField("due_date", StringType(), True),        # Use StringType if generating as string dates
+    StructField("balance", DoubleType(), True)
+])
