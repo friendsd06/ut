@@ -1,9 +1,10 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, concat_ws, lit, array, size, filter, expr
+from pyspark.sql.functions import col, when, lit, expr, concat_ws, size, array, filter
+from pyspark.sql.types import BooleanType
 
 # Initialize SparkSession
 spark = SparkSession.builder \
-    .appName("Simple Delta Table Comparison with Custom Data") \
+    .appName("Delta Table Comparison Test with Custom Data") \
     .getOrCreate()
 
 # Create two sample DataFrames
@@ -17,59 +18,53 @@ data2 = [
     (2, "B", 25, 200),
     (3, "D", 30, 300)
 ]
-
-# Define columns for DataFrames
 columns = ["id", "column1", "column2", "column3"]
-
-# Create DataFrames
 table1 = spark.createDataFrame(data1, columns)
 table2 = spark.createDataFrame(data2, columns)
 
-# Define columns to include/exclude and join key
-include_columns = ["column1", "column2", "column3"]
-exclude_columns = []  # Keep this empty if no columns are to be excluded
+# Parameters
+include_columns = ["column1", "column2", "column3"]  # Specify columns to include; leave empty for all
+exclude_columns = []  # Columns to exclude, if any
+
+# Define the join key (assuming 'id' is the common column)
 join_key = "id"
 
-# Identify common columns between both tables, excluding the join key
+# Determine columns for comparison
 all_common_columns = [col for col in table1.columns if col in table2.columns and col != join_key]
 
-# Filter columns based on include/exclude lists
-common_columns = [col for col in all_common_columns if col in include_columns]
+# Apply include and exclude filters
+if include_columns:
+    common_columns = [col for col in all_common_columns if col in include_columns]
+else:
+    common_columns = all_common_columns
 common_columns = [col for col in common_columns if col not in exclude_columns]
 
-# Perform a join on the specified join key
-comparison_df = table1.join(table2, on=join_key, how="inner").select(
-    table1.id,
-    *(col(f"table1.{col}").alias(f"table1_{col}") for col in common_columns),
-    *(col(f"table2.{col}").alias(f"table2_{col}") for col in common_columns)
-)
+# Perform a join on the key column
+comparison_df = table1.alias("t1").join(table2.alias("t2"), join_key, "inner")
 
-# Initialize mismatch columns and mismatch arrays for storing mismatches
+# Generate mismatch information for each common column
 for column in common_columns:
-    comparison_df = comparison_df.withColumn(
-        f"{column}_mismatch",
-        when(col(f"table1_{column}") != col(f"table2_{column}"),
-             concat_ws(" -> ", col(f"table1_{column}"), col(f"table2_{column}"))
-             ).otherwise(lit(None))
-    )
+    comparison_df = comparison_df \
+        .withColumn(f"{column}_mismatch",
+                    when(col(f"t1.{column}") != col(f"t2.{column}"),
+                         concat_ws(" -> ", col(f"t1.{column}"), col(f"t2.{column}")))
+                    .otherwise(lit(None)))
 
-# Create an array of all mismatch columns for mismatch count
+# Create an array column with all mismatch columns to count mismatches
 mismatch_columns = [f"{col}_mismatch" for col in common_columns]
 comparison_df = comparison_df.withColumn("mismatch_array", array(*mismatch_columns))
 
-# Count mismatches by filtering non-null elements in the mismatch array
-comparison_df = comparison_df.withColumn("mismatch_count", size(filter(col("mismatch_array"), lambda x: x.isNotNull())))
+# Calculate match and mismatch counts
+comparison_df = comparison_df \
+    .withColumn("mismatch_count", size(filter("mismatch_array", lambda x: x.isNotNull()))) \
+    .withColumn("match_count", lit(len(common_columns)) - col("mismatch_count"))
 
-# Calculate match count based on total columns - mismatch count
-comparison_df = comparison_df.withColumn("match_count", lit(len(common_columns)) - col("mismatch_count"))
+# Concatenate all mismatches into a single summary column
+mismatch_summary_expr = " , ".join(mismatch_columns)
+comparison_df = comparison_df \
+    .withColumn("mismatch_summary", expr(f"concat_ws(',', {mismatch_summary_expr})")) \
+    .filter(col("mismatch_summary").isNotNull()) \
+    .select(join_key, "match_count", "mismatch_count", "mismatch_summary", *mismatch_columns)
 
-# Concatenate mismatches into a summary string
-mismatch_summary_expr = ", ".join(mismatch_columns)
-comparison_df = comparison_df.withColumn("mismatch_summary", expr(f"concat_ws(', ', {mismatch_summary_expr})"))
-
-# Select relevant columns for final output
-final_columns = [join_key, "match_count", "mismatch_count", "mismatch_summary"] + mismatch_columns
-result_df = comparison_df.select(*final_columns)
-
-# Display results
-result_df.show(truncate=False)
+# Display the results
+comparison_df.show(truncate=False)
