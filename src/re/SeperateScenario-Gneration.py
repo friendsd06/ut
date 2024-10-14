@@ -57,6 +57,7 @@ USING DELTA
 LOCATION '{delta_path}'
 """)
 
+from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType, StringType, DateType
 # Define schema explicitly
 schema = StructType([
     StructField("loan_id", IntegerType(), True),
