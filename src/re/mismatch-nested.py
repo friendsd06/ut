@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, when, lit, expr, concat_ws, size, array, create_map, to_json
-from pyspark.sql.types import StructType, ArrayType, DataType
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType
 
 def compare_nested_columns(df, col1, col2):
     """
@@ -35,9 +35,19 @@ data2 = [
     (2, "B", {"nested": {"value": 25, "array": [4, 5, 6, 7]}, "top_level": 200}),
     (3, "D", {"nested": {"value": 30, "array": [7, 8, 9]}, "top_level": 300})
 ]
-schema = StructType().add("id", "integer") \
-    .add("column1", "string") \
-    .add("complex_column", "struct<nested:struct<value:integer,array:array<integer>>,top_level:integer>")
+
+# Corrected schema definition
+schema = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("column1", StringType(), False),
+    StructField("complex_column", StructType([
+        StructField("nested", StructType([
+            StructField("value", IntegerType(), True),
+            StructField("array", ArrayType(IntegerType()), True)
+        ]), True),
+        StructField("top_level", IntegerType(), True)
+    ]), True)
+])
 
 table1 = spark.createDataFrame(data1, schema)
 table2 = spark.createDataFrame(data2, schema)
