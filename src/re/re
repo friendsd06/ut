@@ -1,0 +1,189 @@
+# Databricks notebook source
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, count, when, lit, sum as spark_sum
+import ipywidgets as widgets
+from IPython.display import display, HTML, clear_output
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("SimpleReconciliationEngine").getOrCreate()
+
+# Step 1: Create UI elements
+asset_class_dropdown = widgets.Dropdown(
+    options=['loan', 'deposit', 'commitment'],
+    description='Asset Class:',
+    style={'description_width': 'initial'}
+)
+
+source_type_dropdown = widgets.Dropdown(
+    options=['Delta Table', 'S3 Path'],
+    description='Source Type:',
+    style={'description_width': 'initial'}
+)
+
+# Sample S3 paths
+s3_paths = [
+    's3://example-bucket/data/path1',
+    's3://example-bucket/data/path2',
+    's3://example-bucket/data/path3',
+    's3://example-bucket/data/path4',
+    's3://example-bucket/data/path5',
+    's3://example-bucket/loans/path1',
+    's3://example-bucket/loans/path2',
+    's3://example-bucket/deposits/path1',
+    's3://example-bucket/deposits/path2',
+    's3://example-bucket/commitments/path1'
+]
+
+prod_source_dropdown = widgets.Dropdown(
+    options=s3_paths,
+    description='Production Source:',
+    style={'description_width': 'initial'}
+)
+
+preprod_source_dropdown = widgets.Dropdown(
+    options=s3_paths,
+    description='Pre-production Source:',
+    style={'description_width': 'initial'}
+)
+
+run_button = widgets.Button(description="Run Reconciliation")
+output = widgets.Output()
+
+# Step 2: Display UI elements
+display(asset_class_dropdown, source_type_dropdown, prod_source_dropdown, preprod_source_dropdown, run_button, output)
+
+# Step 3: Define reconciliation logic
+def run_reconciliation(b):
+    with output:
+        clear_output()
+
+        # Step 4: Get input values
+        asset_class = asset_class_dropdown.value
+        is_delta = source_type_dropdown.value == 'Delta Table'
+        prod_source = prod_source_dropdown.value
+        preprod_source = preprod_source_dropdown.value
+
+        # Step 5: Validate inputs
+        if not all([asset_class, prod_source, preprod_source]):
+            print("Error: Please select all fields.")
+            return
+
+        try:
+            # Step 6: Read data
+            if is_delta:
+                prod_df = spark.read.format("delta").load(prod_source)
+                preprod_df = spark.read.format("delta").load(preprod_source)
+            else:
+                prod_df = spark.read.parquet(prod_source)
+                preprod_df = spark.read.parquet(preprod_source)
+
+            # Step 7: Get column list
+            columns = prod_df.columns
+
+            # Step 8: Calculate basic stats
+            match_count = prod_df.intersect(preprod_df).count()
+            prod_count = prod_df.count()
+            preprod_count = preprod_df.count()
+
+            # Step 9: Calculate column stats
+            column_stats = {}
+            for col_name in columns:
+                prod_stats = prod_df.agg(
+                    spark_sum(when(col(col_name).isNotNull(), 1).otherwise(0)).alias("non_null_count"),
+                    spark_sum(when(col(col_name).isNull(), 1).otherwise(0)).alias("null_count"),
+                    count(col_name).alias("total_count")
+                ).collect()[0]
+
+                preprod_stats = preprod_df.agg(
+                    spark_sum(when(col(col_name).isNotNull(), 1).otherwise(0)).alias("non_null_count"),
+                    spark_sum(when(col(col_name).isNull(), 1).otherwise(0)).alias("null_count"),
+                    count(col_name).alias("total_count")
+                ).collect()[0]
+
+                column_stats[col_name] = {
+                    'prod': prod_stats.asDict(),
+                    'preprod': preprod_stats.asDict()
+                }
+
+            # Step 10: Find missing attributes
+            prod_columns = set(prod_df.columns)
+            preprod_columns = set(preprod_df.columns)
+            missing_in_prod = list(preprod_columns - prod_columns)
+            missing_in_preprod = list(prod_columns - preprod_columns)
+
+            # Step 11: Get sample mismatches
+            mismatches = prod_df.subtract(preprod_df).union(preprod_df.subtract(prod_df))
+            sample_mismatches = mismatches.limit(5).collect()
+
+            # Step 12: Format and display results
+            html_output = f"""
+            <h2>Reconciliation Results</h2>
+            <table>
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>Match Count</td><td>{match_count}</td></tr>
+                <tr><td>Production Row Count</td><td>{prod_count}</td></tr>
+                <tr><td>Pre-production Row Count</td><td>{preprod_count}</td></tr>
+            </table>
+
+            <h3>Column Statistics</h3>
+            <table>
+                <tr>
+                    <th>Column</th>
+                    <th>Environment</th>
+                    <th>Non-Null Count</th>
+                    <th>Null Count</th>
+                    <th>Total Count</th>
+                </tr>
+            """
+
+            for col_name, stats in column_stats.items():
+                html_output += f"""
+                <tr>
+                    <td rowspan="2">{col_name}</td>
+                    <td>Production</td>
+                    <td>{stats['prod']['non_null_count']}</td>
+                    <td>{stats['prod']['null_count']}</td>
+                    <td>{stats['prod']['total_count']}</td>
+                </tr>
+                <tr>
+                    <td>Pre-production</td>
+                    <td>{stats['preprod']['non_null_count']}</td>
+                    <td>{stats['preprod']['null_count']}</td>
+                    <td>{stats['preprod']['total_count']}</td>
+                </tr>
+                """
+
+            html_output += """
+            </table>
+
+            <h3>Missing Attributes</h3>
+            """
+
+            html_output += f"<p><strong>Missing in Production:</strong> {', '.join(missing_in_prod) or 'None'}</p>"
+            html_output += f"<p><strong>Missing in Pre-production:</strong> {', '.join(missing_in_preprod) or 'None'}</p>"
+
+            if sample_mismatches:
+                html_output += """
+                <h3>Sample Mismatches</h3>
+                <table>
+                    <tr>
+                """
+                for col in sample_mismatches[0].asDict().keys():
+                    html_output += f"<th>{col}</th>"
+                html_output += "</tr>"
+
+                for row in sample_mismatches:
+                    html_output += "<tr>"
+                    for value in row.asDict().values():
+                        html_output += f"<td>{value}</td>"
+                    html_output += "</tr>"
+
+                html_output += "</table>"
+
+            display(HTML(html_output))
+
+        except Exception as e:
+            print(f"Error: {str(e)}")
+
+# Step 13: Attach the reconciliation function to the button
+run_button.on_click(run_reconciliation)
