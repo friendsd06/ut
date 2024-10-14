@@ -1,91 +1,70 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, lit, struct, to_json, create_map, map_from_arrays, array
-from pyspark.sql.types import StructType, ArrayType, DataType
+from pyspark.sql.functions import col, when, lit, struct, map_from_entries, expr, array
+from pyspark.sql.types import StructType, ArrayType
 from typing import List, Optional
 
-def is_nested_type(data_type):
+def generate_comparison_expr(col_name, data_type):
     """
-    Check if a data type is nested (struct or array type).
-    """
-    return isinstance(data_type, (StructType, ArrayType))
-
-def compare_columns(col1, col2, data_type):
-    """
-    Compare two columns and return a column with differences.
-    Handles both nested and non-nested types dynamically.
+    Generate a comparison expression for a given column and data type.
     """
     if isinstance(data_type, StructType):
-        # For struct types, compare each field
-        field_comparisons = [
-            compare_columns(col1[field.name], col2[field.name], field.dataType).alias(field.name)
+        nested_comparisons = [
+            generate_comparison_expr(f"{col_name}.{field.name}", field.dataType)
             for field in data_type.fields
         ]
-        return struct(*field_comparisons)
+        return expr(f"map_from_entries(array({','.join(nested_comparisons)}))")
     elif isinstance(data_type, ArrayType):
-        # For array types, compare as json strings
-        return when(to_json(col1) != to_json(col2),
-                    struct(to_json(col1).alias("old"), to_json(col2).alias("new"))
-                    ).otherwise(None)
+        return expr(f"when(to_json(t1.{col_name}) != to_json(t2.{col_name}), "
+                    f"struct(to_json(t1.{col_name}) as old, to_json(t2.{col_name}) as new))")
     else:
-        # For non-nested types, compare directly
-        return when(col1 != col2, struct(col1.alias("old"), col2.alias("new"))).otherwise(None)
+        return expr(f"when(t1.{col_name} != t2.{col_name}, "
+                    f"struct(t1.{col_name} as old, t2.{col_name} as new))")
 
 def compare_delta_tables(table1, table2, join_key: str, include_columns: Optional[List[str]] = None, exclude_columns: Optional[List[str]] = None):
     """
     Compare two Delta tables and return a DataFrame with the differences.
     Dynamically handles nested and non-nested schemas.
-
-    :param table1: First Delta table
-    :param table2: Second Delta table
-    :param join_key: Column name to use as the join key
-    :param include_columns: List of columns to include in the comparison (None for all)
-    :param exclude_columns: List of columns to exclude from the comparison
-    :return: DataFrame with comparison results
     """
     # Determine columns for comparison
     all_columns = set(table1.columns).intersection(set(table2.columns)) - {join_key}
     if include_columns:
-        compare_columns_set = set(include_columns).intersection(all_columns)
+        compare_columns = set(include_columns).intersection(all_columns)
     else:
-        compare_columns_set = all_columns
+        compare_columns = all_columns
     if exclude_columns:
-        compare_columns_set = compare_columns_set - set(exclude_columns)
+        compare_columns = compare_columns - set(exclude_columns)
 
     # Perform a full outer join
     joined_df = table1.alias("t1").join(table2.alias("t2"), join_key, "full_outer")
 
-    # Generate mismatch information for each column
-    mismatch_columns = []
-    for column in compare_columns_set:
-        data_type = table1.schema[column].dataType
-        mismatch_col = f"{column}_mismatch"
-        joined_df = joined_df.withColumn(
-            mismatch_col,
-            compare_columns(col(f"t1.{column}"), col(f"t2.{column}"), data_type)
-        )
-        mismatch_columns.append(mismatch_col)
-
-    # Calculate mismatch count
-    joined_df = joined_df.withColumn(
-        "mismatch_count",
-        sum([when(col(c).isNotNull(), 1).otherwise(0) for c in mismatch_columns])
-    )
+    # Generate comparison expressions
+    comparison_exprs = [
+        (lit(col_name), generate_comparison_expr(col_name, table1.schema[col_name].dataType))
+        for col_name in compare_columns
+    ]
 
     # Create mismatch summary
-    mismatch_summary = create_map(*[item for column in mismatch_columns for item in [lit(column), col(column)]])
+    mismatch_summary = map_from_entries(array(*comparison_exprs))
+
+    # Calculate mismatch count
+    mismatch_count = sum([
+        when(expr(f"element_at(mismatch_summary, '{col_name}') is not null"), 1).otherwise(0)
+        for col_name in compare_columns
+    ])
 
     # Select final columns and filter out rows with no mismatches
     result_df = joined_df.select(
         col(join_key),
-        col("mismatch_count"),
         mismatch_summary.alias("mismatch_summary"),
-        *mismatch_columns
-    ).filter(col("mismatch_count") > 0)
+        mismatch_count.alias("mismatch_count")
+    ).filter(mismatch_count > 0)
 
     return result_df
 
 # Test scenarios
 def test_mixed_schema_scenario(spark):
+    from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType
+
     print("Testing Mixed Schema Scenario:")
 
     mixed_schema = StructType([
