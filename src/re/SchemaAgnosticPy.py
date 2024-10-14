@@ -30,19 +30,19 @@ def compare_dataframes(df1, df2, join_key, include_columns=None, exclude_columns
     # Determine columns for comparison
     all_columns = set(df1.columns).intersection(set(df2.columns))
     if include_columns:
-        compare_columns = set(include_columns).intersection(all_columns)
+        compare_columns_list = list(set(include_columns).intersection(all_columns))
     else:
-        compare_columns = all_columns
+        compare_columns_list = list(all_columns)
     if exclude_columns:
-        compare_columns = compare_columns - set(exclude_columns)
-    compare_columns = list(compare_columns - set([join_key]))
+        compare_columns_list = [col for col in compare_columns_list if col not in exclude_columns]
+    compare_columns_list = [col for col in compare_columns_list if col != join_key]
 
     # Perform a full outer join
     joined_df = df1.alias("df1").join(df2.alias("df2"), join_key, "full_outer")
 
     # Generate mismatch information for all columns in one go
     mismatch_array = array(*[compare_columns(joined_df, col(f"df1.{column}"), col(f"df2.{column}"), column)
-                             for column in compare_columns])
+                             for column in compare_columns_list])
 
     # Create a map of mismatches
     mismatch_map = map_from_entries(mismatch_array.alias("mismatches"))
