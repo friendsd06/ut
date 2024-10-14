@@ -1,6 +1,8 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, when, struct, lit
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType
 from typing import List, Optional
+from functools import reduce
 
 def compare_delta_tables(table1, table2, join_key: str, include_columns: Optional[List[str]] = None, exclude_columns: Optional[List[str]] = None):
     """
@@ -9,15 +11,19 @@ def compare_delta_tables(table1, table2, join_key: str, include_columns: Optiona
     """
     # Determine columns for comparison
     all_columns = set(table1.columns) & set(table2.columns) - {join_key}
+
+    # Include columns logic
     if include_columns:
         compare_columns = list(set(include_columns) & all_columns)
     else:
         compare_columns = list(all_columns)
+
+    # Exclude columns logic
     if exclude_columns:
-        compare_columns = [col for col in compare_columns if col not in exclude_columns]
+        compare_columns = [c for c in compare_columns if c not in exclude_columns]
 
     # Perform a full outer join
-    joined_df = table1.alias("t1").join(table2.alias("t2"), join_key, "full_outer")
+    joined_df = table1.alias("t1").join(table2.alias("t2"), on=join_key, how="full_outer")
 
     # Create comparison expressions
     compare_exprs = [
@@ -27,23 +33,28 @@ def compare_delta_tables(table1, table2, join_key: str, include_columns: Optiona
         for c in compare_columns
     ]
 
+    # Calculate mismatch count using reduce to sum mismatches
+    mismatch_count_expr = reduce(
+        lambda acc, c: acc + when(col(c).isNotNull(), lit(1)).otherwise(lit(0)),
+        compare_columns,
+        lit(0)
+    )
+
     # Select final columns and add mismatch count
     result_df = joined_df.select(
         col(f"t1.{join_key}").alias(join_key),
         *compare_exprs
     ).withColumn(
-        "mismatch_count",
-        sum([when(col(c).isNotNull(), lit(1)).otherwise(lit(0)) for c in compare_columns])
+        "mismatch_count", mismatch_count_expr
     ).filter(col("mismatch_count") > 0)
 
     return result_df
 
 # Test scenario
 def test_mixed_schema_scenario(spark):
-    from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType
-
     print("Testing Mixed Schema Scenario:")
 
+    # Define the schema
     mixed_schema = StructType([
         StructField("id", IntegerType(), False),
         StructField("name", StringType(), False),
@@ -54,6 +65,7 @@ def test_mixed_schema_scenario(spark):
         StructField("salary", IntegerType(), True)
     ])
 
+    # Sample data
     data1 = [
         (1, "Alice", {"age": 30, "scores": [85, 90, 95]}, 50000),
         (2, "Bob", {"age": 25, "scores": [80, 85, 90]}, 45000),
@@ -65,9 +77,11 @@ def test_mixed_schema_scenario(spark):
         (3, "Charlie", {"age": 35, "scores": [90, 95, 100]}, 60000)
     ]
 
+    # Create DataFrames
     table1 = spark.createDataFrame(data1, mixed_schema)
     table2 = spark.createDataFrame(data2, mixed_schema)
 
+    # Compare tables
     result = compare_delta_tables(table1, table2, join_key="id")
     result.show(truncate=False)
     print(result.count(), "rows with differences")
