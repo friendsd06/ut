@@ -37,3 +37,22 @@ scenarios = [
 # Save each scenario as a separate target file in S3
 for i, scenario_df in enumerate(scenarios, start=1):
     scenario_df.write.mode("overwrite").parquet(f"s3://your-s3-bucket/target_loan_data_scenario_{i}/")
+
+
+    # Define the SQL statement with column definitions and data types
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS loan_data_external (
+    loan_id INT,
+    customer_id INT,
+    amount DOUBLE,
+    interest_rate DOUBLE,
+    term INT,
+    loan_type STRING,
+    status STRING,
+    disbursed_date DATE,
+    due_date DATE,
+    balance DOUBLE
+)
+USING DELTA
+LOCATION '{delta_path}'
+""")
