@@ -1,35 +1,34 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, lit, struct, to_json, create_map
-from pyspark.sql.types import StructType, ArrayType
+from pyspark.sql.functions import col, when, lit, struct, to_json, create_map, map_from_arrays, array
+from pyspark.sql.types import StructType, ArrayType, DataType
 from typing import List, Optional
 
-def is_nested_column(data_type):
+def is_nested_type(data_type):
     """
-    Check if a column is nested (struct or array type).
+    Check if a data type is nested (struct or array type).
     """
     return isinstance(data_type, (StructType, ArrayType))
 
-def compare_columns(col1, col2, col_name, data_type):
+def compare_columns(col1, col2, data_type):
     """
     Compare two columns and return a column with differences.
     Handles both nested and non-nested types dynamically.
     """
-    if is_nested_column(data_type):
-        if isinstance(data_type, StructType):
-            # For struct types, compare each field
-            field_comparisons = [
-                compare_columns(col1[field.name], col2[field.name], f"{col_name}.{field.name}", field.dataType)
-                for field in data_type.fields
-            ]
-            return create_map(*[item for sublist in field_comparisons for item in sublist])
-        elif isinstance(data_type, ArrayType):
-            # For array types, compare as json strings
-            return when(to_json(col1) != to_json(col2),
-                        struct(to_json(col1).alias("old"), to_json(col2).alias("new"))
-                        ).otherwise(None).alias(col_name)
+    if isinstance(data_type, StructType):
+        # For struct types, compare each field
+        field_comparisons = [
+            compare_columns(col1[field.name], col2[field.name], field.dataType).alias(field.name)
+            for field in data_type.fields
+        ]
+        return struct(*field_comparisons)
+    elif isinstance(data_type, ArrayType):
+        # For array types, compare as json strings
+        return when(to_json(col1) != to_json(col2),
+                    struct(to_json(col1).alias("old"), to_json(col2).alias("new"))
+                    ).otherwise(None)
     else:
         # For non-nested types, compare directly
-        return when(col1 != col2, struct(col1.alias("old"), col2.alias("new"))).otherwise(None).alias(col_name)
+        return when(col1 != col2, struct(col1.alias("old"), col2.alias("new"))).otherwise(None)
 
 def compare_delta_tables(table1, table2, join_key: str, include_columns: Optional[List[str]] = None, exclude_columns: Optional[List[str]] = None):
     """
@@ -56,16 +55,14 @@ def compare_delta_tables(table1, table2, join_key: str, include_columns: Optiona
     joined_df = table1.alias("t1").join(table2.alias("t2"), join_key, "full_outer")
 
     # Generate mismatch information for each column
-    select_expr = [col(join_key)]
     mismatch_columns = []
     for column in compare_columns_set:
         data_type = table1.schema[column].dataType
         mismatch_col = f"{column}_mismatch"
         joined_df = joined_df.withColumn(
             mismatch_col,
-            compare_columns(col(f"t1.{column}"), col(f"t2.{column}"), column, data_type)
+            compare_columns(col(f"t1.{column}"), col(f"t2.{column}"), data_type)
         )
-        select_expr.append(col(mismatch_col))
         mismatch_columns.append(mismatch_col)
 
     # Calculate mismatch count
@@ -74,10 +71,16 @@ def compare_delta_tables(table1, table2, join_key: str, include_columns: Optiona
         sum([when(col(c).isNotNull(), 1).otherwise(0) for c in mismatch_columns])
     )
 
+    # Create mismatch summary
+    mismatch_summary = create_map(*[item for column in mismatch_columns for item in [lit(column), col(column)]])
+
     # Select final columns and filter out rows with no mismatches
-    result_df = joined_df.select(*select_expr, "mismatch_count") \
-        .filter(col("mismatch_count") > 0) \
-        .withColumn("mismatch_summary", to_json(struct(*mismatch_columns)))
+    result_df = joined_df.select(
+        col(join_key),
+        col("mismatch_count"),
+        mismatch_summary.alias("mismatch_summary"),
+        *mismatch_columns
+    ).filter(col("mismatch_count") > 0)
 
     return result_df
 
