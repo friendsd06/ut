@@ -8,10 +8,10 @@ spark = SparkSession.builder \
     .master("local[*]") \
     .getOrCreate()
 
-# Define a function to generate dynamic SQL for flattening nested structures
 def generate_flatten_sql(df, table_name):
     """
     Generates a SQL query to flatten all nested columns (structs and arrays) in a DataFrame.
+    Iteratively processes columns to handle deep nested structures.
 
     Args:
         df (DataFrame): The input DataFrame with nested columns.
@@ -21,36 +21,45 @@ def generate_flatten_sql(df, table_name):
         str: A SQL query that flattens all nested columns.
     """
     select_expressions = []
+    nested_columns = True  # Flag to control iterative flattening process
+    temp_view_name = table_name
 
-    def process_struct_field(parent_name, struct_type):
-        """Processes struct fields to create SQL aliases for flattening."""
-        expressions = []
-        for field in struct_type.fields:
-            field_name = f"{parent_name}.{field.name}"
-            flat_name = f"{parent_name}_{field.name}"
-            expressions.append(f"{field_name} AS {flat_name}")
-        return expressions
+    # Iteratively flatten until no nested columns remain
+    while nested_columns:
+        nested_columns = False
+        select_expressions = []
 
-    for field in df.schema.fields:
-        if isinstance(field.dataType, StructType):
-            # Flatten struct type fields
-            select_expressions.extend(process_struct_field(field.name, field.dataType))
-        elif isinstance(field.dataType, ArrayType):
-            if isinstance(field.dataType.elementType, StructType):
-                # Explode and flatten arrays of structs
-                select_expressions.append(f"EXPLODE_OUTER({field.name}) AS {field.name}")
+        # Prepare SQL expressions based on current DataFrame schema
+        for field in df.schema.fields:
+            if isinstance(field.dataType, StructType):
+                # Flatten struct type fields by accessing each subfield
+                for subfield in field.dataType.fields:
+                    field_name = f"{field.name}.{subfield.name}"
+                    flat_name = f"{field.name}_{subfield.name}"
+                    select_expressions.append(f"{field_name} AS {flat_name}")
+                nested_columns = True  # Flag to indicate further flattening required
+            elif isinstance(field.dataType, ArrayType):
+                if isinstance(field.dataType.elementType, StructType):
+                    # Explode arrays of structs and access struct fields
+                    select_expressions.append(f"EXPLODE_OUTER({field.name}) AS {field.name}")
+                else:
+                    # Sort scalar arrays and handle nulls
+                    select_expressions.append(f"SORT_ARRAY(COALESCE({field.name}, ARRAY())) AS {field.name}")
+                nested_columns = True  # Flag to indicate further flattening required
             else:
-                # Sort scalar arrays and handle nulls
-                select_expressions.append(f"SORT_ARRAY(COALESCE({field.name}, ARRAY())) AS {field.name}")
-        else:
-            # Include non-nested columns as-is
-            select_expressions.append(field.name)
+                # Non-nested column, include as-is
+                select_expressions.append(field.name)
 
-    # Join expressions with commas to create the SELECT clause
-    select_clause = ", ".join(select_expressions)
-    # Construct the final SQL query
-    sql_query = f"SELECT {select_clause} FROM {table_name}"
+        # Generate SQL SELECT clause from expressions
+        select_clause = ", ".join(select_expressions)
+        sql_query = f"SELECT {select_clause} FROM {temp_view_name}"
 
+        # Execute SQL and register the result as a new temp view for further processing if needed
+        df = spark.sql(sql_query)
+        temp_view_name = f"{table_name}_flattened"
+        df.createOrReplaceTempView(temp_view_name)
+
+    # Return final SQL query after all iterations
     return sql_query
 
 # Sample complex nested data
