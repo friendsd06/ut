@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.types import StructType, ArrayType
+from pyspark.sql.types import StructType, ArrayType, StringType, IntegerType, DoubleType, StructField
 from typing import List, Optional
 
 def generate_flatten_sql(schema: StructType, prefix: str = "", separator: str = "_") -> List[str]:
@@ -33,7 +33,8 @@ def generate_flatten_sql(schema: StructType, prefix: str = "", separator: str = 
                 array_exprs.extend([f"{expr} as {column_name}{separator}{alias.split(' as ')[1]}" for expr, alias in zip(nested_exprs, nested_exprs)])
                 expressions.extend(array_exprs)
             else:
-                expressions.append(f"array_sort({column_name}) as {column_name}")
+                # For scalar arrays, we keep them as-is without sorting
+                expressions.append(f"{column_name} as {column_name.replace('.', separator)}")
         else:
             expressions.append(f"{column_name} as {column_name.replace('.', separator)}")
     return expressions
