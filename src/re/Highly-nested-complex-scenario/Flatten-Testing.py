@@ -48,9 +48,11 @@ def flatten_df(df: DataFrame) -> DataFrame:
 
     # Explode array columns containing structs
     for array_col in array_struct_cols:
+        # Explode the array of structs
         df = df.withColumn(array_col, explode_outer(col(array_col)))
         # After exploding, flatten the struct fields
-        for subfield in df.schema[array_col].dataType.elementType.fields:
+        # Since array_col is now a struct, directly access its fields
+        for subfield in df.schema[array_col].dataType.fields:
             df = df.withColumn(f"{array_col}_{subfield.name}", col(f"{array_col}.{subfield.name}"))
         # Drop the original exploded array column
         df = df.drop(array_col)
@@ -63,7 +65,13 @@ def flatten_df(df: DataFrame) -> DataFrame:
     df_flat = df.select(*flat_cols)
 
     # Check if there are still nested columns; if so, recursively flatten
-    if any(isinstance(field.dataType, StructType) or isinstance(field.dataType, ArrayType) for field in df_flat.schema.fields):
+    has_nested = False
+    for field in df_flat.schema.fields:
+        if isinstance(field.dataType, StructType) or isinstance(field.dataType, ArrayType):
+            has_nested = True
+            break
+
+    if has_nested:
         return flatten_df(df_flat)
     else:
         return df_flat
