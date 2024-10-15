@@ -1,14 +1,18 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, when, struct, lit
 from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType
 from typing import List, Optional
 from functools import reduce
 
-def compare_delta_tables(table1, table2, join_key: str, include_columns: Optional[List[str]] = None, exclude_columns: Optional[List[str]] = None):
+def compare_delta_tables(table1: DataFrame, table2: DataFrame, join_key: str, include_columns: Optional[List[str]] = None, exclude_columns: Optional[List[str]] = None):
     """
     Compare two Delta tables and return a DataFrame with the differences.
     Works for both nested and non-nested structures.
     """
+    # Ensure the inputs are DataFrames
+    if not isinstance(table1, DataFrame) or not isinstance(table2, DataFrame):
+        raise ValueError("Both table1 and table2 must be Spark DataFrames.")
+
     # Determine columns for comparison
     all_columns = set(table1.columns) & set(table2.columns) - {join_key}
 
@@ -80,6 +84,10 @@ def test_mixed_schema_scenario(spark):
     # Create DataFrames
     table1 = spark.createDataFrame(data1, mixed_schema)
     table2 = spark.createDataFrame(data2, mixed_schema)
+
+    # Ensure they are DataFrames
+    assert isinstance(table1, DataFrame), "table1 is not a DataFrame"
+    assert isinstance(table2, DataFrame), "table2 is not a DataFrame"
 
     # Compare tables
     result = compare_delta_tables(table1, table2, join_key="id")
