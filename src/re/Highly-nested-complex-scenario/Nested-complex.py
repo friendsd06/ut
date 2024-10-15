@@ -29,30 +29,30 @@ times. You want to identify any changes in the orders, including modifications
 within nested items and addresses.
 
 Table 1 (Original Data):
-+---+----------+---------------------------------------------+-------------------------------+
-|id |customer  |order_details                                 |shipping_address               |
-+---+----------+---------------------------------------------+-------------------------------+
++---+----------+---------------------------------------------+---------------------------------------------+
+|id |customer  |order_details                                 |shipping_address                             |
++---+----------+---------------------------------------------+---------------------------------------------+
 |1  |John Doe  |{order_id: 1001, items: [{item_id: A1, qty:2}, {item_id: B2, qty:1}]}|{street: "123 Elm St", city: "Springfield", zip: "12345"}|
 |2  |Jane Smith|{order_id: 1002, items: [{item_id: C3, qty:5}]}|{street: "456 Oak St", city: "Shelbyville", zip: "67890"}|
-+---+----------+---------------------------------------------+-------------------------------+
++---+----------+---------------------------------------------+---------------------------------------------+
 
 Table 2 (Updated Data):
-+---+----------+---------------------------------------------+-------------------------------+
-|id |customer  |order_details                                 |shipping_address               |
-+---+----------+---------------------------------------------+-------------------------------+
-|1  |John Doe  |{order_id: 1001, items: [{item_id: A1, qty:3}, {item_id: B2, qty:1}]}|{street: "123 Elm St", city: "Springfield", zip: "12345"}|
-|2  |Jane Smith|{order_id: 1002, items: [{item_id: C3, qty:5}, {item_id: D4, qty:2}]}|{street: "456 Oak St", city: "Capital City", zip: "67890"}|
++---+-------------+---------------------------------------------+---------------------------------------------+
+|id |customer     |order_details                                 |shipping_address                             |
++---+-------------+---------------------------------------------+---------------------------------------------+
+|1  |John Doe     |{order_id: 1001, items: [{item_id: A1, qty:3}, {item_id: B2, qty:1}]}|{street: "123 Elm St", city: "Springfield", zip: "12345"}|
+|2  |Jane Smith   |{order_id: 1002, items: [{item_id: C3, qty:5}, {item_id: D4, qty:2}]}|{street: "456 Oak St", city: "Capital City", zip: "67890"}|
 |3  |Alice Johnson|{order_id: 1003, items: [{item_id: E5, qty:1}]}|{street: "789 Pine St", city: "Ogdenville", zip: "54321"}|
-+---+----------+---------------------------------------------+-------------------------------+
++---+-------------+---------------------------------------------+---------------------------------------------+
 
 Expected Output After Comparison:
-+---+----------------------+---------------------------+-------------------------+-------------------+
-|id |order_details_order_id|order_details_items        |shipping_address        |mismatch_count     |
-+---+----------------------+---------------------------+-------------------------+-------------------+
-|1  |null                  |{old: [{item_id: A1, qty:2}], new: [{item_id: A1, qty:3}]}|null                 |1                  |
-|2  |null                  |{old: null, new: [{item_id: D4, qty:2}]}|{old: {city: "Shelbyville"}, new: {city: "Capital City"}}|2                  |
-|3  |{old: null, new: 1003}|{old: null, new: [{item_id: E5, qty:1}]}|{old: null, new: {street: "789 Pine St", city: "Ogdenville", zip: "54321"}}|3                  |
-+---+----------------------+---------------------------+-------------------------+-------------------+
++---+------------------------+-----------------------------------------------+---------------------------------------------+--------------+
+|id |order_details_order_id  |order_details_items                            |shipping_address_city                       |mismatch_count|
++---+------------------------+-----------------------------------------------+---------------------------------------------+--------------+
+|1  |null                    |{old: [{item_id: A1, qty: 2}], new: [{item_id: A1, qty: 3}]}|null                                         |1             |
+|2  |null                    |{old: null, new: [{item_id: D4, qty: 2}]}      |{old: Shelbyville, new: Capital City}       |2             |
+|3  |{old: null, new: 1003}  |{old: null, new: [{item_id: E5, qty: 1}]}      |{old: null, new: Ogdenville}                 |3             |
++---+------------------------+-----------------------------------------------+---------------------------------------------+--------------+
 3 rows with differences
 
 ====================================================================
@@ -65,18 +65,9 @@ from pyspark.sql.functions import (
     struct,
     lit,
     sort_array,
-    explode,
     array_sort,
-    array,
-    sort_array,
-    array_contains,
-    array_distinct,
-    array_except,
-    array_intersect,
-    size,
-    udf,
 )
-from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType, MapType, DataType
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType
 from typing import List, Optional
 from functools import reduce
 import sys
@@ -105,11 +96,14 @@ def flatten_schema(
     for field in schema.fields:
         field_name = f"{prefix}{separator}{field.name}" if prefix else field.name
         if isinstance(field.dataType, StructType):
+            # Recursively flatten nested StructType
             fields.extend(flatten_schema(field.dataType, prefix=field_name, separator=separator))
-        elif isinstance(field.dataType, ArrayType) and isinstance(field.dataType.elementType, StructType):
-            # Handle arrays of structs by flattening the struct fields
-            # e.g., items_item_id, items_qty
-            fields.append(field_name)  # Keep as is for array comparison
+        elif isinstance(field.dataType, ArrayType):
+            # If the array contains StructType, keep the array as a whole for comparison
+            if isinstance(field.dataType.elementType, StructType):
+                fields.append(field_name)  # e.g., order_details_items
+            else:
+                fields.append(field_name)  # e.g., some_array_of_scalars
         else:
             fields.append(field_name)
     return fields
@@ -129,9 +123,9 @@ def get_flat_columns(
     - df: DataFrame
         The Spark DataFrame.
     - include_columns: List[str], optional
-        Columns to include in the comparison.
+        Columns to include in the comparison. Supports top-level and nested columns using dot notation.
     - exclude_columns: List[str], optional
-        Columns to exclude from the comparison.
+        Columns to exclude from the comparison. Supports top-level and nested columns using dot notation.
     - separator: str, optional
         Separator used in flattened column names.
 
@@ -142,9 +136,18 @@ def get_flat_columns(
     """
     flat_cols = flatten_schema(df.schema, separator=separator)
     if include_columns:
-        flat_cols = [c for c in flat_cols if any(c.startswith(ic) for ic in include_columns)]
+        include_flat = []
+        for ic in include_columns:
+            # Convert dot notation to separator
+            ic_flat = ic.replace(".", separator)
+            include_flat.extend([c for c in flat_cols if c.startswith(ic_flat)])
+        flat_cols = list(set(flat_cols).intersection(set(include_flat)))
     if exclude_columns:
-        flat_cols = [c for c in flat_cols if not any(c.startswith(ec) for ec in exclude_columns)]
+        exclude_flat = []
+        for ec in exclude_columns:
+            ec_flat = ec.replace(".", separator)
+            exclude_flat.extend([c for c in flat_cols if c.startswith(ec_flat)])
+        flat_cols = [c for c in flat_cols if c not in exclude_flat]
     return flat_cols
 
 def sort_arrays_in_df(df: DataFrame, columns: List[str], ascending: bool = True) -> DataFrame:
@@ -170,66 +173,6 @@ def sort_arrays_in_df(df: DataFrame, columns: List[str], ascending: bool = True)
         df = df.withColumn(column, sort_array(col(column), ascending))
     return df
 
-def compare_columns(
-        df1: DataFrame,
-        df2: DataFrame,
-        join_key: str,
-        flattened_columns: List[str],
-        separator: str = "_"
-) -> DataFrame:
-    """
-    Compares columns between two DataFrames and identifies differences.
-
-    Parameters:
-    -----------
-    - df1: DataFrame
-        The first DataFrame (original).
-    - df2: DataFrame
-        The second DataFrame (updated).
-    - join_key: str
-        The column name to join the DataFrames on.
-    - flattened_columns: List[str]
-        List of flattened column names to compare.
-    - separator: str, optional
-        Separator used in flattened column names.
-
-    Returns:
-    --------
-    - DataFrame
-        A DataFrame highlighting the differences.
-    """
-    comparison_exprs = []
-    mismatch_conditions = []
-
-    for col_name in flattened_columns:
-        # Define aliases for clarity
-        col1 = col(f"t1.{col_name}")
-        col2 = col(f"t2.{col_name}")
-
-        # Create expression to identify differences
-        diff_expr = when(col1 != col2, struct(col1.alias("old"), col2.alias("new"))).alias(col_name)
-        comparison_exprs.append(diff_expr)
-
-        # Condition to check if this column has a mismatch
-        mismatch_conditions.append(col(col_name).isNotNull())
-
-    # Calculate total number of mismatches
-    mismatch_count_expr = reduce(
-        lambda acc, cond: acc + when(cond, lit(1)).otherwise(lit(0)),
-        mismatch_conditions,
-        lit(0)
-    )
-
-    # Select all comparison expressions and mismatch count
-    result_df = df1.join(df2, on=join_key, how="full_outer") \
-        .select(col1 for col1 in df1.columns) \
-        .join(df2, on=join_key, how="full_outer") \
-        .select(col(f"t1.{join_key}").alias(join_key), *comparison_exprs) \
-        .withColumn("mismatch_count", mismatch_count_expr) \
-        .filter(col("mismatch_count") > 0)
-
-    return result_df
-
 def compare_delta_tables(
         table1: DataFrame,
         table2: DataFrame,
@@ -252,11 +195,11 @@ def compare_delta_tables(
     - join_key: str
         Column name to join the tables on.
     - include_columns: List[str], optional
-        Columns to include in the comparison.
+        Columns to include in the comparison. Supports nested columns using dot notation.
     - exclude_columns: List[str], optional
-        Columns to exclude from the comparison.
+        Columns to exclude from the comparison. Supports nested columns using dot notation.
     - sort_array_columns: List[str], optional
-        List of array-type columns to sort before comparison.
+        List of array-type columns to sort before comparison. Supports nested columns using dot notation.
     - separator: str, optional
         Separator used in flattened column names.
 
@@ -270,7 +213,7 @@ def compare_delta_tables(
     if not isinstance(table1, DataFrame) or not isinstance(table2, DataFrame):
         raise ValueError("Both table1 and table2 must be Spark DataFrames.")
 
-    # Identify common columns excluding the join key
+    # Identify common top-level columns excluding the join key
     common_columns = set(table1.columns).intersection(set(table2.columns)) - {join_key}
 
     # Apply include and exclude filters
@@ -291,17 +234,20 @@ def compare_delta_tables(
 
     # Optionally sort arrays to ensure order-independent comparison
     if sort_array_columns:
-        table1 = sort_arrays_in_df(table1, sort_array_columns, ascending=True)
-        table2 = sort_arrays_in_df(table2, sort_array_columns, ascending=True)
+        # Convert sort_array_columns from dot notation to flattened names
+        sort_array_columns_flat = [c.replace(".", separator) for c in sort_array_columns]
+        table1 = sort_arrays_in_df(table1, sort_array_columns_flat, ascending=True)
+        table2 = sort_arrays_in_df(table2, sort_array_columns_flat, ascending=True)
 
     # Select and alias columns for both tables
     selected_cols_table1 = [col(c).alias(f"t1.{c}") for c in flattened_common_columns] + [col(join_key).alias(f"t1.{join_key}")]
     selected_cols_table2 = [col(c).alias(f"t2.{c}") for c in flattened_common_columns] + [col(join_key).alias(f"t2.{join_key}")]
 
+    # Select the necessary columns
     table1_flat = table1.select(*selected_cols_table1)
     table2_flat = table2.select(*selected_cols_table2)
 
-    # Perform a full outer join on the join key
+    # Perform a full outer join on the join key to capture all differences
     joined_df = table1_flat.join(table2_flat, on=join_key, how="full_outer")
 
     # Generate comparison expressions for each flattened column
@@ -314,13 +260,14 @@ def compare_delta_tables(
 
         # For arrays of structs, compare sorted arrays
         # Assuming elements in arrays are structs with consistent ordering after sort
+        # Sorting is already handled if specified in sort_array_columns
         if isinstance(table1.schema[c].dataType, ArrayType) and isinstance(table1.schema[c].dataType.elementType, StructType):
-            # Compare sorted arrays
+            # Compare arrays directly since they are sorted if specified
             expr = when(
-                sort_array(col1) != sort_array(col2),
+                col1 != col2,
                 struct(
-                    sort_array(col1).alias("old"),
-                    sort_array(col2).alias("new")
+                    col1.alias("old"),
+                    col2.alias("new")
                 )
             ).alias(c)
         else:
