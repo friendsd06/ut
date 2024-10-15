@@ -33,7 +33,7 @@ def generate_flatten_sql(df, table_name):
         """
         nonlocal alias_counter
 
-        # Construct the full field path
+        # Construct the full field path and alias prefix
         if parent:
             full_field = f"{parent}.`{field}`"
             alias_prefix = f"{parent}_{field}"
@@ -235,6 +235,8 @@ print("Generated SQL Query:\n", sql_query)
 
 # Execute the generated SQL query
 flattened_df = spark.sql(sql_query)
+
+# Display the flattened DataFrame
 flattened_df.show(truncate=False)
 flattened_df.printSchema()
 
