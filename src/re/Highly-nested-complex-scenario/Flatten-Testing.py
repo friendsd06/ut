@@ -1,6 +1,6 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, explode_outer, sort_array
+from pyspark.sql.functions import col, explode_outer, sort_array, coalesce, array
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 
 # Initialize SparkSession
@@ -39,7 +39,7 @@ def flatten_df(df: DataFrame) -> DataFrame:
                 # If the array contains structs, mark it for exploding
                 array_struct_cols.append(field_name)
             else:
-                # If the array contains scalars, sort it
+                # If the array contains scalars, mark it for sorting
                 array_scalar_cols.append(field_name)
                 flat_cols.append(col(field_name))
         else:
@@ -57,9 +57,16 @@ def flatten_df(df: DataFrame) -> DataFrame:
         # Drop the original exploded array column
         df = df.drop(array_col)
 
-    # Sort array columns containing scalars in ascending order
+    # Sort array columns containing scalars in ascending order, handling nulls
     for array_col in array_scalar_cols:
-        df = df.withColumn(array_col, sort_array(col(array_col), ascending=True))
+        # Replace null arrays with empty arrays before sorting
+        df = df.withColumn(
+            array_col,
+            sort_array(
+                coalesce(col(array_col), array()),
+                ascending=True
+            )
+        )
 
     # Select all flattened columns
     df_flat = df.select(*flat_cols)
