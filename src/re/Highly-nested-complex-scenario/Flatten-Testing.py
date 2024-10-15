@@ -1,6 +1,9 @@
+# Databricks notebook source
 from pyspark.sql import DataFrame
-from pyspark.sql.types import StructType, ArrayType
+from pyspark.sql.types import StructType, ArrayType, StructField, StringType, IntegerType, DoubleType
 from typing import List, Optional
+
+# COMMAND ----------
 
 def generate_flatten_sql(schema: StructType, prefix: str = "", separator: str = "_") -> List[str]:
     """
@@ -38,6 +41,8 @@ def generate_flatten_sql(schema: StructType, prefix: str = "", separator: str = 
         else:
             expressions.append(f"{column_name} as {column_name.replace('.', separator)}")
     return expressions
+
+# COMMAND ----------
 
 def flatten_delta_table_sql(
         df: DataFrame,
@@ -82,15 +87,65 @@ def flatten_delta_table_sql(
         # Ensure the temporary view is always dropped
         spark.catalog.dropTempView(view_name)
 
-# Example usage in Databricks notebook
-# Assuming 'df' is your input DataFrame
+# COMMAND ----------
 
-# Test case 1: Flatten all nested columns
+# Create a sample dataset with multiple nested columns
+sample_data = [
+    (1, "John", {"age": 30, "city": "New York"},
+     [{"type": "home", "number": "123-456-7890"}, {"type": "work", "number": "098-765-4321"}],
+     {"scores": [85, 90, 78], "average": 84.3}),
+    (2, "Alice", {"age": 25, "city": "San Francisco"},
+     [{"type": "home", "number": "111-222-3333"}],
+     {"scores": [92, 88, 95], "average": 91.7}),
+    (3, "Bob", {"age": 35, "city": "Chicago"},
+     [],
+     {"scores": [75, 80, 82], "average": 79.0})
+]
+
+schema = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("name", StringType(), False),
+    StructField("info", StructType([
+        StructField("age", IntegerType(), True),
+        StructField("city", StringType(), True)
+    ]), True),
+    StructField("phones", ArrayType(StructType([
+        StructField("type", StringType(), True),
+        StructField("number", StringType(), True)
+    ])), True),
+    StructField("grades", StructType([
+        StructField("scores", ArrayType(IntegerType()), True),
+        StructField("average", DoubleType(), True)
+    ]), True)
+])
+
+# Create the DataFrame
+df = spark.createDataFrame(sample_data, schema)
+
+# COMMAND ----------
+
+print("Original DataFrame:")
+display(df)
+
+# COMMAND ----------
+
+# Flatten all nested columns
 df_flat_all = flatten_delta_table_sql(df)
-print("\nFlattened DataFrame (all nested columns):")
+print("Flattened DataFrame (all nested columns):")
 display(df_flat_all)
 
-# Test case 2: Flatten specific columns
+# COMMAND ----------
+
+# Flatten specific columns
 df_flat_specific = flatten_delta_table_sql(df, columns_to_flatten=["info", "phones"])
-print("\nFlattened DataFrame (specific columns: info, phones):")
+print("Flattened DataFrame (specific columns: info, phones):")
 display(df_flat_specific)
+
+# COMMAND ----------
+
+# Show schema of flattened DataFrames
+print("Schema of fully flattened DataFrame:")
+df_flat_all.printSchema()
+
+print("\nSchema of specifically flattened DataFrame:")
+df_flat_specific.printSchema()
