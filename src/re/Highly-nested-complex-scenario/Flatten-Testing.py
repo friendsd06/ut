@@ -1,146 +1,197 @@
+# Import necessary libraries
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, explode_outer, sort_array
-from pyspark.sql.types import StructType, ArrayType, StringType, IntegerType, DoubleType, StructField
-from typing import List, Optional, Tuple
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 
-def flatten_delta_table(
-        df: DataFrame,
-        columns_to_flatten: Optional[List[str]] = None,
-        separator: str = "_"
-) -> DataFrame:
-    def flatten_schema(
-            schema: StructType,
-            prefix: str = ""
-    ) -> Tuple[List[str], List[str], List[str]]:
-        flat_cols = []
-        array_struct_cols = []
-        array_scalar_cols = []
-        for field in schema.fields:
-            name = f"{prefix}{separator}{field.name}" if prefix else field.name
-            dtype = field.dataType
+# Initialize SparkSession
+spark = SparkSession.builder \
+    .appName("FlattenNestedDataFrames") \
+    .master("local[*]") \
+    .getOrCreate()
 
-            should_flatten = (
-                    columns_to_flatten is None or
-                    any(name.startswith(col.replace(".", separator)) for col in columns_to_flatten)
-            )
+def flatten_df(df: DataFrame) -> DataFrame:
+    """
+    Recursively flattens a Spark DataFrame with nested structures (structs and arrays).
 
-            if should_flatten:
-                if isinstance(dtype, StructType):
-                    nested_flat_cols, nested_array_struct_cols, nested_array_scalar_cols = flatten_schema(
-                        dtype, prefix=name
-                    )
-                    flat_cols.extend(nested_flat_cols)
-                    array_struct_cols.extend(nested_array_struct_cols)
-                    array_scalar_cols.extend(nested_array_scalar_cols)
-                elif isinstance(dtype, ArrayType):
-                    if isinstance(dtype.elementType, StructType):
-                        array_struct_cols.append(name)
-                        flat_cols.append(name)
-                    else:
-                        array_scalar_cols.append(name)
-                        flat_cols.append(name)
-                else:
-                    flat_cols.append(name)
+    Args:
+        df (DataFrame): The input Spark DataFrame with nested columns.
+
+    Returns:
+        DataFrame: A flattened Spark DataFrame.
+    """
+    # Initialize lists to keep track of fields to process
+    flat_cols = []
+    array_struct_cols = []
+    array_scalar_cols = []
+
+    # Iterate through all fields in the DataFrame's schema
+    for field in df.schema.fields:
+        field_name = field.name
+        field_type = field.dataType
+
+        if isinstance(field_type, StructType):
+            # If the field is a struct, flatten its fields
+            for subfield in field_type.fields:
+                flat_cols.append(col(f"{field_name}.{subfield.name}").alias(f"{field_name}_{subfield.name}"))
+        elif isinstance(field_type, ArrayType):
+            element_type = field_type.elementType
+            if isinstance(element_type, StructType):
+                # If the array contains structs, mark it for exploding
+                array_struct_cols.append(field_name)
             else:
-                flat_cols.append(name)
+                # If the array contains scalars, sort it
+                array_scalar_cols.append(field_name)
+                flat_cols.append(col(field_name))
+        else:
+            # If the field is neither a struct nor an array, keep it as is
+            flat_cols.append(col(field_name))
 
-        return flat_cols, array_struct_cols, array_scalar_cols
-
-    flat_cols, array_struct_cols, array_scalar_cols = flatten_schema(df.schema)
-
+    # Explode array columns containing structs
     for array_col in array_struct_cols:
         df = df.withColumn(array_col, explode_outer(col(array_col)))
-        struct_fields = df.schema[array_col].dataType.elementType.fields if array_col in df.columns else []
-        for field in struct_fields:
-            df = df.withColumn(f"{array_col}{separator}{field.name}", col(f"{array_col}.{field.name}"))
+        # After exploding, flatten the struct fields
+        for subfield in df.schema[array_col].dataType.elementType.fields:
+            df = df.withColumn(f"{array_col}_{subfield.name}", col(f"{array_col}.{subfield.name}"))
+        # Drop the original exploded array column
         df = df.drop(array_col)
 
+    # Sort array columns containing scalars in ascending order
     for array_col in array_scalar_cols:
         df = df.withColumn(array_col, sort_array(col(array_col), ascending=True))
 
-    if 'grades_scores' in flat_cols:
-        df = df.withColumn('grades_scores', sort_array(col('grades.scores')))
-    if 'grades_average' in flat_cols:
-        df = df.withColumn('grades_average', col('grades.average'))
+    # Select all flattened columns
+    df_flat = df.select(*flat_cols)
 
-    select_exprs = [col(col_name).alias(col_name.replace(separator, "_")) for col_name in flat_cols]
-
-    df_flat = df.select(*select_exprs)
-
-    if len(df_flat.columns) > len(df.columns):
-        return flatten_delta_table(df_flat, columns_to_flatten, separator)
+    # Check if there are still nested columns; if so, recursively flatten
+    if any(isinstance(field.dataType, StructType) or isinstance(field.dataType, ArrayType) for field in df_flat.schema.fields):
+        return flatten_df(df_flat)
     else:
         return df_flat
 
-def test_flatten_delta_table():
-    spark = SparkSession.builder \
-        .appName("FlattenDeltaTableTest") \
-        .master("local[*]") \
-        .getOrCreate()
+# Create Sample Data for Table 1
+data1 = [
+    (
+        1,
+        "John",
+        {"age": 30, "city": "New York"},
+        [
+            {"type": "home", "number": "123-456-7890"},
+            {"type": "work", "number": "098-765-4321"}
+        ],
+        {"scores": [85, 90, 78], "average": 84.3}
+    ),
+    (
+        2,
+        "Alice",
+        {"age": 25, "city": "San Francisco"},
+        [
+            {"type": "home", "number": "111-222-3333"}
+        ],
+        {"scores": [92, 88, 95], "average": 91.7}
+    ),
+    (
+        3,
+        "Bob",
+        {"age": 35, "city": "Chicago"},
+        [],
+        {"scores": [75, 80, 82], "average": 79.0}
+    )
+]
 
-    sample_data = [
-        (
-            1,
-            "John",
-            {"age": 30, "city": "New York"},
-            [
-                {"type": "home", "number": "123-456-7890"},
-                {"type": "work", "number": "098-765-4321"}
-            ],
-            {"scores": [85, 90, 78], "average": 84.3}
-        ),
-        (
-            2,
-            "Alice",
-            {"age": 25, "city": "San Francisco"},
-            [
-                {"type": "home", "number": "111-222-3333"}
-            ],
-            {"scores": [92, 88, 95], "average": 91.7}
-        ),
-        (
-            3,
-            "Bob",
-            {"age": 35, "city": "Chicago"},
-            [],
-            {"scores": [75, 80, 82], "average": 79.0}
-        )
-    ]
+schema1 = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("name", StringType(), False),
+    StructField("info", StructType([
+        StructField("age", IntegerType(), True),
+        StructField("city", StringType(), True)
+    ]), True),
+    StructField("phones", ArrayType(StructType([
+        StructField("type", StringType(), True),
+        StructField("number", StringType(), True)
+    ])), True),
+    StructField("grades", StructType([
+        StructField("scores", ArrayType(IntegerType()), True),
+        StructField("average", DoubleType(), True)
+    ]), True)
+])
 
-    schema = StructType([
-        StructField("id", IntegerType(), False),
-        StructField("name", StringType(), False),
-        StructField("info", StructType([
-            StructField("age", IntegerType(), True),
-            StructField("city", StringType(), True)
-        ]), True),
-        StructField("phones", ArrayType(StructType([
-            StructField("type", StringType(), True),
-            StructField("number", StringType(), True)
-        ])), True),
-        StructField("grades", StructType([
-            StructField("scores", ArrayType(IntegerType()), True),
-            StructField("average", DoubleType(), True)
-        ]), True)
-    ])
+# Create DataFrame for Table 1
+df1 = spark.createDataFrame(data1, schema1)
 
-    df = spark.createDataFrame(sample_data, schema)
+# Create Sample Data for Table 2 (Updated Data)
+data2 = [
+    (
+        1,
+        "John",
+        {"age": 31, "city": "New York"},  # Age changed
+        [
+            {"type": "home", "number": "123-456-7890"},
+            {"type": "work", "number": "098-765-4321"}
+        ],
+        {"scores": [85, 90, 78], "average": 84.3}
+    ),
+    (
+        2,
+        "Alice",
+        {"age": 25, "city": "San Francisco"},
+        [
+            {"type": "home", "number": "111-222-3333"},
+            {"type": "mobile", "number": "222-333-4444"}  # New phone added
+        ],
+        {"scores": [92, 88, 95, 100], "average": 93.8}  # New score added
+    ),
+    (
+        4,
+        "Charlie",
+        {"age": 28, "city": "Boston"},
+        [
+            {"type": "home", "number": "555-666-7777"}
+        ],
+        {"scores": [80, 85, 88], "average": 84.3}  # New record
+    )
+]
 
-    print("Original DataFrame:")
-    df.show(truncate=False)
-    df.printSchema()
+schema2 = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("name", StringType(), False),
+    StructField("info", StructType([
+        StructField("age", IntegerType(), True),
+        StructField("city", StringType(), True)
+    ]), True),
+    StructField("phones", ArrayType(StructType([
+        StructField("type", StringType(), True),
+        StructField("number", StringType(), True)
+    ])), True),
+    StructField("grades", StructType([
+        StructField("scores", ArrayType(IntegerType()), True),
+        StructField("average", DoubleType(), True)
+    ]), True)
+])
 
-    df_flat_all = flatten_delta_table(df)
-    print("\nFlattened DataFrame (all nested columns):")
-    df_flat_all.show(truncate=False)
-    df_flat_all.printSchema()
+# Create DataFrame for Table 2
+df2 = spark.createDataFrame(data2, schema2)
 
-    df_flat_specific = flatten_delta_table(df, columns_to_flatten=["info", "phones"])
-    print("\nFlattened DataFrame (specific columns: info, phones):")
-    df_flat_specific.show(truncate=False)
-    df_flat_specific.printSchema()
+# Display Original DataFrames
+print("Original DataFrame - Table 1:")
+df1.show(truncate=False)
+df1.printSchema()
 
-    spark.stop()
+print("\nOriginal DataFrame - Table 2:")
+df2.show(truncate=False)
+df2.printSchema()
 
-if __name__ == "__main__":
-    test_flatten_delta_table()
+# Apply the flattening function to both DataFrames
+df1_flat = flatten_df(df1)
+df2_flat = flatten_df(df2)
+
+# Display Flattened DataFrames
+print("\nFlattened DataFrame - Table 1:")
+df1_flat.show(truncate=False)
+df1_flat.printSchema()
+
+print("\nFlattened DataFrame - Table 2:")
+df2_flat.show(truncate=False)
+df2_flat.printSchema()
+
+# Stop the SparkSession
+spark.stop()
