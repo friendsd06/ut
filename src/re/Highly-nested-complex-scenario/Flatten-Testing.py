@@ -47,15 +47,17 @@ def flatten_delta_table(df: DataFrame, columns_to_flatten: Optional[List[str]] =
 
     flat_cols, array_cols = flatten_schema(df.schema)
 
-    # First, explode all array columns
+    # Explode array columns one by one
     for array_col in array_cols:
         df = df.withColumn(array_col, explode_outer(col(array_col)))
+        # Update flat_cols to use the exploded column
+        flat_cols = [c if c != array_col else f"{array_col}.*" for c in flat_cols]
 
-    # Then, select all flattened columns
+    # Select all flattened columns
     df_flat = df.select([expr(col).alias(col.split(".")[-1].replace(separator, "_")) for col in flat_cols])
 
     # If any columns were flattened, recursively call the function again
-    if len(df_flat.columns) > len(df.columns) - len(array_cols):
+    if len(df_flat.columns) > len(df.columns):
         return flatten_delta_table(df_flat, columns_to_flatten, separator)
     else:
         return df_flat
