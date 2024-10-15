@@ -1,212 +1,85 @@
-# Import necessary libraries
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, explode_outer, sort_array, coalesce, array
+from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 
 # Initialize SparkSession
 spark = SparkSession.builder \
-    .appName("FlattenNestedDataFrames") \
+    .appName("DynamicSQLFlattenNestedColumns") \
     .master("local[*]") \
     .getOrCreate()
 
-def flatten_df(df: DataFrame) -> DataFrame:
+def generate_flatten_sql(df, table_name):
     """
-    Recursively flattens a Spark DataFrame with nested structures (structs and arrays).
+    Generates a SQL query to flatten all nested columns (structs and arrays) in a DataFrame.
 
     Args:
-        df (DataFrame): The input Spark DataFrame with nested columns.
+        df (DataFrame): The input DataFrame with nested columns.
+        table_name (str): The temporary table name for the DataFrame in SQL.
 
     Returns:
-        DataFrame: A flattened Spark DataFrame.
+        str: A SQL query that flattens all nested columns.
     """
-    # Initialize lists to keep track of fields to process
-    flat_cols = []
-    array_struct_cols = []
-    array_scalar_cols = []
+    select_expressions = []
 
-    # Iterate through all fields in the DataFrame's schema
+    def process_struct_field(parent_name, struct_type):
+        """Processes struct fields to create SQL aliases for flattening."""
+        expressions = []
+        for field in struct_type.fields:
+            field_name = f"{parent_name}.{field.name}"
+            flat_name = f"{parent_name}_{field.name}"
+            expressions.append(f"{field_name} AS {flat_name}")
+        return expressions
+
     for field in df.schema.fields:
-        field_name = field.name
-        field_type = field.dataType
-
-        if isinstance(field_type, StructType):
-            # If the field is a struct, flatten its fields
-            for subfield in field_type.fields:
-                flat_cols.append(col(f"{field_name}.{subfield.name}").alias(f"{field_name}_{subfield.name}"))
-        elif isinstance(field_type, ArrayType):
-            element_type = field_type.elementType
-            if isinstance(element_type, StructType):
-                # If the array contains structs, mark it for exploding
-                array_struct_cols.append(field_name)
+        if isinstance(field.dataType, StructType):
+            # Flatten struct type fields
+            select_expressions.extend(process_struct_field(field.name, field.dataType))
+        elif isinstance(field.dataType, ArrayType):
+            if isinstance(field.dataType.elementType, StructType):
+                # Explode and flatten arrays of structs
+                select_expressions.append(f"EXPLODE_OUTER({field.name}) AS {field.name}")
             else:
-                # If the array contains scalars, mark it for sorting
-                array_scalar_cols.append(field_name)
-                flat_cols.append(col(field_name))
+                # Sort scalar arrays and handle nulls
+                select_expressions.append(f"SORT_ARRAY(COALESCE({field.name}, ARRAY())) AS {field.name}")
         else:
-            # If the field is neither a struct nor an array, keep it as is
-            flat_cols.append(col(field_name))
+            # Include non-nested columns as-is
+            select_expressions.append(field.name)
 
-    # Explode array columns containing structs
-    for array_col in array_struct_cols:
-        # Explode the array of structs
-        df = df.withColumn(array_col, explode_outer(col(array_col)))
-        # After exploding, flatten the struct fields
-        # Since array_col is now a struct, directly access its fields
-        for subfield in df.schema[array_col].dataType.fields:
-            df = df.withColumn(f"{array_col}_{subfield.name}", col(f"{array_col}.{subfield.name}"))
-        # Drop the original exploded array column
-        df = df.drop(array_col)
+    # Join expressions with commas to create the SELECT clause
+    select_clause = ", ".join(select_expressions)
+    # Construct the final SQL query
+    sql_query = f"SELECT {select_clause} FROM {table_name}"
 
-    # Sort array columns containing scalars in ascending order, handling nulls
-    for array_col in array_scalar_cols:
-        # Replace null arrays with empty arrays before sorting
-        df = df.withColumn(
-            array_col,
-            sort_array(
-                coalesce(col(array_col), array()),
-                ascending=True
-            )
-        )
+    return sql_query
 
-    # Select all flattened columns
-    df_flat = df.select(*flat_cols)
-
-    # Check if there are still nested columns; if so, recursively flatten
-    has_nested = False
-    for field in df_flat.schema.fields:
-        if isinstance(field.dataType, StructType) or isinstance(field.dataType, ArrayType):
-            has_nested = True
-            break
-
-    if has_nested:
-        return flatten_df(df_flat)
-    else:
-        return df_flat
-
-# Create Sample Data for Table 1
+# Sample data with nested structures for testing
 data1 = [
-    (
-        1,
-        "John",
-        {"age": 30, "city": "New York"},
-        [
-            {"type": "home", "number": "123-456-7890"},
-            {"type": "work", "number": "098-765-4321"}
-        ],
-        {"scores": [85, 90, 78], "average": 84.3}
-    ),
-    (
-        2,
-        "Alice",
-        {"age": 25, "city": "San Francisco"},
-        [
-            {"type": "home", "number": "111-222-3333"}
-        ],
-        {"scores": [92, 88, 95], "average": 91.7}
-    ),
-    (
-        3,
-        "Bob",
-        {"age": 35, "city": "Chicago"},
-        [],
-        {"scores": [75, 80, 82], "average": 79.0}
-    )
+    (1, "John", {"age": 30, "city": "New York"}, [{"type": "home", "number": "123-456-7890"}, {"type": "work", "number": "098-765-4321"}], {"scores": [85, 90, 78], "average": 84.3}),
+    (2, "Alice", {"age": 25, "city": "San Francisco"}, [{"type": "home", "number": "111-222-3333"}], {"scores": [92, 88, 95], "average": 91.7}),
+    (3, "Bob", {"age": 35, "city": "Chicago"}, [], {"scores": [75, 80, 82], "average": 79.0})
 ]
 
-schema1 = StructType([
+schema = StructType([
     StructField("id", IntegerType(), False),
     StructField("name", StringType(), False),
-    StructField("info", StructType([
-        StructField("age", IntegerType(), True),
-        StructField("city", StringType(), True)
-    ]), True),
-    StructField("phones", ArrayType(StructType([
-        StructField("type", StringType(), True),
-        StructField("number", StringType(), True)
-    ])), True),
-    StructField("grades", StructType([
-        StructField("scores", ArrayType(IntegerType()), True),
-        StructField("average", DoubleType(), True)
-    ]), True)
+    StructField("info", StructType([StructField("age", IntegerType(), True), StructField("city", StringType(), True)]), True),
+    StructField("phones", ArrayType(StructType([StructField("type", StringType(), True), StructField("number", StringType(), True)])), True),
+    StructField("grades", StructType([StructField("scores", ArrayType(IntegerType()), True), StructField("average", DoubleType(), True)]), True)
 ])
 
-# Create DataFrame for Table 1
-df1 = spark.createDataFrame(data1, schema1)
+# Create DataFrame
+df = spark.createDataFrame(data1, schema)
 
-# Create Sample Data for Table 2 (Updated Data)
-data2 = [
-    (
-        1,
-        "John",
-        {"age": 31, "city": "New York"},  # Age changed
-        [
-            {"type": "home", "number": "123-456-7890"},
-            {"type": "work", "number": "098-765-4321"}
-        ],
-        {"scores": [85, 90, 78], "average": 84.3}
-    ),
-    (
-        2,
-        "Alice",
-        {"age": 25, "city": "San Francisco"},
-        [
-            {"type": "home", "number": "111-222-3333"},
-            {"type": "mobile", "number": "222-333-4444"}  # New phone added
-        ],
-        {"scores": [92, 88, 95, 100], "average": 93.8}  # New score added
-    ),
-    (
-        4,
-        "Charlie",
-        {"age": 28, "city": "Boston"},
-        [
-            {"type": "home", "number": "555-666-7777"}
-        ],
-        {"scores": [80, 85, 88], "average": 84.3}  # New record
-    )
-]
+# Register DataFrame as a temporary SQL table
+df.createOrReplaceTempView("nested_table")
 
-schema2 = StructType([
-    StructField("id", IntegerType(), False),
-    StructField("name", StringType(), False),
-    StructField("info", StructType([
-        StructField("age", IntegerType(), True),
-        StructField("city", StringType(), True)
-    ]), True),
-    StructField("phones", ArrayType(StructType([
-        StructField("type", StringType(), True),
-        StructField("number", StringType(), True)
-    ])), True),
-    StructField("grades", StructType([
-        StructField("scores", ArrayType(IntegerType()), True),
-        StructField("average", DoubleType(), True)
-    ]), True)
-])
+# Generate and execute the dynamic SQL query
+sql_query = generate_flatten_sql(df, "nested_table")
+print("Generated SQL Query:\n", sql_query)
 
-# Create DataFrame for Table 2
-df2 = spark.createDataFrame(data2, schema2)
+# Execute the query and fetch the results
+flattened_df = spark.sql(sql_query)
+flattened_df.show(truncate=False)
+flattened_df.printSchema()
 
-# Display Original DataFrames
-print("Original DataFrame - Table 1:")
-df1.show(truncate=False)
-df1.printSchema()
-
-print("\nOriginal DataFrame - Table 2:")
-df2.show(truncate=False)
-df2.printSchema()
-
-# Apply the flattening function to both DataFrames
-df1_flat = flatten_df(df1)
-df2_flat = flatten_df(df2)
-
-# Display Flattened DataFrames
-print("\nFlattened DataFrame - Table 1:")
-df1_flat.show(truncate=False)
-df1_flat.printSchema()
-
-print("\nFlattened DataFrame - Table 2:")
-df2_flat.show(truncate=False)
-df2_flat.printSchema()
-
-# Stop the SparkSession
+# Stop Spark session
 spark.stop()
