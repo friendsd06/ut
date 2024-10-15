@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, explode_outer, expr
 from pyspark.sql.types import StructType, ArrayType, StringType, IntegerType, DoubleType
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 def flatten_delta_table(df: DataFrame, columns_to_flatten: Optional[List[str]] = None, separator: str = "_") -> DataFrame:
     """
@@ -16,38 +16,46 @@ def flatten_delta_table(df: DataFrame, columns_to_flatten: Optional[List[str]] =
     DataFrame: A new DataFrame with specified (or all) nested structures flattened.
     """
 
-    def flatten_schema(schema: StructType, prefix: str = "") -> List[str]:
+    def flatten_schema(schema: StructType, prefix: str = "") -> Tuple[List[str], List[str]]:
         """
-        Recursively flatten the schema and return a list of flattened column expressions.
+        Recursively flatten the schema and return lists of flattened column expressions and array columns to explode.
         """
         fields = []
+        array_columns = []
         for field in schema.fields:
             name = prefix + field.name if prefix else field.name
             dtype = field.dataType
 
             if columns_to_flatten is None or name in columns_to_flatten:
                 if isinstance(dtype, StructType):
-                    fields.extend(flatten_schema(dtype, f"{name}{separator}"))
+                    nested_fields, nested_arrays = flatten_schema(dtype, f"{name}{separator}")
+                    fields.extend(nested_fields)
+                    array_columns.extend(nested_arrays)
                 elif isinstance(dtype, ArrayType):
+                    array_columns.append(name)
                     if isinstance(dtype.elementType, StructType):
-                        exploded = f"explode_outer({name})"
-                        fields.extend([f"{exploded}.{subname}" for subname in dtype.elementType.names])
+                        nested_fields, _ = flatten_schema(dtype.elementType, f"{name}{separator}")
+                        fields.extend(nested_fields)
                     else:
-                        fields.append(f"explode_outer({name}) as {name}")
+                        fields.append(f"{name} as {name}")
                 else:
                     fields.append(name)
             else:
                 fields.append(name)
 
-        return fields
+        return fields, array_columns
 
-    flat_cols = flatten_schema(df.schema)
+    flat_cols, array_cols = flatten_schema(df.schema)
 
-    # Create a new DataFrame with flattened columns
+    # First, explode all array columns
+    for array_col in array_cols:
+        df = df.withColumn(array_col, explode_outer(col(array_col)))
+
+    # Then, select all flattened columns
     df_flat = df.select([expr(col).alias(col.split(".")[-1].replace(separator, "_")) for col in flat_cols])
 
     # If any columns were flattened, recursively call the function again
-    if len(df_flat.columns) > len(df.columns):
+    if len(df_flat.columns) > len(df.columns) - len(array_cols):
         return flatten_delta_table(df_flat, columns_to_flatten, separator)
     else:
         return df_flat
