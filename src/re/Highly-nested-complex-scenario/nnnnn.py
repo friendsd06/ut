@@ -19,7 +19,7 @@ def generate_flatten_sql(df, table_name):
         str: A SQL query that flattens all nested columns.
     """
     select_expressions = []
-    explode_expressions = []
+    lateral_view_clauses = []
     temp_view_name = table_name
     alias_counter = 0
 
@@ -32,19 +32,22 @@ def generate_flatten_sql(df, table_name):
             for subfield in field_type.fields:
                 field_name = f"{parent}.{field}.{subfield.name}" if parent else f"{field}.{subfield.name}"
                 alias_name = f"{parent}_{field}_{subfield.name}" if parent else f"{field}_{subfield.name}"
+                select_expressions.append(f"{field_name} AS {alias_name}")
+                # Recursively process nested structs
                 process_field(f"{parent}.{field}" if parent else field, subfield.name, subfield.dataType)
         elif isinstance(field_type, ArrayType):
+            # Array of structs or scalars, need to explode
+            exploded_alias = f"{field}_exploded_{alias_counter}"
+            explode_clause = f"LATERAL VIEW OUTER EXPLODE({parent}.{field}) {exploded_alias}" if parent else f"LATERAL VIEW OUTER EXPLODE({field}) {exploded_alias}"
+            lateral_view_clauses.append(explode_clause)
             if isinstance(field_type.elementType, StructType):
-                # Array of structs, need to explode and alias the struct fields
-                explode_name = f"{parent}_{field}_exploded" if parent else f"{field}_exploded"
-                explode_expressions.append((explode_name, f"EXPLODE_OUTER({parent}.{field})" if parent else f"EXPLODE_OUTER({field})"))
-                # Recursively process each element in the exploded struct
-                process_field(explode_name, "", field_type.elementType)
+                # Process each element of the exploded struct array
+                process_field(exploded_alias, "", field_type.elementType)
             else:
-                # Array of scalars, we can sort and alias directly
-                select_expressions.append(f"SORT_ARRAY(COALESCE({parent}.{field}, ARRAY())) AS {parent}_{field}" if parent else f"SORT_ARRAY(COALESCE({field}, ARRAY())) AS {field}")
+                # Process scalar array directly
+                select_expressions.append(f"SORT_ARRAY(COALESCE({exploded_alias}, ARRAY())) AS {parent}_{field}" if parent else f"SORT_ARRAY(COALESCE({field}, ARRAY())) AS {field}")
         else:
-            # Handle standard field, add to select expressions with alias
+            # Handle scalar fields by aliasing
             select_expressions.append(f"{parent}.{field} AS {parent}_{field}" if parent else f"{field}")
 
     # Start processing top-level fields
@@ -53,9 +56,8 @@ def generate_flatten_sql(df, table_name):
 
     # Construct the SQL
     select_clause = ", ".join(select_expressions)
-    explode_clause = " ".join([f"LATERAL VIEW {expr} AS {alias}" for alias, expr in explode_expressions])
-
-    sql_query = f"SELECT {select_clause} FROM {table_name} {explode_clause}"
+    lateral_view_clause = " ".join(lateral_view_clauses)
+    sql_query = f"SELECT {select_clause} FROM {temp_view_name} {lateral_view_clause}"
 
     return sql_query
 
