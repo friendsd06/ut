@@ -1,4 +1,3 @@
-# Import necessary libraries
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 
@@ -11,7 +10,6 @@ spark = SparkSession.builder \
 def generate_flatten_sql(df, table_name):
     """
     Generates a SQL query to flatten all nested columns (structs and arrays) in a DataFrame.
-    Iteratively processes columns to handle deep nested structures.
 
     Args:
         df (DataFrame): The input DataFrame with nested columns.
@@ -21,45 +19,44 @@ def generate_flatten_sql(df, table_name):
         str: A SQL query that flattens all nested columns.
     """
     select_expressions = []
-    nested_columns = True  # Flag to control iterative flattening process
+    explode_expressions = []
     temp_view_name = table_name
+    alias_counter = 0
 
-    # Iteratively flatten until no nested columns remain
-    while nested_columns:
-        nested_columns = False
-        select_expressions = []
-
-        # Prepare SQL expressions based on current DataFrame schema
-        for field in df.schema.fields:
-            if isinstance(field.dataType, StructType):
-                # Flatten struct type fields by accessing each subfield
-                for subfield in field.dataType.fields:
-                    field_name = f"{field.name}.{subfield.name}"
-                    flat_name = f"{field.name}_{subfield.name}"
-                    select_expressions.append(f"{field_name} AS {flat_name}")
-                nested_columns = True  # Flag to indicate further flattening required
-            elif isinstance(field.dataType, ArrayType):
-                if isinstance(field.dataType.elementType, StructType):
-                    # Explode arrays of structs and access struct fields
-                    select_expressions.append(f"EXPLODE_OUTER({field.name}) AS {field.name}")
-                else:
-                    # Sort scalar arrays and handle nulls
-                    select_expressions.append(f"SORT_ARRAY(COALESCE({field.name}, ARRAY())) AS {field.name}")
-                nested_columns = True  # Flag to indicate further flattening required
+    # Process columns recursively to build SELECT and EXPLODE expressions
+    def process_field(parent, field, field_type):
+        nonlocal alias_counter
+        alias_counter += 1
+        if isinstance(field_type, StructType):
+            # Handle struct by flattening each field in the struct
+            for subfield in field_type.fields:
+                field_name = f"{parent}.{field}.{subfield.name}" if parent else f"{field}.{subfield.name}"
+                alias_name = f"{parent}_{field}_{subfield.name}" if parent else f"{field}_{subfield.name}"
+                process_field(f"{parent}.{field}" if parent else field, subfield.name, subfield.dataType)
+        elif isinstance(field_type, ArrayType):
+            if isinstance(field_type.elementType, StructType):
+                # Array of structs, need to explode and alias the struct fields
+                explode_name = f"{parent}_{field}_exploded" if parent else f"{field}_exploded"
+                explode_expressions.append((explode_name, f"EXPLODE_OUTER({parent}.{field})" if parent else f"EXPLODE_OUTER({field})"))
+                # Recursively process each element in the exploded struct
+                process_field(explode_name, "", field_type.elementType)
             else:
-                # Non-nested column, include as-is
-                select_expressions.append(field.name)
+                # Array of scalars, we can sort and alias directly
+                select_expressions.append(f"SORT_ARRAY(COALESCE({parent}.{field}, ARRAY())) AS {parent}_{field}" if parent else f"SORT_ARRAY(COALESCE({field}, ARRAY())) AS {field}")
+        else:
+            # Handle standard field, add to select expressions with alias
+            select_expressions.append(f"{parent}.{field} AS {parent}_{field}" if parent else f"{field}")
 
-        # Generate SQL SELECT clause from expressions
-        select_clause = ", ".join(select_expressions)
-        sql_query = f"SELECT {select_clause} FROM {temp_view_name}"
+    # Start processing top-level fields
+    for field in df.schema.fields:
+        process_field("", field.name, field.dataType)
 
-        # Execute SQL and register the result as a new temp view for further processing if needed
-        df = spark.sql(sql_query)
-        temp_view_name = f"{table_name}_flattened"
-        df.createOrReplaceTempView(temp_view_name)
+    # Construct the SQL
+    select_clause = ", ".join(select_expressions)
+    explode_clause = " ".join([f"LATERAL VIEW {expr} AS {alias}" for alias, expr in explode_expressions])
 
-    # Return final SQL query after all iterations
+    sql_query = f"SELECT {select_clause} FROM {table_name} {explode_clause}"
+
     return sql_query
 
 # Sample complex nested data
