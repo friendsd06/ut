@@ -9,7 +9,14 @@ spark = SparkSession.builder \
 
 def generate_flatten_sql(df, table_name):
     """
-    [Function code as defined above]
+    Generates a SQL query to flatten all nested columns (structs and arrays) in a DataFrame.
+
+    Args:
+        df (DataFrame): The input DataFrame with nested columns.
+        table_name (str): The temporary table name for the DataFrame in SQL.
+
+    Returns:
+        str: A SQL query that flattens all nested columns.
     """
     select_expressions = []
     lateral_view_clauses = []
@@ -40,11 +47,11 @@ def generate_flatten_sql(df, table_name):
                 process_field(parent=alias_prefix, field=subfield.name, field_type=subfield.dataType)
         elif isinstance(field_type, ArrayType):
             element_type = field_type.elementType
-            alias_counter += 1
-            exploded_alias = f"{alias_prefix}_exploded_{alias_counter}"
-
             if isinstance(element_type, StructType):
                 # Handle Array of Structs: Explode and process subfields
+                alias_counter += 1
+                exploded_alias = f"{alias_prefix}_exploded_{alias_counter}"
+
                 if parent:
                     explode_clause = f"LATERAL VIEW OUTER EXPLODE({parent}.`{field}`) {exploded_alias} AS `{exploded_alias}`"
                 else:
@@ -57,11 +64,11 @@ def generate_flatten_sql(df, table_name):
             else:
                 # Handle Array of Scalars: Sort and alias
                 if parent:
-                    alias_name = f"{parent}_{field}"
+                    alias_name = f"{parent}_{field}_sorted"
                 else:
-                    alias_name = field
+                    alias_name = f"{field}_sorted"
                 # Sort the array to ensure order-independent comparison
-                sort_expr = f"SORT_ARRAY({full_field}, TRUE) AS `{alias_name}_sorted`"
+                sort_expr = f"SORT_ARRAY({full_field}, TRUE) AS `{alias_name}`"
                 select_expressions.append(sort_expr)
         else:
             # Handle Scalar Types: Alias the field
@@ -82,15 +89,25 @@ def generate_flatten_sql(df, table_name):
     lateral_view_clause = " ".join(lateral_view_clauses)
 
     # Construct the final SQL query
-    sql_query = f"SELECT \n  {select_clause} \nFROM `{table_name}` {lateral_view_clause}"
+    if lateral_view_clause:
+        sql_query = f"SELECT \n  {select_clause} \nFROM `{table_name}` {lateral_view_clause}"
+    else:
+        sql_query = f"SELECT \n  {select_clause} \nFROM `{table_name}`"
 
     return sql_query
 
-# Sample complex nested data
+# Sample complex nested data including 'grades' field
 data = [
     (
         1,
-        {"name": "John Doe", "age": 30, "contact": {"email": "john@example.com", "phone": "123-456-7890"}},
+        {
+            "name": "John Doe",
+            "age": 30,
+            "contact": {
+                "email": "john@example.com",
+                "phone": "123-456-7890"
+            }
+        },
         [
             {
                 "order_id": 101,
@@ -101,7 +118,11 @@ data = [
                 "payment_details": {
                     "method": "Credit Card",
                     "card": {"type": "Visa", "number": "****-1234"},
-                    "billing_address": {"street": "123 Main St", "city": "New York", "zip": "10001"}
+                    "billing_address": {
+                        "street": "123 Main St",
+                        "city": "New York",
+                        "zip": "10001"
+                    }
                 }
             },
             {
@@ -118,11 +139,22 @@ data = [
         [
             {"category": "electronics", "tags": ["tech", "gadgets"]},
             {"category": "home", "tags": ["decor", "furniture"]}
-        ]
+        ],
+        {
+            "scores": [85, 90, 78],
+            "average": 84.3
+        }
     ),
     (
         2,
-        {"name": "Alice Smith", "age": 28, "contact": {"email": "alice@example.com", "phone": "987-654-3210"}},
+        {
+            "name": "Alice Smith",
+            "age": 28,
+            "contact": {
+                "email": "alice@example.com",
+                "phone": "987-654-3210"
+            }
+        },
         [
             {
                 "order_id": 103,
@@ -132,17 +164,25 @@ data = [
                 "payment_details": {
                     "method": "Credit Card",
                     "card": {"type": "MasterCard", "number": "****-5678"},
-                    "billing_address": {"street": "456 Elm St", "city": "Los Angeles", "zip": "90001"}
+                    "billing_address": {
+                        "street": "456 Elm St",
+                        "city": "Los Angeles",
+                        "zip": "90001"
+                    }
                 }
             }
         ],
         [
             {"category": "office", "tags": ["work", "productivity"]}
-        ]
+        ],
+        {
+            "scores": [92, 88, 95],
+            "average": 91.7
+        }
     )
 ]
 
-# Define schema for the complex nested structure
+# Define schema for the complex nested structure, including 'grades' field
 schema = StructType([
     StructField("customer_id", IntegerType(), False),
     StructField("customer_info", StructType([
@@ -176,7 +216,11 @@ schema = StructType([
     StructField("preferences", ArrayType(StructType([
         StructField("category", StringType(), True),
         StructField("tags", ArrayType(StringType()), True)
-    ])), True)
+    ])), True),
+    StructField("grades", StructType([
+        StructField("scores", ArrayType(IntegerType()), True),
+        StructField("average", DoubleType(), True)
+    ]), True)
 ])
 
 # Create DataFrame from sample data
