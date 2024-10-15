@@ -1,114 +1,93 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, explode_outer, sort_array
-from pyspark.sql.types import StructType, ArrayType, StringType, IntegerType, DoubleType
-from typing import List, Optional, Tuple
+from pyspark.sql.types import StructType, ArrayType
+from typing import List, Optional
 
-def flatten_delta_table(
+def generate_flatten_sql(schema: StructType, prefix: str = "", separator: str = "_") -> List[str]:
+    """
+    Recursively generate SQL expressions to flatten a nested schema.
+
+    Args:
+    -----
+    schema : StructType
+        The schema to flatten.
+    prefix : str, optional
+        Prefix for nested column names.
+    separator : str, optional
+        Separator for nested column names.
+
+    Returns:
+    --------
+    List[str]
+        List of SQL expressions for flattening.
+    """
+    expressions = []
+    for field in schema.fields:
+        column_name = f"{prefix}{field.name}"
+        if isinstance(field.dataType, StructType):
+            nested_exprs = generate_flatten_sql(field.dataType, f"{column_name}{separator}", separator)
+            expressions.extend(nested_exprs)
+        elif isinstance(field.dataType, ArrayType):
+            if isinstance(field.dataType.elementType, StructType):
+                nested_exprs = generate_flatten_sql(field.dataType.elementType, f"{column_name}{separator}", separator)
+                array_exprs = [f"explode_outer({column_name}) as {column_name}"]
+                array_exprs.extend([f"{expr} as {column_name}{separator}{alias.split(' as ')[1]}" for expr, alias in zip(nested_exprs, nested_exprs)])
+                expressions.extend(array_exprs)
+            else:
+                expressions.append(f"array_sort({column_name}) as {column_name}")
+        else:
+            expressions.append(f"{column_name} as {column_name.replace('.', separator)}")
+    return expressions
+
+def flatten_delta_table_sql(
         df: DataFrame,
         columns_to_flatten: Optional[List[str]] = None,
         separator: str = "_"
 ) -> DataFrame:
     """
-    Recursively flatten specified columns or all nested structures (structs and arrays) in a Delta table.
+    Flatten a Delta table using SQL expressions.
 
     Args:
     -----
-    df (DataFrame): The input Delta table as a Spark DataFrame.
-    columns_to_flatten (List[str], optional): List of column names to flatten. 
-        Supports nested columns using dot notation (e.g., "order_details.items").
-        If None, all nested columns will be flattened.
-    separator (str): The separator to use for flattened column names. Default is "_".
+    df : DataFrame
+        The input Delta table as a Spark DataFrame.
+    columns_to_flatten : List[str], optional
+        List of column names to flatten. If None, all nested columns will be flattened.
+    separator : str, optional
+        Separator for nested column names.
 
     Returns:
     --------
-    DataFrame: A new DataFrame with specified (or all) nested structures flattened.
+    DataFrame
+        A new DataFrame with specified (or all) nested structures flattened.
     """
+    schema = df.schema
+    flat_expressions = generate_flatten_sql(schema, separator=separator)
 
-    def flatten_schema(
-            schema: StructType,
-            prefix: str = ""
-    ) -> Tuple[List[str], List[str], List[str]]:
-        """
-        Recursively flatten the schema and return lists of flattened column names,
-        array columns containing structs to explode, and array columns containing scalars.
+    if columns_to_flatten:
+        flat_expressions = [expr for expr in flat_expressions if any(expr.startswith(col) for col in columns_to_flatten)]
 
-        Returns:
-        --------
-        Tuple[List[str], List[str], List[str]]:
-            flat_cols: List of flattened column names.
-            array_struct_cols: List of array columns containing structs to explode.
-            array_scalar_cols: List of array columns containing scalars to sort.
-        """
-        flat_cols = []
-        array_struct_cols = []
-        array_scalar_cols = []
-        for field in schema.fields:
-            name = f"{prefix}{separator}{field.name}" if prefix else field.name
-            dtype = field.dataType
+    # Create a SQL expression that selects all flattened columns
+    select_expr = ", ".join(flat_expressions)
 
-            should_flatten = (
-                    columns_to_flatten is None or
-                    any(name.startswith(col.replace(".", separator)) for col in (columns_to_flatten or []))
-            )
+    # Create a temporary view of the original DataFrame
+    view_name = "temp_view_for_flattening"
+    df.createOrReplaceTempView(view_name)
 
-            if should_flatten:
-                if isinstance(dtype, StructType):
-                    nested_flat_cols, nested_array_struct_cols, nested_array_scalar_cols = flatten_schema(
-                        dtype, prefix=name
-                    )
-                    flat_cols.extend(nested_flat_cols)
-                    array_struct_cols.extend(nested_array_struct_cols)
-                    array_scalar_cols.extend(nested_array_scalar_cols)
-                elif isinstance(dtype, ArrayType):
-                    if isinstance(dtype.elementType, StructType):
-                        array_struct_cols.append(name)
-                    else:
-                        array_scalar_cols.append(name)
-                    flat_cols.append(name)
-                else:
-                    flat_cols.append(name)
-            else:
-                flat_cols.append(name)
+    # Execute the SQL query
+    flattened_df = df.sparkSession.sql(f"SELECT {select_expr} FROM {view_name}")
 
-        return flat_cols, array_struct_cols, array_scalar_cols
+    # Drop the temporary view
+    df.sparkSession.catalog.dropTempView(view_name)
 
-    # Step 1: Flatten the schema to identify columns to explode or sort
-    flat_cols, array_struct_cols, array_scalar_cols = flatten_schema(df.schema)
+    return flattened_df
 
-    # Step 2: Explode array columns containing structs
-    for array_col in array_struct_cols:
-        df = df.withColumn(array_col, explode_outer(col(array_col)))
-        struct_fields = df.schema[array_col].dataType.fields
-        for field in struct_fields:
-            new_col_name = f"{array_col}{separator}{field.name}"
-            df = df.withColumn(new_col_name, col(f"{array_col}.{field.name}"))
-        df = df.drop(array_col)
-
-    # Step 3: Sort array columns containing scalars
-    for array_col in array_scalar_cols:
-        df = df.withColumn(array_col, sort_array(col(array_col)))
-
-    # Step 4: Select all flattened columns with appropriate aliasing
-    select_exprs = [
-        col(col_name).alias(col_name.replace(separator, "_"))
-        for col_name in df.columns
-    ]
-
-    df_flat = df.select(*select_exprs)
-
-    # Step 5: Recursively flatten further nested structures if any
-    if len(df_flat.columns) > len(df.columns):
-        return flatten_delta_table(df_flat, columns_to_flatten, separator)
-    else:
-        return df_flat
-
-def test_flatten_delta_table():
+def test_flatten_delta_table_sql():
     """
-    Test function to demonstrate the usage of flatten_delta_table.
+    Test function to demonstrate the usage of flatten_delta_table_sql.
     """
     # Create a SparkSession
     spark = SparkSession.builder \
-        .appName("FlattenDeltaTableTest") \
+        .appName("FlattenDeltaTableSQLTest") \
         .master("local[*]") \
         .getOrCreate()
 
@@ -149,13 +128,13 @@ def test_flatten_delta_table():
     df.printSchema()
 
     # Test case 1: Flatten all nested columns
-    df_flat_all = flatten_delta_table(df)
+    df_flat_all = flatten_delta_table_sql(df)
     print("\nFlattened DataFrame (all nested columns):")
     df_flat_all.show(truncate=False)
     df_flat_all.printSchema()
 
     # Test case 2: Flatten specific columns
-    df_flat_specific = flatten_delta_table(df, columns_to_flatten=["info", "phones"])
+    df_flat_specific = flatten_delta_table_sql(df, columns_to_flatten=["info", "phones"])
     print("\nFlattened DataFrame (specific columns: info, phones):")
     df_flat_specific.show(truncate=False)
     df_flat_specific.printSchema()
@@ -164,4 +143,4 @@ def test_flatten_delta_table():
     spark.stop()
 
 if __name__ == "__main__":
-    test_flatten_delta_table()
+    test_flatten_delta_table_sql()
