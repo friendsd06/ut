@@ -316,6 +316,7 @@ def create_complex_sample_data(schema: StructType):
         )
     ]
 
+    # Create DataFrames
     source_df = spark.createDataFrame(source_data, schema)
     target_df = spark.createDataFrame(target_data, schema)
 
