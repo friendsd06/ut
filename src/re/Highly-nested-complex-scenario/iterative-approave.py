@@ -24,7 +24,7 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
     stack = [(None, field.name, field.dataType) for field in df.schema.fields]
 
     # Set of columns to explode for quick lookup
-    explode_columns = columns_to_explode or []
+    explode_columns = set(columns_to_explode or [])
 
     while stack:
         parent, field, field_type = stack.pop()
@@ -35,18 +35,18 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
             for subfield in field_type.fields:
                 sub_full_field = f"{full_field}.{subfield.name}"
                 alias_name = f"{full_field.replace('.', '_')}_{subfield.name}"
-                select_expressions.append(f"{sub_full_field} AS `{alias_name}`")
+                select_expressions.append(f"`{sub_full_field}` AS `{alias_name}`")
                 stack.append((full_field, subfield.name, subfield.dataType))
 
         elif isinstance(field_type, ArrayType):
             # Only explode if the column is specified in explode_columns or if explode_columns is empty (explode all)
-            should_explode = not explode_columns or field in explode_columns
+            should_explode = not explode_columns or full_field in explode_columns
             if should_explode:
                 alias_counter += 1
                 exploded_alias = f"{field}_exploded_{alias_counter}"
 
                 # Lateral view clause for explosion
-                explode_clause = f"LATERAL VIEW OUTER EXPLODE(`{full_field}`) {exploded_alias}"
+                explode_clause = f"LATERAL VIEW OUTER EXPLODE(`{full_field}`) {exploded_alias} AS `{exploded_alias}`"
                 lateral_view_clauses.append(explode_clause)
 
                 element_type = field_type.elementType
@@ -55,18 +55,16 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
                     for subfield in element_type.fields:
                         sub_full_field = f"{exploded_alias}.{subfield.name}"
                         alias_name = f"{exploded_alias}_{subfield.name}"
-                        select_expressions.append(f"{sub_full_field} AS `{alias_name}`")
+                        select_expressions.append(f"`{sub_full_field}` AS `{alias_name}`")
                         stack.append((exploded_alias, subfield.name, subfield.dataType))
                 else:
-                    # For non-struct arrays, sort and coalesce
+                    # For non-struct arrays, use the exploded alias directly
                     alias_name = f"{full_field.replace('.', '_')}"
-                    sort_expr = f"SORT_ARRAY(COALESCE(`{exploded_alias}`, ARRAY())) AS `{alias_name}`"
-                    select_expressions.append(sort_expr)
+                    select_expressions.append(f"`{exploded_alias}` AS `{alias_name}`")
             else:
-                # If not exploding, directly coalesce and sort the array
+                # If not exploding, directly use the array
                 alias_name = f"{full_field.replace('.', '_')}"
-                sort_expr = f"SORT_ARRAY(COALESCE(`{full_field}`, ARRAY())) AS `{alias_name}`"
-                select_expressions.append(sort_expr)
+                select_expressions.append(f"`{full_field}` AS `{alias_name}`")
 
         else:
             # For simple fields, just add them to select_expressions
@@ -134,8 +132,8 @@ df = spark.createDataFrame(data, schema)
 # Register DataFrame as a temporary SQL table
 df.createOrReplaceTempView("complex_nested_table")
 
-# Specify columns to explode in a specific order (e.g., 'orders' first, then 'preferences')
-columns_to_explode = ["orders", "preferences"]
+# Specify columns to explode in a specific order
+columns_to_explode = ["orders", "orders.order_items", "preferences", "preferences.tags"]
 
 # Generate the flatten SQL query using iterative approach with controlled explosion order
 sql_query = generate_flatten_sql(df, "complex_nested_table", columns_to_explode)
