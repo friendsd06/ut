@@ -9,7 +9,7 @@ spark = SparkSession.builder \
 
 def generate_flatten_sql(df, table_name, columns_to_explode=None):
     """
-    Generates a SQL query to flatten a nested DataFrame schema, handling deep nesting.
+    Generates a SQL query to flatten a nested DataFrame schema, handling deep nesting with proper column resolution.
 
     :param df: Input DataFrame with nested schema
     :param table_name: Name of the table to generate SQL for
@@ -17,37 +17,38 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
     :return: Flattened SQL query as a string
     """
     select_expressions = []
-    lateral_view_clauses = []
+    from_clause = f"`{table_name}`"
     explode_columns = set(columns_to_explode or [])
 
-    def process_field(field_path, data_type, current_depth=0, parent_exploded=False):
-        nonlocal select_expressions, lateral_view_clauses
+    def process_field(field_path, data_type, current_alias):
+        nonlocal select_expressions, from_clause
 
         if isinstance(data_type, StructType):
             for subfield in data_type.fields:
                 sub_path = f"{field_path}.{subfield.name}" if field_path else subfield.name
-                process_field(sub_path, subfield.dataType, current_depth, parent_exploded)
+                process_field(sub_path, subfield.dataType, current_alias)
         elif isinstance(data_type, ArrayType):
             should_explode = field_path in explode_columns or not explode_columns
-            if should_explode and not parent_exploded:
-                alias = f"exploded_{field_path.replace('.', '_')}_{current_depth}"
-                lateral_view_clauses.append(f"LATERAL VIEW EXPLODE(COALESCE(`{field_path}`, ARRAY(NULL))) {alias} AS `{alias}`")
-                process_field(alias, data_type.elementType, current_depth + 1, True)
+            if should_explode:
+                new_alias = f"exploded_{field_path.replace('.', '_')}"
+                from_clause += f"\nLATERAL VIEW EXPLODE(COALESCE(`{current_alias}`.`{field_path}`, ARRAY(NULL))) {new_alias} AS `{new_alias}`"
+                if isinstance(data_type.elementType, StructType):
+                    for subfield in data_type.elementType.fields:
+                        sub_path = f"{new_alias}.{subfield.name}"
+                        select_expressions.append(f"`{sub_path}` AS `{field_path}_{subfield.name}`")
+                        process_field(sub_path, subfield.dataType, new_alias)
+                else:
+                    select_expressions.append(f"`{new_alias}` AS `{field_path}`")
             else:
-                alias = field_path.replace('.', '_')
-                select_expressions.append(f"`{field_path}` AS `{alias}`")
-                if isinstance(data_type.elementType, (StructType, ArrayType)):
-                    process_field(field_path, data_type.elementType, current_depth, parent_exploded)
+                select_expressions.append(f"`{current_alias}`.`{field_path}` AS `{field_path}`")
         else:
-            alias = field_path.replace('.', '_')
-            select_expressions.append(f"`{field_path}` AS `{alias}`")
+            select_expressions.append(f"`{current_alias}`.`{field_path}` AS `{field_path}`")
 
     for field in df.schema.fields:
-        process_field(field.name, field.dataType)
+        process_field(field.name, field.dataType, table_name)
 
     select_clause = ",\n    ".join(select_expressions)
-    lateral_view_clause = "\n    ".join(lateral_view_clauses)
-    sql_query = f"SELECT DISTINCT\n    {select_clause}\nFROM `{table_name}`\n    {lateral_view_clause}"
+    sql_query = f"SELECT DISTINCT\n    {select_clause}\nFROM {from_clause}"
 
     return sql_query
 
