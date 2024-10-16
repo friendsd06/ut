@@ -2,19 +2,32 @@
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, when, lit
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
+import ipywidgets as widgets
 from IPython.display import display, HTML
+import json
 
 # Initialize Spark Session
 spark = SparkSession.builder.appName("ReconTool").getOrCreate()
 
-# Create sample datasets
-schema = StructType([
+# ==================== Define Your Custom Datasets ====================
+
+# Define the schema for source DataFrame
+source_schema = StructType([
     StructField("id", IntegerType(), True),
     StructField("name", StringType(), True),
     StructField("age", IntegerType(), True),
     StructField("salary", DoubleType(), True)
 ])
 
+# Define the schema for target DataFrame
+target_schema = StructType([
+    StructField("id", IntegerType(), True),
+    StructField("name", StringType(), True),
+    StructField("age", IntegerType(), True),
+    StructField("salary", DoubleType(), True)
+])
+
+# Replace the sample data below with your own custom data
 source_data = [
     (1, "Alice", 30, 50000.0),
     (2, "Bob", 35, 60000.0),
@@ -31,11 +44,28 @@ target_data = [
     (6, "Frank", 55, 95000.0)  # New record in target
 ]
 
-source_df = spark.createDataFrame(source_data, schema)
-target_df = spark.createDataFrame(target_data, schema)
+# Create DataFrames using the custom data
+source_df = spark.createDataFrame(source_data, source_schema)
+target_df = spark.createDataFrame(target_data, target_schema)
+
+# ==================== End of Custom Dataset Definition ====================
+
+def get_common_columns(source_df: DataFrame, target_df: DataFrame) -> list:
+    """
+    Retrieve the list of common columns between source and target DataFrames.
+    """
+    source_columns = source_df.columns
+    target_columns = target_df.columns
+    return list(set(source_columns) & set(target_columns))
 
 def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, columns_to_check: list) -> DataFrame:
-    joined_df = source_df.join(target_df, columns_to_check, "full_outer")
+    """
+    Reconcile two DataFrames based on specified columns.
+    """
+    # Assuming 'id' is the key for joining; modify if different
+    key_column = "id"
+
+    joined_df = source_df.alias("source").join(target_df.alias("target"), on=key_column, how="full_outer")
 
     conditions = [
         when(col(f"source.{c}") != col(f"target.{c}"), "Mismatch")
@@ -57,93 +87,104 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, columns_to_
     )
 
 # Create widgets for user input
-columns = source_df.columns
-dbutils.widgets.multiselect("columns_to_reconcile", defaultValue=columns[0], choices=columns, label="Columns to Reconcile")
-dbutils.widgets.dropdown("action", defaultValue="Select Action", choices=["Select Action", "Run Reconciliation", "Show All Results"], label="Action")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Reconciliation Tool
-# MAGIC Use the widgets above to select columns and run the reconciliation.
-
-# COMMAND ----------
+columns_to_reconcile = get_common_columns(source_df, target_df)
+columns_widget = widgets.SelectMultiple(
+    options=columns_to_reconcile,
+    value=columns_to_reconcile,  # Default to all common columns selected
+    description='Columns to Reconcile:',
+    disabled=False
+)
+run_button = widgets.Button(description="Run Reconciliation")
+output = widgets.Output()
 
 reconciliation_results = []
 
-def run_reconciliation():
-    columns_to_check = dbutils.widgets.get("columns_to_reconcile").split(",")
+def run_reconciliation(b):
+    with output:
+        output.clear_output()
+        print("Running reconciliation...")
+        columns_to_check = list(columns_widget.value)  # Convert to list for processing
 
-    if not columns_to_check:
-        print("Please select at least one column to reconcile.")
-        return
+        if not columns_to_check:
+            print("Please select at least one column to reconcile.")
+            return
 
-    result_df = reconcile_dataframes(source_df, target_df, columns_to_check)
+        result_df = reconcile_dataframes(source_df, target_df, columns_to_check)
 
-    html_table = "<table style='border-collapse: collapse; width: 100%;'>"
-    html_table += "<tr style='background-color: #f2f2f2;'><th style='border: 1px solid #ddd; padding: 8px;'>Column</th><th style='border: 1px solid #ddd; padding: 8px;'>Matches</th><th style='border: 1px solid #ddd; padding: 8px;'>Mismatches</th><th style='border: 1px solid #ddd; padding: 8px;'>Missing in Source</th><th style='border: 1px solid #ddd; padding: 8px;'>Missing in Target</th></tr>"
+        html_table = "<table style='border-collapse: collapse; width: 100%;'>"
+        html_table += "<tr style='background-color: #f2f2f2;'>"
+        html_table += "<th style='border: 1px solid #ddd; padding: 8px;'>Column</th>"
+        html_table += "<th style='border: 1px solid #ddd; padding: 8px;'>Matches</th>"
+        html_table += "<th style='border: 1px solid #ddd; padding: 8px;'>Mismatches</th>"
+        html_table += "<th style='border: 1px solid #ddd; padding: 8px;'>Missing in Source</th>"
+        html_table += "<th style='border: 1px solid #ddd; padding: 8px;'>Missing in Target</th>"
+        html_table += "</tr>"
 
-    recon_summary = {}
-    for col in columns_to_check:
-        matches = result_df.select(f"{col}_Match").first()[0]
-        mismatches = result_df.select(f"{col}_Mismatch").first()[0]
-        missing_source = result_df.select(f"{col}_Missing_in_Source").first()[0]
-        missing_target = result_df.select(f"{col}_Missing_in_Target").first()[0]
+        recon_summary = {}
+        for c in columns_to_check:
+            # Collect metrics for each column
+            metrics = result_df.select(
+                f"{c}_Match", f"{c}_Mismatch", f"{c}_Missing_in_Source", f"{c}_Missing_in_Target"
+            ).first()
+            if metrics:
+                matches, mismatches, missing_source, missing_target = metrics
+            else:
+                matches = mismatches = missing_source = missing_target = 0
 
-        recon_summary[col] = {
-            "Matches": matches,
-            "Mismatches": mismatches,
-            "Missing in Source": missing_source,
-            "Missing in Target": missing_target
-        }
+            recon_summary[c] = {
+                "Matches": matches,
+                "Mismatches": mismatches,
+                "Missing in Source": missing_source,
+                "Missing in Target": missing_target
+            }
 
-        html_table += f"<tr><td style='border: 1px solid #ddd; padding: 8px;'>{col}</td>"
-        html_table += f"<td style='border: 1px solid #ddd; padding: 8px;'>{matches}</td>"
-        html_table += f"<td style='border: 1px solid #ddd; padding: 8px; background-color: {'#ffcccc' if mismatches > 0 else 'inherit'};'>{mismatches}</td>"
-        html_table += f"<td style='border: 1px solid #ddd; padding: 8px; background-color: {'#ffffcc' if missing_source > 0 else 'inherit'};'>{missing_source}</td>"
-        html_table += f"<td style='border: 1px solid #ddd; padding: 8px; background-color: {'#ffffcc' if missing_target > 0 else 'inherit'};'>{missing_target}</td></tr>"
+            # Build HTML table rows
+            html_table += f"<tr>"
+            html_table += f"<td style='border: 1px solid #ddd; padding: 8px;'>{c}</td>"
+            html_table += f"<td style='border: 1px solid #ddd; padding: 8px;'>{matches}</td>"
+            html_table += f"<td style='border: 1px solid #ddd; padding: 8px; background-color: {'#ffcccc' if mismatches > 0 else 'inherit'};'>{mismatches}</td>"
+            html_table += f"<td style='border: 1px solid #ddd; padding: 8px; background-color: {'#ffffcc' if missing_source > 0 else 'inherit'};'>{missing_source}</td>"
+            html_table += f"<td style='border: 1px solid #ddd; padding: 8px; background-color: {'#ffffcc' if missing_target > 0 else 'inherit'};'>{missing_target}</td>"
+            html_table += f"</tr>"
 
-    html_table += "</table>"
-    displayHTML(html_table)
+        html_table += "</table>"
+        display(HTML(html_table))
 
-    reconciliation_results.append({
-        "Columns": columns_to_check,
-        "Summary": recon_summary
-    })
+        reconciliation_results.append({
+            "Columns": columns_to_check,
+            "Summary": recon_summary
+        })
 
-    print("\nReconciliation completed successfully!")
-    print(f"Total reconciliations performed: {len(reconciliation_results)}")
+        print("\nReconciliation completed successfully!")
+        print(f"Total reconciliations performed: {len(reconciliation_results)}")
 
-def show_all_results():
-    if not reconciliation_results:
-        print("No reconciliations have been performed yet.")
-    else:
-        for idx, result in enumerate(reconciliation_results, 1):
-            print(f"\nReconciliation #{idx}")
-            print(f"Columns: {', '.join(result['Columns'])}")
-            print("Summary:")
-            for col, summary in result['Summary'].items():
-                print(f"  {col}:")
-                for metric, value in summary.items():
-                    print(f"    {metric}: {value}")
-            print("-" * 50)
+run_button.on_click(run_reconciliation)
 
-def handle_action(action):
-    if action == "Run Reconciliation":
-        run_reconciliation()
-    elif action == "Show All Results":
-        show_all_results()
+# Display the UI
+display(widgets.VBox([columns_widget, run_button, output]))
 
-# Set up the action handler
-dbutils.widgets.onEvent("action", handle_action)
+# Add a button to show all reconciliation results
+show_all_results_button = widgets.Button(description="Show All Reconciliation Results")
+all_results_output = widgets.Output()
 
-print("Reconciliation Tool is ready. Please select columns and choose an action from the dropdown.")
+def show_all_results(b):
+    with all_results_output:
+        all_results_output.clear_output()
+        if not reconciliation_results:
+            print("No reconciliations have been performed yet.")
+        else:
+            for idx, result in enumerate(reconciliation_results, 1):
+                print(f"\nReconciliation #{idx}")
+                print(f"Columns: {', '.join(result['Columns'])}")
+                print("Summary:")
+                for col, summary in result['Summary'].items():
+                    print(f"  {col}:")
+                    for metric, value in summary.items():
+                        print(f"    {metric}: {value}")
+                print("-" * 50)
+
+show_all_results_button.on_click(show_all_results)
+
+display(show_all_results_button, all_results_output)
 
 # COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### How to Use
-# MAGIC 1. Select the columns you want to reconcile from the "Columns to Reconcile" dropdown.
-# MAGIC 2. Choose "Run Reconciliation" from the Action dropdown to perform the reconciliation.
-# MAGIC 3. View the results in the table that appears below.
-# MAGIC 4. To see a summary of all reconciliations performed, choose "Show All Results" from the Action dropdown.
