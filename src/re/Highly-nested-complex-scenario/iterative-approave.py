@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType, BooleanType
 
 # Initialize SparkSession
 spark = SparkSession.builder \
@@ -26,31 +26,48 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
         if isinstance(field_type, StructType):
             for subfield in field_type.fields:
                 full_field = f"{parent}.{field}.{subfield.name}" if parent else f"{field}.{subfield.name}"
-                alias_name = full_field.replace('.', '_')
+                alias_name = f"{parent}_{field}_{subfield.name}" if parent else f"{field}_{subfield.name}"
                 process_field(parent=f"{parent}.{field}" if parent else field, field=subfield.name, field_type=subfield.dataType)
         elif isinstance(field_type, ArrayType):
+            element_type = field_type.elementType
             full_field = f"{parent}.{field}" if parent else field
             should_explode = full_field in explode_columns or not explode_columns
+
             if should_explode:
                 alias_counter += 1
                 exploded_alias = f"{field}_exploded_{alias_counter}"
-                lateral_view_clauses.append(f"LATERAL VIEW OUTER EXPLODE(COALESCE(`{full_field}`, ARRAY(NULL))) {exploded_alias} AS `{exploded_alias}`")
-
-                if isinstance(field_type.elementType, StructType):
-                    for subfield in field_type.elementType.fields:
-                        sub_full_field = f"{exploded_alias}.{subfield.name}"
-                        alias_name = f"{full_field}_{subfield.name}"
-                        select_expressions.append(f"`{sub_full_field}` AS `{alias_name}`")
+                if isinstance(element_type, StructType):
+                    if parent:
+                        explode_clause = f"LATERAL VIEW OUTER EXPLODE({parent}.`{field}`) {exploded_alias} AS `{exploded_alias}`"
+                    else:
+                        explode_clause = f"LATERAL VIEW OUTER EXPLODE(`{field}`) {exploded_alias} AS `{exploded_alias}`"
+                    lateral_view_clauses.append(explode_clause)
+                    for subfield in element_type.fields:
+                        full_field = f"{exploded_alias}.{subfield.name}"
+                        alias_name = f"{field}_{subfield.name}_{alias_counter}"
+                        select_expressions.append(f"{full_field} AS `{alias_name}`")
                         process_field(parent=exploded_alias, field=subfield.name, field_type=subfield.dataType)
                 else:
-                    select_expressions.append(f"`{exploded_alias}` AS `{full_field}`")
+                    if parent:
+                        explode_clause = f"LATERAL VIEW OUTER EXPLODE({parent}.`{field}`) {exploded_alias} AS `{exploded_alias}`"
+                    else:
+                        explode_clause = f"LATERAL VIEW OUTER EXPLODE(`{field}`) {exploded_alias} AS `{exploded_alias}`"
+                    lateral_view_clauses.append(explode_clause)
+                    alias_name = f"{field}_{alias_counter}"
+                    select_expressions.append(f"`{exploded_alias}` AS `{alias_name}`")
             else:
-                alias_name = full_field.replace('.', '_')
-                select_expressions.append(f"`{full_field}` AS `{alias_name}`")
+                if parent:
+                    alias_name = f"{parent}_{field}"
+                else:
+                    alias_name = field
+                select_expressions.append(f"SORT_ARRAY({parent}.`{field}`) AS `{alias_name}`")
         else:
-            full_field = f"{parent}.{field}" if parent else field
-            alias_name = full_field.replace('.', '_')
-            select_expressions.append(f"`{full_field}` AS `{alias_name}`")
+            if parent:
+                alias_name = f"{parent}_{field}"
+                select_expressions.append(f"{parent}.`{field}` AS `{alias_name}`")
+            else:
+                alias_name = field
+                select_expressions.append(f"`{field}` AS `{alias_name}`")
 
     for field in df.schema.fields:
         process_field(parent="", field=field.name, field_type=field.dataType)
@@ -61,60 +78,61 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
 
     return sql_query
 
-# Sample complex nested data
+# Sample complex nested data with more nested structures
 data = [
     (
         1,
-        {"name": "John Doe", "age": 30, "contact": {"email": "john@example.com", "phone": "123-456-7890"}},
+        {"name": "John Doe", "age": 30,
+         "contact": {"email": "john@example.com", "phone": "123-456-7890",
+                     "address": {"street": "123 Main St", "city": "New York", "zip": "10001"}},
+         "skills": ["Python", "Spark", "SQL"]
+         },
         [
             {
                 "order_id": 101,
+                "order_date": "2023-01-15",
                 "order_items": [
-                    {"product": "Laptop", "quantity": 1},
-                    {"product": "Mouse", "quantity": 2}
+                    {"product": "Laptop", "quantity": 1, "price": 1200.00,
+                     "specs": {"brand": "Dell", "model": "XPS", "features": ["16GB RAM", "512GB SSD"]}},
+                    {"product": "Mouse", "quantity": 2, "price": 25.50,
+                     "specs": {"brand": "Logitech", "model": "MX", "features": ["Wireless", "Ergonomic"]}}
                 ],
                 "payment_details": {
                     "method": "Credit Card",
-                    "card": {"type": "Visa", "number": "****-1234"},
+                    "card": {"type": "Visa", "number": "****-1234", "expiry": "12/25"},
                     "billing_address": {"street": "123 Main St", "city": "New York", "zip": "10001"}
+                },
+                "shipping": {
+                    "method": "Express",
+                    "tracking": ["ABC123", "DEF456"],
+                    "address": {"street": "123 Main St", "city": "New York", "zip": "10001"}
                 }
             },
             {
                 "order_id": 102,
+                "order_date": "2023-02-20",
                 "order_items": [
-                    {"product": "Keyboard", "quantity": 1}
+                    {"product": "Keyboard", "quantity": 1, "price": 100.00,
+                     "specs": {"brand": "Corsair", "model": "K95", "features": ["Mechanical", "RGB"]}}
                 ],
                 "payment_details": {
                     "method": "PayPal",
                     "account": "john@paypal.com"
+                },
+                "shipping": {
+                    "method": "Standard",
+                    "tracking": ["GHI789"],
+                    "address": {"street": "456 Elm St", "city": "Los Angeles", "zip": "90001"}
                 }
             }
         ],
         [
-            {"category": "electronics", "tags": ["tech", "gadgets"]},
-            {"category": "home", "tags": ["decor", "furniture"]}
-        ]
+            {"category": "electronics", "tags": ["tech", "gadgets"], "priority": 1},
+            {"category": "home office", "tags": ["work", "productivity"], "priority": 2}
+        ],
+        {"favorites": ["Laptop", "Keyboard"], "wishlist": ["Monitor", "Headphones"]}
     ),
-    (
-        2,
-        {"name": "Alice Smith", "age": 28, "contact": {"email": "alice@example.com", "phone": "987-654-3210"}},
-        [
-            {
-                "order_id": 103,
-                "order_items": [
-                    {"product": "Desk", "quantity": 1}
-                ],
-                "payment_details": {
-                    "method": "Credit Card",
-                    "card": {"type": "MasterCard", "number": "****-5678"},
-                    "billing_address": {"street": "456 Elm St", "city": "Los Angeles", "zip": "90001"}
-                }
-            }
-        ],
-        [
-            {"category": "office", "tags": ["work", "productivity"]}
-        ]
-    )
+    # Add more test data here if needed
 ]
 
 # Define schema for the complex nested structure
@@ -125,23 +143,46 @@ schema = StructType([
         StructField("age", IntegerType(), True),
         StructField("contact", StructType([
             StructField("email", StringType(), True),
-            StructField("phone", StringType(), True)
-        ]), True)
+            StructField("phone", StringType(), True),
+            StructField("address", StructType([
+                StructField("street", StringType(), True),
+                StructField("city", StringType(), True),
+                StructField("zip", StringType(), True)
+            ]), True)
+        ]), True),
+        StructField("skills", ArrayType(StringType()), True)
     ]), True),
     StructField("orders", ArrayType(StructType([
         StructField("order_id", IntegerType(), True),
+        StructField("order_date", StringType(), True),
         StructField("order_items", ArrayType(StructType([
             StructField("product", StringType(), True),
-            StructField("quantity", IntegerType(), True)
+            StructField("quantity", IntegerType(), True),
+            StructField("price", DoubleType(), True),
+            StructField("specs", StructType([
+                StructField("brand", StringType(), True),
+                StructField("model", StringType(), True),
+                StructField("features", ArrayType(StringType()), True)
+            ]), True)
         ])), True),
         StructField("payment_details", StructType([
             StructField("method", StringType(), True),
             StructField("card", StructType([
                 StructField("type", StringType(), True),
-                StructField("number", StringType(), True)
+                StructField("number", StringType(), True),
+                StructField("expiry", StringType(), True)
             ]), True),
             StructField("account", StringType(), True),
             StructField("billing_address", StructType([
+                StructField("street", StringType(), True),
+                StructField("city", StringType(), True),
+                StructField("zip", StringType(), True)
+            ]), True)
+        ]), True),
+        StructField("shipping", StructType([
+            StructField("method", StringType(), True),
+            StructField("tracking", ArrayType(StringType()), True),
+            StructField("address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
                 StructField("zip", StringType(), True)
@@ -150,8 +191,13 @@ schema = StructType([
     ])), True),
     StructField("preferences", ArrayType(StructType([
         StructField("category", StringType(), True),
-        StructField("tags", ArrayType(StringType()), True)
-    ])), True)
+        StructField("tags", ArrayType(StringType()), True),
+        StructField("priority", IntegerType(), True)
+    ])), True),
+    StructField("lists", StructType([
+        StructField("favorites", ArrayType(StringType()), True),
+        StructField("wishlist", ArrayType(StringType()), True)
+    ]), True)
 ])
 
 # Create DataFrame from sample data
@@ -161,7 +207,17 @@ df = spark.createDataFrame(data, schema)
 df.createOrReplaceTempView("complex_nested_table")
 
 # Specify columns to explode
-columns_to_explode = ["orders", "orders.order_items", "preferences"]
+columns_to_explode = [
+    "orders",
+    "orders.order_items",
+    "orders.order_items.specs.features",
+    "orders.shipping.tracking",
+    "preferences",
+    "preferences.tags",
+    "customer_info.skills",
+    "lists.favorites",
+    "lists.wishlist"
+]
 
 # Generate the flatten SQL query
 sql_query = generate_flatten_sql(df, "complex_nested_table", columns_to_explode)
