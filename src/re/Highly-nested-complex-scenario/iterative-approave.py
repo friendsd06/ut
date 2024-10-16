@@ -214,7 +214,7 @@ schema = StructType([
             StructField("address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
-                StructField("zip", StringType(), True)
+                StructField("zip", StringType(), True)  # Corrected parentheses
             ]), True)
         ]), True),
         StructField("skills", ArrayType(StringType()), True)
@@ -243,7 +243,7 @@ schema = StructType([
             StructField("billing_address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
-                StructField("zip", StringType(), True)
+                StructField("zip", StringType(), True)  # Corrected parentheses
             ]), True)
         ]), True),
         StructField("shipping", StructType([
@@ -252,19 +252,19 @@ schema = StructType([
             StructField("address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
-                StructField("zip", StringType()), True)
+                StructField("zip", StringType(), True)  # Corrected parentheses
+            ]), True)
         ]), True)
+    ])), True),
+    StructField("preferences", ArrayType(StructType([
+        StructField("category", StringType(), True),
+        StructField("tags", ArrayType(StringType()), True),
+        StructField("priority", IntegerType(), True)
+    ])), True),
+    StructField("lists", StructType([
+        StructField("favorites", ArrayType(StringType()), True),
+        StructField("wishlist", ArrayType(StringType()), True)
     ]), True)
-])), True),
-StructField("preferences", ArrayType(StructType([
-    StructField("category", StringType(), True),
-    StructField("tags", ArrayType(StringType()), True),
-    StructField("priority", IntegerType(), True)
-])), True),
-StructField("lists", StructType([
-    StructField("favorites", ArrayType(StringType()), True),
-    StructField("wishlist", ArrayType(StringType()), True)
-]), True)
 ])
 
 # Create DataFrame from sample data
@@ -275,15 +275,15 @@ df.createOrReplaceTempView("complex_nested_table")
 
 # Specify columns to explode
 columns_to_explode = [
-"orders",
-"orders.order_items",
-"orders.order_items.specs.features",
-"orders.shipping.tracking",
-"preferences",
-"preferences.tags",
-"customer_info.skills",
-"lists.favorites",
-"lists.wishlist"
+    "orders",
+    "orders.order_items",
+    "orders.order_items.specs.features",
+    "orders.shipping.tracking",
+    "preferences",
+    "preferences.tags",
+    "customer_info.skills",
+    "lists.favorites",
+    "lists.wishlist"
 ]
 
 # Generate the flatten SQL query
