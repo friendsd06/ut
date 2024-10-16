@@ -21,22 +21,39 @@ def get_nested_columns(schema, prefix=''):
     :return: List of nested column paths.
     """
     nested_cols = []
+
+    # Ensure the schema is a StructType
+    if not isinstance(schema, StructType):
+        logger.error("Provided schema is not a StructType.")
+        return nested_cols
+
     for field in schema.fields:
         field_name = f"{prefix}.{field.name}" if prefix else field.name
         if isinstance(field.dataType, (StructType, ArrayType, MapType)):
             nested_cols.append(field_name)
+            # Recurse only if the dataType is complex
             if isinstance(field.dataType, StructType):
                 nested_cols += get_nested_columns(field.dataType, prefix=field_name)
             elif isinstance(field.dataType, ArrayType):
                 element_type = field.dataType.elementType
-                if isinstance(element_type, StructType):
-                    nested_cols += get_nested_columns(element_type, prefix=field_name)
-                elif isinstance(element_type, ArrayType):
-                    nested_cols += get_nested_columns(element_type, prefix=field_name)
-                elif isinstance(element_type, MapType):
-                    nested_cols += get_nested_columns(element_type.valueType, prefix=field_name)
+                if isinstance(element_type, (StructType, ArrayType, MapType)):
+                    # For ArrayType of complex types, recurse accordingly
+                    if isinstance(element_type, StructType):
+                        nested_cols += get_nested_columns(element_type, prefix=field_name)
+                    elif isinstance(element_type, ArrayType):
+                        nested_cols += get_nested_columns(element_type, prefix=field_name)
+                    elif isinstance(element_type, MapType):
+                        nested_cols += get_nested_columns(element_type.valueType, prefix=field_name)
             elif isinstance(field.dataType, MapType):
-                nested_cols += get_nested_columns(field.dataType.valueType, prefix=field_name)
+                value_type = field.dataType.valueType
+                if isinstance(value_type, (StructType, ArrayType, MapType)):
+                    # For MapType of complex types, recurse accordingly
+                    if isinstance(value_type, StructType):
+                        nested_cols += get_nested_columns(value_type, prefix=field_name)
+                    elif isinstance(value_type, ArrayType):
+                        nested_cols += get_nested_columns(value_type, prefix=field_name)
+                    elif isinstance(value_type, MapType):
+                        nested_cols += get_nested_columns(value_type.valueType, prefix=field_name)
     return nested_cols
 
 def flatten_map(df, map_column, prefix=None):
