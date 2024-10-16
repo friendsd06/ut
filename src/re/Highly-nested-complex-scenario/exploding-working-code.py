@@ -1,3 +1,4 @@
+# Import necessary libraries
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
     StructType,
@@ -294,7 +295,7 @@ def main():
     # Create DataFrame with sample data
     df = create_sample_data(schema)
 
-    # Register DataFrame as a temporary SQL view (optional, not used in DataFrame API approach)
+    # (Optional) Register DataFrame as a temporary SQL view
     df.createOrReplaceTempView("complex_nested_table")
 
     # Define columns to explode using dot notation for nested fields
@@ -324,5 +325,5 @@ def main():
     # Stop SparkSession
     spark.stop()
 
-if __name__ == "__main__":
-    main()
+# Execute the main function
+main()
