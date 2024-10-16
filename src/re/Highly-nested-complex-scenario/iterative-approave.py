@@ -9,76 +9,44 @@ spark = SparkSession.builder \
 
 def generate_flatten_sql(df, table_name, columns_to_explode=None):
     """
-    Generates a SQL query to flatten a nested DataFrame schema iteratively using a stack.
+    Generates a SQL query to flatten a nested DataFrame schema.
 
     :param df: Input DataFrame with nested schema
     :param table_name: Name of the table to generate SQL for
-    :param columns_to_explode: List of column names to explode in specified order.
+    :param columns_to_explode: List of column names to explode in specified order
     :return: Flattened SQL query as a string
     """
     select_expressions = []
     lateral_view_clauses = []
-    alias_counter = 0
-
-    # Stack with controlled order of fields (priority to columns in columns_to_explode list)
-    stack = [(None, field.name, field.dataType) for field in df.schema.fields]
-
-    # Set of columns to explode for quick lookup
     explode_columns = set(columns_to_explode or [])
 
-    while stack:
-        parent, field, field_type = stack.pop()
-        full_field = f"{parent}.{field}" if parent else field
-
-        if isinstance(field_type, StructType):
-            # Process StructType fields by pushing subfields onto the stack
-            for subfield in field_type.fields:
-                sub_full_field = f"{full_field}.{subfield.name}"
-                alias_name = f"{full_field.replace('.', '_')}_{subfield.name}"
-                select_expressions.append(f"`{sub_full_field}` AS `{alias_name}`")
-                stack.append((full_field, subfield.name, subfield.dataType))
-
-        elif isinstance(field_type, ArrayType):
-            # Only explode if the column is specified in explode_columns or if explode_columns is empty (explode all)
-            should_explode = not explode_columns or full_field in explode_columns
-            if should_explode:
-                alias_counter += 1
-                exploded_alias = f"{field}_exploded_{alias_counter}"
-
-                # Lateral view clause for explosion
-                explode_clause = f"LATERAL VIEW EXPLODE(COALESCE(`{full_field}`, ARRAY(NULL))) {exploded_alias} AS `{exploded_alias}`"
-                lateral_view_clauses.append(explode_clause)
-
-                element_type = field_type.elementType
-                if isinstance(element_type, StructType):
-                    # If the array elements are structs, process their subfields
-                    for subfield in element_type.fields:
-                        sub_full_field = f"{exploded_alias}.{subfield.name}"
-                        alias_name = f"{exploded_alias}_{subfield.name}"
-                        select_expressions.append(f"`{sub_full_field}` AS `{alias_name}`")
-                        stack.append((exploded_alias, subfield.name, subfield.dataType))
-                else:
-                    # For non-struct arrays, use the exploded alias directly
-                    alias_name = f"{full_field.replace('.', '_')}"
-                    select_expressions.append(f"`{exploded_alias}` AS `{alias_name}`")
+    def process_field(field_path, data_type, is_nested=False):
+        if isinstance(data_type, StructType):
+            for subfield in data_type.fields:
+                sub_path = f"{field_path}.{subfield.name}" if field_path else subfield.name
+                process_field(sub_path, subfield.dataType, is_nested)
+        elif isinstance(data_type, ArrayType):
+            if field_path in explode_columns or not explode_columns:
+                alias = f"{field_path.replace('.', '_')}_exploded"
+                lateral_view_clauses.append(f"LATERAL VIEW EXPLODE(COALESCE(`{field_path}`, ARRAY(NULL))) {alias} AS `{alias}`")
+                process_field(alias, data_type.elementType, True)
             else:
-                # If not exploding, directly use the array
-                alias_name = f"{full_field.replace('.', '_')}"
-                select_expressions.append(f"`{full_field}` AS `{alias_name}`")
-
+                alias = field_path.replace('.', '_')
+                select_expressions.append(f"`{field_path}` AS `{alias}`")
         else:
-            # For simple fields, just add them to select_expressions
-            alias_name = f"{full_field.replace('.', '_')}"
-            select_expressions.append(f"`{full_field}` AS `{alias_name}`")
+            alias = field_path.replace('.', '_')
+            select_expressions.append(f"`{field_path}` AS `{alias}`")
 
-    # Constructing the SQL query
+    for field in df.schema.fields:
+        process_field(field.name, field.dataType)
+
     select_clause = ",\n    ".join(select_expressions)
     lateral_view_clause = "\n    ".join(lateral_view_clauses)
     sql_query = f"SELECT \n    {select_clause}\nFROM `{table_name}`\n    {lateral_view_clause}"
 
     return sql_query
 
-# Sample data structure to test the function
+# Sample data structure
 data = [
     (
         1,
@@ -86,17 +54,26 @@ data = [
         [
             {
                 "order_id": 101,
-                "order_items": [{"product": "Laptop", "quantity": 1}],
+                "order_items": [{"product": "Laptop", "quantity": 1}, {"product": "Mouse", "quantity": 2}],
                 "payment_details": {
                     "method": "Credit Card",
-                    "billing_address": {"city": "New York"}
+                    "billing_address": {"city": "New York", "zip": "10001"}
+                }
+            },
+            {
+                "order_id": 102,
+                "order_items": [{"product": "Keyboard", "quantity": 1}],
+                "payment_details": {
+                    "method": "PayPal",
+                    "billing_address": {"city": "Los Angeles", "zip": "90001"}
                 }
             }
         ],
-        [{"category": "electronics", "tags": ["tech", "gadgets"]}]
+        [{"category": "electronics", "tags": ["tech", "gadgets"]}, {"category": "accessories", "tags": ["computer"]}]
     )
 ]
 
+# Define schema
 schema = StructType([
     StructField("customer_id", IntegerType(), False),
     StructField("customer_info", StructType([
@@ -116,7 +93,8 @@ schema = StructType([
         StructField("payment_details", StructType([
             StructField("method", StringType(), True),
             StructField("billing_address", StructType([
-                StructField("city", StringType(), True)
+                StructField("city", StringType(), True),
+                StructField("zip", StringType(), True)
             ]), True)
         ]), True)
     ])), True),
@@ -126,23 +104,29 @@ schema = StructType([
     ])), True)
 ])
 
-# Create DataFrame from sample data
+# Create DataFrame
 df = spark.createDataFrame(data, schema)
 
 # Register DataFrame as a temporary SQL table
 df.createOrReplaceTempView("complex_nested_table")
 
-# Specify columns to explode in a specific order
+# Specify columns to explode
 columns_to_explode = ["orders", "orders.order_items", "preferences", "preferences.tags"]
 
-# Generate the flatten SQL query using iterative approach with controlled explosion order
+# Generate and print the flatten SQL query
 sql_query = generate_flatten_sql(df, "complex_nested_table", columns_to_explode)
 print("Generated SQL Query:\n")
 print(sql_query)
 
 # Execute the generated SQL query
 flattened_df = spark.sql(sql_query)
+
+# Show the flattened DataFrame
+print("\nFlattened DataFrame:")
 flattened_df.show(truncate=False)
+
+# Print the schema of the flattened DataFrame
+print("\nFlattened DataFrame Schema:")
 flattened_df.printSchema()
 
 # Stop Spark session
