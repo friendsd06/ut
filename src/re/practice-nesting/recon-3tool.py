@@ -1,11 +1,4 @@
-# COMMAND ----------
-# DBTITLE 1,Reconciliation Tool Setup (Hidden from regular users)
-# MAGIC %md
-# MAGIC ## Developer Section
-# MAGIC This cell contains the setup code and is hidden from regular users.
-
-# COMMAND ----------
-# MAGIC %run
+# Databricks notebook source
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, when, lit
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
@@ -63,25 +56,19 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, columns_to_
         *[count(when(col(c) == "Match", 1)).alias(f"{c}_Match") for c in columns_to_check]
     )
 
-# COMMAND ----------
-# DBTITLE 1,User Interface
-# MAGIC %md
-# MAGIC ## Reconciliation Tool
-# MAGIC Use the widgets below to select columns and run the reconciliation.
-
-# COMMAND ----------
-# This cell will be visible to all users
+# Create widgets for user input
 columns = source_df.columns
 dbutils.widgets.multiselect("columns_to_reconcile", defaultValue=columns[0], choices=columns, label="Columns to Reconcile")
 dbutils.widgets.dropdown("action", defaultValue="Select Action", choices=["Select Action", "Run Reconciliation", "Show All Results"], label="Action")
 
 # COMMAND ----------
+
 # MAGIC %md
-# MAGIC ### Reconciliation Results
-# MAGIC The results of your reconciliation will appear below after you select "Run Reconciliation" from the Action dropdown.
+# MAGIC ## Reconciliation Tool
+# MAGIC Use the widgets above to select columns and run the reconciliation.
 
 # COMMAND ----------
-# This cell will be visible to all users
+
 reconciliation_results = []
 
 def run_reconciliation():
@@ -153,6 +140,7 @@ dbutils.widgets.onEvent("action", handle_action)
 print("Reconciliation Tool is ready. Please select columns and choose an action from the dropdown.")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### How to Use
 # MAGIC 1. Select the columns you want to reconcile from the "Columns to Reconcile" dropdown.
