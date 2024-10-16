@@ -73,13 +73,12 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, columns_to_
 # This cell will be visible to all users
 columns = source_df.columns
 dbutils.widgets.multiselect("columns_to_reconcile", defaultValue=columns[0], choices=columns, label="Columns to Reconcile")
-dbutils.widgets.button("run_reconciliation", "Run Reconciliation")
-dbutils.widgets.button("show_all_results", "Show All Reconciliation Results")
+dbutils.widgets.dropdown("action", defaultValue="Select Action", choices=["Select Action", "Run Reconciliation", "Show All Results"], label="Action")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ### Reconciliation Results
-# MAGIC The results of your reconciliation will appear below after you click "Run Reconciliation".
+# MAGIC The results of your reconciliation will appear below after you select "Run Reconciliation" from the Action dropdown.
 
 # COMMAND ----------
 # This cell will be visible to all users
@@ -142,15 +141,21 @@ def show_all_results():
                     print(f"    {metric}: {value}")
             print("-" * 50)
 
-dbutils.widgets.onEvent("run_reconciliation", lambda _: run_reconciliation())
-dbutils.widgets.onEvent("show_all_results", lambda _: show_all_results())
+def handle_action(action):
+    if action == "Run Reconciliation":
+        run_reconciliation()
+    elif action == "Show All Results":
+        show_all_results()
 
-print("Reconciliation Tool is ready. Please select columns and click 'Run Reconciliation'.")
+# Set up the action handler
+dbutils.widgets.onEvent("action", handle_action)
+
+print("Reconciliation Tool is ready. Please select columns and choose an action from the dropdown.")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ### How to Use
 # MAGIC 1. Select the columns you want to reconcile from the "Columns to Reconcile" dropdown.
-# MAGIC 2. Click the "Run Reconciliation" button to perform the reconciliation.
+# MAGIC 2. Choose "Run Reconciliation" from the Action dropdown to perform the reconciliation.
 # MAGIC 3. View the results in the table that appears below.
-# MAGIC 4. To see a summary of all reconciliations performed, click "Show All Reconciliation Results".
+# MAGIC 4. To see a summary of all reconciliations performed, choose "Show All Results" from the Action dropdown.
