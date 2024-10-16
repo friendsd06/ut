@@ -2,11 +2,11 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import explode_outer, col, lit
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, ArrayType, MapType,
-    TimestampType, DecimalType, BinaryType, ByteType,
-    FloatType, ShortType, LongType
+    TimestampType, DecimalType, BinaryType
 )
 from datetime import datetime
 import logging
+from decimal import Decimal
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -74,6 +74,9 @@ def flatten_dataframe_recursive(df, columns_to_explode=None):
     if columns_to_explode is not None:
         # Normalize column paths
         columns_to_explode = set(columns_to_explode)
+        logger.info(f"Columns to explode: {columns_to_explode}")
+    else:
+        logger.info("No specific columns to explode provided. All ArrayType columns will be exploded.")
 
     nested_cols = get_nested_columns(df.schema)
     iteration = 1
@@ -173,9 +176,12 @@ def flatten_dataframe_recursive(df, columns_to_explode=None):
     logger.info("Completed flattening the DataFrame.")
     return df
 
-# Below are additional helper functions and example usage.
-
 def define_complex_schema() -> StructType:
+    """
+    Defines a complex schema with various data types, including DecimalType.
+
+    :return: StructType representing the schema.
+    """
     return StructType([
         StructField("customer_id", IntegerType(), False),
         StructField("name", StringType(), True),
@@ -196,6 +202,12 @@ def define_complex_schema() -> StructType:
     ])
 
 def create_complex_sample_data(schema: StructType):
+    """
+    Creates sample data for source and target DataFrames based on the provided schema.
+
+    :param schema: StructType schema for the DataFrames.
+    :return: Tuple of (source_df, target_df)
+    """
     source_data = [
         (
             1,
@@ -221,7 +233,7 @@ def create_complex_sample_data(schema: StructType):
                 "sms_alerts": "enabled"
             },
             datetime(2023, 5, 21, 15, 30),
-            1500.75,
+            Decimal("1500.75"),
             b'\x00\x01\x02',
             "active"
         ),
@@ -244,7 +256,7 @@ def create_complex_sample_data(schema: StructType):
                 "sms_alerts": "disabled"
             },
             datetime(2023, 6, 10, 10, 15),
-            250.00,
+            Decimal("250.00"),
             b'\x03\x04\x05',
             "inactive"
         )
@@ -275,7 +287,7 @@ def create_complex_sample_data(schema: StructType):
                 "sms_alerts": "enabled"
             },
             datetime(2023, 5, 21, 15, 30),
-            1500.75,
+            Decimal("1500.75"),
             b'\x00\x01\x02',
             "active"
         ),
@@ -298,7 +310,7 @@ def create_complex_sample_data(schema: StructType):
                 "sms_alerts": "disabled"
             },
             datetime(2023, 6, 10, 10, 15),
-            250.00,
+            Decimal("250.00"),
             b'\x03\x04\x05',
             "inactive"
         )
@@ -359,7 +371,9 @@ def compare_dataframes(source_df, target_df):
         discrepancies.show(truncate=False)
 
 def main_example():
-    # Initialize SparkSession
+    """
+    Main function to execute the flattening and reconciliation process.
+    """
     global spark  # To make it accessible in create_complex_sample_data
     spark = SparkSession.builder \
         .appName("AdvancedFlatteningExample") \
@@ -409,6 +423,5 @@ def main_example():
     # Stop SparkSession
     spark.stop()
 
-# Execute the example
 if __name__ == "__main__":
     main_example()
