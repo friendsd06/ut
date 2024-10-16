@@ -6,7 +6,6 @@
 
 # COMMAND ----------
 # MAGIC %run
-# MAGIC # This cell will be hidden from regular users
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, when, lit
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
@@ -73,7 +72,7 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, columns_to_
 # COMMAND ----------
 # This cell will be visible to all users
 columns = source_df.columns
-dbutils.widgets.multiselect("columns_to_reconcile", "", columns, "Columns to Reconcile")
+dbutils.widgets.multiselect("columns_to_reconcile", defaultValue=columns[0], choices=columns, label="Columns to Reconcile")
 dbutils.widgets.button("run_reconciliation", "Run Reconciliation")
 dbutils.widgets.button("show_all_results", "Show All Reconciliation Results")
 
@@ -143,8 +142,8 @@ def show_all_results():
                     print(f"    {metric}: {value}")
             print("-" * 50)
 
-dbutils.widgets.onEvent("run_reconciliation", run_reconciliation)
-dbutils.widgets.onEvent("show_all_results", show_all_results)
+dbutils.widgets.onEvent("run_reconciliation", lambda _: run_reconciliation())
+dbutils.widgets.onEvent("show_all_results", lambda _: show_all_results())
 
 print("Reconciliation Tool is ready. Please select columns and click 'Run Reconciliation'.")
 
