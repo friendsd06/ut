@@ -55,3 +55,21 @@ def create_sample_data(schema: StructType):
     target_df = spark.createDataFrame(target_data, schema)
 
     return source_df, target_df
+
+
+def define_schema() -> StructType:
+    """
+    Defines and returns the schema for the reconciliation test DataFrames.
+
+    :return: StructType representing the schema.
+    """
+    return StructType([
+        StructField("customer_id", IntegerType(), False),
+        StructField("name", StringType(), True),
+        StructField("contact_details", StructType([
+            StructField("email", StringType(), True),
+            StructField("phone", StringType(), True)
+        ]), True),
+        StructField("age", IntegerType(), True)
+    ])
+
