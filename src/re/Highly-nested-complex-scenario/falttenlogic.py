@@ -1,6 +1,6 @@
 # Import necessary PySpark modules
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr, when, lit
+from pyspark.sql.functions import col, expr, when, lit, sum as _sum, count as _count
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 )
@@ -87,7 +87,7 @@ def reconcile_datasets(source_df, target_df, join_keys, columns_to_explode=None)
     :param target_df: Target DataFrame
     :param join_keys: List of column names to join on
     :param columns_to_explode: List of column names to explode during flattening
-    :return: DataFrame containing reconciliation report with match/mismatch counts and details
+    :return: Tuple containing DataFrames for match/mismatch counts and detailed mismatch reports
     """
     # Create temporary views
     source_df.createOrReplaceTempView("source_table")
@@ -96,6 +96,11 @@ def reconcile_datasets(source_df, target_df, join_keys, columns_to_explode=None)
     # Generate flattened SQL queries
     source_sql = generate_flatten_sql(source_df, "source_table", columns_to_explode)
     target_sql = generate_flatten_sql(target_df, "target_table", columns_to_explode)
+
+    print("Source Flattened SQL Query:")
+    print(source_sql)
+    print("\nTarget Flattened SQL Query:")
+    print(target_sql)
 
     # Execute SQL queries to get flattened DataFrames
     flattened_source_df = spark.sql(source_sql)
@@ -113,63 +118,82 @@ def reconcile_datasets(source_df, target_df, join_keys, columns_to_explode=None)
     comparison_exprs = []
     mismatch_details = []
 
-    for col_name in flattened_source_df.columns:
-        if col_name not in [fk.replace('.', '_') for fk in join_keys]:
-            src_col = f"src.{col_name}"
-            tgt_col = f"tgt.{col_name}"
-            diff_col = f"diff_{col_name}"
+    # Collect all columns except join keys for comparison
+    comparison_columns = [c for c in flattened_source_df.columns if c not in [fk.replace('.', '_') for fk in join_keys]]
 
-            # Comparison expression to identify mismatches
-            comparison_expr = when(
-                col(src_col) != col(tgt_col),
-                lit(1)
-            ).otherwise(lit(0)).alias(diff_col)
-            comparison_exprs.append(comparison_expr)
+    for col_name in comparison_columns:
+        src_col = f"src.{col_name}"
+        tgt_col = f"tgt.{col_name}"
+        diff_col = f"diff_{col_name}"
 
-            # Capture mismatch details
-            detail_expr = when(
-                col(src_col) != col(tgt_col),
-                expr(f"concat('{col_name}: ', src.{col_name}, ' != ', tgt.{col_name})")
-            )
-            mismatch_details.append(detail_expr.alias(f"detail_{col_name}"))
+        # Comparison expression to identify mismatches
+        comparison_expr = when(
+            col(src_col) != col(tgt_col),
+            lit(1)
+        ).otherwise(lit(0)).alias(diff_col)
+        comparison_exprs.append(comparison_expr)
 
-    # Calculate total mismatches and matches
-    total_mismatches = sum([col(f"diff_{c}") for c in flattened_source_df.columns
-                            if c not in [fk.replace('.', '_') for fk in join_keys]])
-    total_columns = len([c for c in flattened_source_df.columns
-                         if c not in [fk.replace('.', '_') for fk in join_keys]])
+        # Capture mismatch details
+        detail_expr = when(
+            col(src_col) != col(tgt_col),
+            expr(f"concat('{col_name}: ', src.{col_name}, ' != ', tgt.{col_name})")
+        )
+        mismatch_details.append(detail_expr.alias(f"detail_{col_name}"))
 
     # Select key columns and comparison expressions
     select_cols = [col(f"src.{jk}").alias(jk) for jk in join_keys] + comparison_exprs + mismatch_details
     comparison_df = joined_df.select(*select_cols)
 
     # Aggregate to get match and mismatch counts
-    agg_exprs = [
-        (sum(col(f"diff_{c}") for c in flattened_source_df.columns
-             if c not in [fk.replace('.', '_') for fk in join_keys])).alias("total_mismatches"),
-        (count(lit(1)) - sum(col(f"diff_{c}") for c in flattened_source_df.columns
-                             if c not in [fk.replace('.', '_') for fk in join_keys])).alias("total_matches")
-    ]
-    counts_df = comparison_df.agg(*agg_exprs)
+    # Sum all diff columns to get total mismatches
+    total_mismatches_expr = _sum(
+        _sum(col(f"diff_{c}") for c in comparison_columns)
+    ).alias("total_mismatches")
 
-    # Collect mismatch details
-    mismatch_columns = [f"detail_{c}" for c in flattened_source_df.columns
-                        if c not in [fk.replace('.', '_') for fk in join_keys]]
-    detailed_mismatches_df = comparison_df.select(*join_keys, *mismatch_columns) \
-        .filter(
-        (col("diff_customer_info_age") == 1) |
-        (col("diff_other_columns") == 1)  # Add other diff columns as needed
+    # Count total rows
+    total_rows_expr = _count(lit(1)).alias("total_rows")
+
+    # Sum all diff columns and calculate total matches
+    # total_matches = total_columns * total_rows - total_mismatches
+    counts_df = comparison_df.agg(
+        _sum(*[col(f"diff_{c}") for c in comparison_columns]).alias("total_mismatches"),
+        _count(lit(1)).alias("total_rows")
     )
 
+    # Calculate total_matches as total_rows * total_columns - total_mismatches
+    # Alternatively, for per-row matching, you can count rows with total_mismatches == 0
+    # Here, we'll count how many rows have no mismatches
+    match_count_df = comparison_df.filter(
+        sum([col(f"diff_{c}") for c in comparison_columns]) == 0
+    ).count()
+
+    mismatch_count_df = counts_df.collect()[0]["total_mismatches"]
+
+    total_rows = counts_df.collect()[0]["total_rows"]
+    total_columns = len(comparison_columns)
+    total_matches = total_rows * total_columns - mismatch_count_df
+
+    # Collect mismatch details
+    mismatch_columns = [f"detail_{c}" for c in comparison_columns]
+    # Create a condition to check if any detail column is not null
+    mismatch_condition = " OR ".join([f"`{c}` IS NOT NULL" for c in mismatch_columns])
+    detailed_mismatches_df = comparison_df.select(*join_keys, *mismatch_columns) \
+        .filter(expr(mismatch_condition))
+
     # Show counts
-    counts_df.show(truncate=False)
+    print("\nReconciliation Counts:")
+    counts_data = {
+        "total_mismatches": mismatch_count_df,
+        "total_matches": total_matches
+    }
+    counts_df_final = spark.createDataFrame([counts_data])
+    counts_df_final.show(truncate=False)
 
     # Show detailed mismatches
+    print("\nDetailed Mismatches:")
     detailed_mismatches_df.show(truncate=False)
 
-    # For better reporting, you might want to join counts and detailed mismatches into a single report
-    # Here, we return both DataFrames for flexibility
-    return counts_df, detailed_mismatches_df
+    return counts_df_final, detailed_mismatches_df
 
 # Sample complex nested data for source and target
 data_source = [
@@ -260,3 +284,6 @@ match_counts_df, mismatch_details_df = reconcile_datasets(
     join_keys=["customer_id"],
     columns_to_explode=columns_to_explode
 )
+
+# Stop Spark session
+spark.stop()
