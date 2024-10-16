@@ -46,7 +46,7 @@ def generate_flatten_sql(df, table_name, columns_to_explode=None):
                 exploded_alias = f"{field}_exploded_{alias_counter}"
 
                 # Lateral view clause for explosion
-                explode_clause = f"LATERAL VIEW OUTER EXPLODE(`{full_field}`) {exploded_alias} AS `{exploded_alias}`"
+                explode_clause = f"LATERAL VIEW EXPLODE(COALESCE(`{full_field}`, ARRAY(NULL))) {exploded_alias} AS `{exploded_alias}`"
                 lateral_view_clauses.append(explode_clause)
 
                 element_type = field_type.elementType
