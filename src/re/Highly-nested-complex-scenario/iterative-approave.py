@@ -6,8 +6,8 @@ from pyspark.sql.types import (
     IntegerType,
     ArrayType,
     DoubleType,
-    BooleanType,
 )
+from pyspark.sql.functions import explode_outer, sort_array, col
 
 # Initialize SparkSession
 spark = SparkSession.builder \
@@ -15,86 +15,75 @@ spark = SparkSession.builder \
     .master("local[*]") \
     .getOrCreate()
 
-def generate_flatten_sql(df, table_name, columns_to_explode=None):
+def flatten_dataframe(df, columns_to_explode):
     """
-    Generates a SQL query to flatten a nested DataFrame schema, with selective column explosion.
+    Flattens a nested DataFrame by selectively exploding specified columns.
 
     :param df: Input DataFrame with nested schema
-    :param table_name: Name of the table to generate SQL for
     :param columns_to_explode: List of column names to explode (dot notation for nested fields)
-    :return: Flattened SQL query as a string
+    :return: Flattened DataFrame
     """
-    select_expressions = []
-    lateral_view_clauses = []
-    alias_counter = 0
-    explode_columns = set(columns_to_explode or [])
+    for column in columns_to_explode:
+        # Split the column path
+        parts = column.split('.')
+        # Identify the parent column to explode
+        parent = '.'.join(parts[:-1]) if len(parts) > 1 else parts[0]
+        field = parts[-1]
 
-    def process_field(original_path, current_parent, field, field_type):
-        nonlocal alias_counter
-        original_full_field = f"{original_path}.{field}" if original_path else field
-        current_full_field = f"{current_parent}.{field}" if current_parent else field
+        # Define the exploded column alias
+        exploded_alias = f"{field}_exploded"
 
-        if isinstance(field_type, StructType):
-            for subfield in field_type.fields:
-                process_field(original_full_field, current_full_field, subfield.name, subfield.dataType)
-        elif isinstance(field_type, ArrayType):
-            should_explode = original_full_field in explode_columns or not explode_columns
+        print(f"Exploding column: {column} as {exploded_alias}")
 
-            if should_explode:
-                alias_counter += 1
-                exploded_alias = f"{field}_exploded_{alias_counter}"
-                if isinstance(field_type.elementType, StructType):
-                    # Explode the array of structs
-                    explode_clause = (
-                        f"LATERAL VIEW OUTER EXPLODE({current_full_field}) {exploded_alias} AS `{exploded_alias}`"
-                    )
-                    lateral_view_clauses.append(explode_clause)
-                    for subfield in field_type.elementType.fields:
-                        # Build the original path for the subfield
-                        sub_original_path = original_full_field
-                        # The current parent is the exploded alias
-                        sub_current_parent = exploded_alias
-                        # The field is subfield.name
-                        sub_field = subfield.name
-                        # Add to select_expressions with proper aliasing
-                        alias_name = f"{field}_{sub_field}_{alias_counter}"
-                        select_expressions.append(
-                            f"{exploded_alias}.`{sub_field}` AS `{alias_name}`"
-                        )
-                        # Recursively process subfields
-                        process_field(
-                            sub_original_path, sub_current_parent, sub_field, subfield.dataType
-                        )
-                else:
-                    # Explode the array of primitive types
-                    explode_clause = (
-                        f"LATERAL VIEW OUTER EXPLODE({current_full_field}) {exploded_alias} AS `{exploded_alias}`"
-                    )
-                    lateral_view_clauses.append(explode_clause)
-                    alias_name = f"{field}_exploded_{alias_counter}"
-                    select_expressions.append(f"`{exploded_alias}` AS `{alias_name}`")
+        # Apply explode_outer
+        df = df.withColumn(exploded_alias, explode_outer(col(column)))
+
+        # Retrieve the schema of the exploded column to determine its type
+        try:
+            # Traverse the schema to get the data type of the exploded column
+            exploded_field = df.schema
+            for part in parts:
+                exploded_field = exploded_field[part].dataType
+            if isinstance(exploded_field, ArrayType):
+                exploded_field = exploded_field.elementType
+
+            if isinstance(exploded_field, StructType):
+                # Exploded field is a StructType; expand its subfields
+                for subfield in exploded_field.fields:
+                    subfield_name = subfield.name
+                    new_col_name = f"{field}_{subfield_name}_exploded"
+                    df = df.withColumn(new_col_name, col(f"{exploded_alias}.{subfield_name}"))
+                    print(f"Added column: {new_col_name} from {exploded_alias}.{subfield_name}")
+                # Drop the exploded struct column after expanding its fields
+                df = df.drop(exploded_alias)
             else:
-                # If not exploded, keep the array as is (optionally sorted)
-                alias_name = f"{current_full_field.replace('.', '_')}"
-                select_expressions.append(
-                    f"SORT_ARRAY({current_full_field}) AS `{alias_name}`"
-                )
-        else:
-            # Primitive field, select with alias
-            if current_parent:
-                alias_name = f"{current_full_field.replace('.', '_')}"
+                # Exploded field is a primitive type; rename the exploded column
+                new_col_name = f"{field}_exploded"
+                df = df.withColumnRenamed(exploded_alias, new_col_name)
+                print(f"Renamed column: {exploded_alias} to {new_col_name}")
+        except Exception as e:
+            print(f"Error processing column '{column}': {e}")
+
+    # Function to recursively collect all columns, replacing dots with underscores
+    def get_all_columns(schema, prefix=""):
+        fields = []
+        for field in schema.fields:
+            col_name = f"{prefix}.{field.name}" if prefix else field.name
+            if isinstance(field.dataType, StructType):
+                # Recursively process StructType fields
+                fields += get_all_columns(field.dataType, prefix=col_name)
+            elif isinstance(field.dataType, ArrayType) and not isinstance(field.dataType.elementType, StructType):
+                # Sort arrays of primitive types and alias them
+                fields.append(sort_array(col(col_name)).alias(col_name.replace('.', '_')))
             else:
-                alias_name = field
-            select_expressions.append(f"{current_full_field} AS `{alias_name}`")
+                # Alias all other columns, replacing dots with underscores
+                fields.append(col(col_name).alias(col_name.replace('.', '_')))
+        return fields
 
-    for field in df.schema.fields:
-        process_field("", "", field.name, field.dataType)
-
-    select_clause = ", ".join(select_expressions)
-    lateral_view_clause = " ".join(lateral_view_clauses)
-    sql_query = f"SELECT {select_clause} FROM `{table_name}` {lateral_view_clause}"
-
-    return sql_query
+    # Collect all flattened columns
+    flattened_columns = get_all_columns(df.schema)
+    # Select all columns to create the flattened DataFrame
+    return df.select(*flattened_columns)
 
 # Sample complex nested data with more nested structures
 data = [
@@ -199,7 +188,7 @@ data = [
         ],
         {"favorites": ["Laptop", "Keyboard"], "wishlist": ["Monitor", "Headphones"]}
     ),
-    # Add more test data here if needed
+    # You can add more test data here if needed
 ]
 
 # Define schema for the complex nested structure
@@ -214,7 +203,7 @@ schema = StructType([
             StructField("address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
-                StructField("zip", StringType(), True)  # Corrected parentheses
+                StructField("zip", StringType(), True)
             ]), True)
         ]), True),
         StructField("skills", ArrayType(StringType()), True)
@@ -243,7 +232,7 @@ schema = StructType([
             StructField("billing_address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
-                StructField("zip", StringType(), True)  # Corrected parentheses
+                StructField("zip", StringType(), True)
             ]), True)
         ]), True),
         StructField("shipping", StructType([
@@ -252,7 +241,7 @@ schema = StructType([
             StructField("address", StructType([
                 StructField("street", StringType(), True),
                 StructField("city", StringType(), True),
-                StructField("zip", StringType(), True)  # Corrected parentheses
+                StructField("zip", StringType(), True)
             ]), True)
         ]), True)
     ])), True),
@@ -286,13 +275,13 @@ columns_to_explode = [
     "lists.wishlist"
 ]
 
-# Generate the flatten SQL query
-sql_query = generate_flatten_sql(df, "complex_nested_table", columns_to_explode)
-print("Generated SQL Query:\n", sql_query)
+# Apply the flattening function
+flattened_df = flatten_dataframe(df, columns_to_explode)
 
-# Execute the generated SQL query
-flattened_df = spark.sql(sql_query)
+# Show the flattened DataFrame
 flattened_df.show(truncate=False)
+
+# Print the schema of the flattened DataFrame
 flattened_df.printSchema()
 
 # Stop Spark session
