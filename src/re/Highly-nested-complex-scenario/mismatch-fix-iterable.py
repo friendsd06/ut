@@ -4,7 +4,7 @@ from pyspark.sql.types import (
     MapType, DoubleType
 )
 from pyspark.sql.functions import (
-    explode_outer, col, when, struct, lit, array, explode, filter, expr
+    explode_outer, col, when, struct, lit, array, explode, array_remove, expr
 )
 from functools import reduce
 from typing import List, Optional
@@ -77,19 +77,19 @@ def compare_delta_tables(
     )
 
     # Create an array of mismatches with column name, old value, and new value
-    mismatches_expr = filter(
-        array(
-            *[
-                when(col(c).isNotNull(), struct(
-                    lit(c).alias("column"),
-                    col(f"{c}.old").alias("old_value"),
-                    col(f"{c}.new").alias("new_value")
-                ))
-                for c in compare_columns
-            ]
-        ),
-        expr("x -> x is not null")
+    mismatches_array = array(
+        *[
+            when(col(c).isNotNull(), struct(
+                lit(c).alias("column"),
+                col(f"{c}.old").alias("old_value"),
+                col(f"{c}.new").alias("new_value")
+            ))
+            for c in compare_columns
+        ]
     )
+
+    # Remove nulls from the array
+    mismatches_expr = array_remove(mismatches_array, None)
 
     # Add mismatches array column
     comparison_df = comparison_df.withColumn("mismatches", mismatches_expr)
