@@ -60,15 +60,15 @@ def flatten_nested_entities(df: DataFrame, nested_col: str, nested_fields: list,
 
     return exploded.select(*select_expr)
 
-def compare_columns(source_col, target_col, col_name):
+def compare_columns(df, col_name):
     return when(
-        (source_col != target_col) |
-        (source_col.isNull() & target_col.isNotNull()) |
-        (source_col.isNotNull() & target_col.isNull()),
+        (col(f"source.{col_name}") != col(f"target.{col_name}")) |
+        (col(f"source.{col_name}").isNull() & col(f"target.{col_name}").isNotNull()) |
+        (col(f"source.{col_name}").isNotNull() & col(f"target.{col_name}").isNull()),
         concat(lit(f"{col_name}: "),
-               when(source_col.isNotNull(), concat(lit("source="), source_col)).otherwise(lit("source=NULL")),
+               when(col(f"source.{col_name}").isNotNull(), concat(lit("source="), col(f"source.{col_name}"))).otherwise(lit("source=NULL")),
                lit(", "),
-               when(target_col.isNotNull(), concat(lit("target="), target_col)).otherwise(lit("target=NULL")))
+               when(col(f"target.{col_name}").isNotNull(), concat(lit("target="), col(f"target.{col_name}"))).otherwise(lit("target=NULL")))
     ).otherwise(None)
 
 def reconcile_dataframes(
@@ -81,29 +81,29 @@ def reconcile_dataframes(
 ) -> DataFrame:
     # Reconcile main-level entities
     joined_main = source_flat.select(parent_primary_key, *main_compare_cols).distinct() \
-        .join(target_flat.select(parent_primary_key, *main_compare_cols).distinct(),
+        .alias("source") \
+        .join(target_flat.select(parent_primary_key, *main_compare_cols).distinct().alias("target"),
               on=parent_primary_key, how="full_outer")
 
-    main_diffs = [compare_columns(col(f"source.{c}"), col(f"target.{c}"), c).alias(f"{c}_diff")
-                  for c in main_compare_cols]
+    main_diffs = [compare_columns(joined_main, c).alias(f"{c}_diff") for c in main_compare_cols]
 
     main_diff_df = joined_main.select(
-        parent_primary_key,
+        col(f"source.{parent_primary_key}").alias(parent_primary_key),
         *main_diffs,
         lit("Main").alias("diff_type")
     ).filter(" OR ".join([f"{c}_diff IS NOT NULL" for c in main_compare_cols]))
 
     # Reconcile nested entities
     joined_nested = source_flat.select(parent_primary_key, child_primary_key, *nested_compare_cols) \
-        .join(target_flat.select(parent_primary_key, child_primary_key, *nested_compare_cols),
+        .alias("source") \
+        .join(target_flat.select(parent_primary_key, child_primary_key, *nested_compare_cols).alias("target"),
               on=[parent_primary_key, child_primary_key], how="full_outer")
 
-    nested_diffs = [compare_columns(col(f"source.{c}"), col(f"target.{c}"), c).alias(f"{c}_diff")
-                    for c in nested_compare_cols]
+    nested_diffs = [compare_columns(joined_nested, c).alias(f"{c}_diff") for c in nested_compare_cols]
 
     nested_diff_df = joined_nested.select(
-        parent_primary_key,
-        child_primary_key,
+        col(f"source.{parent_primary_key}").alias(parent_primary_key),
+        col(f"source.{child_primary_key}").alias(child_primary_key),
         *nested_diffs,
         lit("Nested").alias("diff_type")
     ).filter(" OR ".join([f"{c}_diff IS NOT NULL" for c in nested_compare_cols]))
@@ -160,7 +160,7 @@ def main():
     print("\n=== Unified Reconciliation Report ===")
     reconciliation_report.show(truncate=False)
 
-    #spark.stop()
+    spark.stop()
 
 if __name__ == "__main__":
     main()
