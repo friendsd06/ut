@@ -18,7 +18,7 @@ def compare_delta_tables(
 ) -> DataFrame:
     """
     Compare two Delta tables and return a DataFrame with the differences.
-    Shows only the columns that have mismatches.
+    Shows only the columns that have mismatches along with mismatch and match counts.
     Works for both nested and non-nested structures.
 
     Args:
@@ -29,7 +29,8 @@ def compare_delta_tables(
         exclude_columns (Optional[List[str]]): Specific columns to exclude from the comparison.
 
     Returns:
-        DataFrame: A DataFrame highlighting the differences with mismatched columns and their old and new values.
+        DataFrame: A DataFrame highlighting the differences with mismatched columns,
+                   their old and new values, and counts of mismatches and matches per row.
     """
     # Ensure the inputs are DataFrames
     if not isinstance(table1, DataFrame) or not isinstance(table2, DataFrame):
@@ -90,13 +91,25 @@ def compare_delta_tables(
     # Add mismatches array column
     comparison_df = comparison_df.withColumn("mismatches", mismatches_expr)
 
+    # Calculate mismatch_count and match_count
+    comparison_df = comparison_df.withColumn(
+        "mismatch_count",
+        expr("size(mismatches)")
+    ).withColumn(
+        "match_count",
+        lit(total_compare_columns) - col("mismatch_count")
+    )
+
     # Explode mismatches to have one row per mismatch
+    # Include mismatch_count and match_count in each row
     result_df = comparison_df.withColumn("mismatch", explode("mismatches")) \
         .select(
         join_key,
         col("mismatch.column").alias("column"),
         col("mismatch.old_value").alias("old_value"),
-        col("mismatch.new_value").alias("new_value")
+        col("mismatch.new_value").alias("new_value"),
+        col("mismatch_count"),
+        col("match_count")
     )
 
     return result_df
