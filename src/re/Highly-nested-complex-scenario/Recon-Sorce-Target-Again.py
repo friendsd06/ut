@@ -1,13 +1,19 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import explode, col, when, concat, lit, concat_ws, array, struct
+from pyspark.sql.functions import explode, col, when, concat, lit, concat_ws
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
 
 def initialize_spark(app_name="GenericNestedDataFrameReconciliation"):
+    """
+    Initialize a Spark session with the specified application name.
+    """
     spark = SparkSession.builder.appName(app_name).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
     return spark
 
 def create_sample_dataframes(spark: SparkSession):
+    """
+    Create sample source and target DataFrames with nested structures.
+    """
     schema = StructType([
         StructField("main_id", IntegerType(), True),
         StructField("main_attr1", StringType(), True),
@@ -52,6 +58,9 @@ def create_sample_dataframes(spark: SparkSession):
     return source_df, target_df
 
 def flatten_nested_entities(df: DataFrame, nested_col: str, nested_fields: list, parent_keys: list) -> DataFrame:
+    """
+    Flatten nested entities by exploding the nested column and selecting relevant fields.
+    """
     exploded = df.select(*parent_keys, explode(col(nested_col)).alias("nested_entity"))
 
     select_expr = parent_keys.copy()
@@ -60,15 +69,20 @@ def flatten_nested_entities(df: DataFrame, nested_col: str, nested_fields: list,
 
     return exploded.select(*select_expr)
 
-def compare_columns(df, col_name):
+def compare_columns(source_col: str, target_col: str, col_name: str):
+    """
+    Compare two columns and return a formatted difference string if they differ.
+    """
     return when(
-        (col(f"source.{col_name}") != col(f"target.{col_name}")) |
-        (col(f"source.{col_name}").isNull() & col(f"target.{col_name}").isNotNull()) |
-        (col(f"source.{col_name}").isNotNull() & col(f"target.{col_name}").isNull()),
-        concat(lit(f"{col_name}: "),
-               when(col(f"source.{col_name}").isNotNull(), concat(lit("source="), col(f"source.{col_name}"))).otherwise(lit("source=NULL")),
-               lit(", "),
-               when(col(f"target.{col_name}").isNotNull(), concat(lit("target="), col(f"target.{col_name}"))).otherwise(lit("target=NULL")))
+        (source_col != target_col) |
+        (source_col.isNull() & target_col.isNotNull()) |
+        (source_col.isNotNull() & target_col.isNull()),
+        concat(
+            lit(f"{col_name}: "),
+            when(source_col.isNotNull(), concat(lit("source="), source_col)).otherwise(lit("source=NULL")),
+            lit(", "),
+            when(target_col.isNotNull(), concat(lit("target="), target_col)).otherwise(lit("target=NULL"))
+        )
     ).otherwise(None)
 
 def reconcile_dataframes(
@@ -79,36 +93,92 @@ def reconcile_dataframes(
         main_compare_cols: list,
         nested_compare_cols: list
 ) -> DataFrame:
-    # Reconcile main-level entities
-    joined_main = source_flat.select(parent_primary_key, *main_compare_cols).distinct() \
-        .alias("source") \
-        .join(target_flat.select(parent_primary_key, *main_compare_cols).distinct().alias("target"),
-              on=parent_primary_key, how="full_outer")
+    """
+    Reconcile source and target DataFrames by comparing main and nested entities.
+    """
+    # Prefix columns to differentiate source and target after join
+    source_prefixed = source_flat.select(
+        [col(parent_primary_key)] +
+        [col(c).alias(f"source_{c}") for c in main_compare_cols + nested_compare_cols]
+    )
 
-    main_diffs = [compare_columns(joined_main, c).alias(f"{c}_diff") for c in main_compare_cols]
+    target_prefixed = target_flat.select(
+        [col(parent_primary_key)] +
+        [col(c).alias(f"target_{c}") for c in main_compare_cols + nested_compare_cols]
+    )
+
+    # Perform full outer join on parent and child primary keys
+    joined_main = source_prefixed.join(
+        target_prefixed,
+        on=parent_primary_key,
+        how="full_outer"
+    )
+
+    # Compare main-level columns
+    main_diffs = [
+        compare_columns(
+            col(f"source_{c}"),
+            col(f"target_{c}"),
+            c
+        ).alias(f"{c}_diff")
+        for c in main_compare_cols
+    ]
 
     main_diff_df = joined_main.select(
-        col(f"source.{parent_primary_key}").alias(parent_primary_key),
+        col(parent_primary_key),
         *main_diffs,
         lit("Main").alias("diff_type")
-    ).filter(" OR ".join([f"{c}_diff IS NOT NULL" for c in main_compare_cols]))
+    ).filter(
+        " OR ".join([f"{c}_diff IS NOT NULL" for c in main_compare_cols])
+    )
 
-    # Reconcile nested entities
-    joined_nested = source_flat.select(parent_primary_key, child_primary_key, *nested_compare_cols) \
-        .alias("source") \
-        .join(target_flat.select(parent_primary_key, child_primary_key, *nested_compare_cols).alias("target"),
-              on=[parent_primary_key, child_primary_key], how="full_outer")
+    # Compare nested-level columns
+    nested_diffs = [
+        compare_columns(
+            col(f"source_{c}"),
+            col(f"target_{c}"),
+            c
+        ).alias(f"{c}_diff")
+        for c in nested_compare_cols
+    ]
 
-    nested_diffs = [compare_columns(joined_nested, c).alias(f"{c}_diff") for c in nested_compare_cols]
+    # To compare nested entities, we need to explode them again
+    # First, select and alias the necessary columns
+    source_nested = source_prefixed.select(
+        parent_primary_key,
+        child_primary_key,
+        *[col(f"source_{c}") for c in nested_compare_cols]
+    )
+
+    target_nested = target_prefixed.select(
+        parent_primary_key,
+        child_primary_key,
+        *[col(f"target_{c}") for c in nested_compare_cols]
+    )
+
+    # Perform full outer join on parent and child primary keys for nested entities
+    joined_nested = source_nested.join(
+        target_nested,
+        on=[parent_primary_key, child_primary_key],
+        how="full_outer"
+    )
 
     nested_diff_df = joined_nested.select(
-        col(f"source.{parent_primary_key}").alias(parent_primary_key),
-        col(f"source.{child_primary_key}").alias(child_primary_key),
-        *nested_diffs,
+        col(parent_primary_key),
+        col(child_primary_key),
+        *[
+            compare_columns(
+                col(f"source_{c}"),
+                col(f"target_{c}"),
+                c
+            ).alias(f"{c}_diff") for c in nested_compare_cols
+        ],
         lit("Nested").alias("diff_type")
-    ).filter(" OR ".join([f"{c}_diff IS NOT NULL" for c in nested_compare_cols]))
+    ).filter(
+        " OR ".join([f"{c}_diff IS NOT NULL" for c in nested_compare_cols])
+    )
 
-    # Combine main and nested diffs
+    # Prepare main diffs for unified report
     main_diff_prepared = main_diff_df.select(
         col(parent_primary_key),
         "diff_type",
@@ -116,6 +186,7 @@ def reconcile_dataframes(
         lit(None).alias(child_primary_key)
     )
 
+    # Prepare nested diffs for unified report
     nested_diff_prepared = nested_diff_df.select(
         col(parent_primary_key),
         "diff_type",
@@ -123,10 +194,15 @@ def reconcile_dataframes(
         col(child_primary_key)
     )
 
+    # Combine main and nested diffs
     unified_report = main_diff_prepared.unionByName(nested_diff_prepared)
+
     return unified_report.orderBy(col(parent_primary_key).asc(), col(child_primary_key).asc().nullsFirst())
 
 def main():
+    """
+    Main function to execute the reconciliation process.
+    """
     spark = initialize_spark()
     source_df, target_df = create_sample_dataframes(spark)
 
@@ -134,11 +210,17 @@ def main():
     child_primary_key = "nested_id"
     nested_column = "nested_entities"
 
+    # Identify main-level columns excluding primary key and nested column
     main_columns = [f.name for f in source_df.schema.fields
                     if f.name not in {parent_primary_key, nested_column}]
+
+    # Identify nested-level fields
     nested_fields = [f.name for f in source_df.schema[nested_column].dataType.elementType.fields]
+
+    # Columns to compare in nested entities (excluding child primary key)
     nested_compare_cols = [f for f in nested_fields if f != child_primary_key]
 
+    # Flatten source and target DataFrames
     source_flat = flatten_nested_entities(source_df, nested_column, nested_fields, [parent_primary_key])
     target_flat = flatten_nested_entities(target_df, nested_column, nested_fields, [parent_primary_key])
 
@@ -148,6 +230,7 @@ def main():
     print("\n=== Target Flattened DataFrame ===")
     target_flat.show(truncate=False)
 
+    # Generate reconciliation report
     reconciliation_report = reconcile_dataframes(
         source_flat=source_flat,
         target_flat=target_flat,
