@@ -118,3 +118,66 @@ def compare_dataframes_with_nested_columns(
     ).filter(col("differences").isNotNull())
 
     return differences_df
+
+
+    # Define schema for source DataFrame
+    schema_source = StructType([
+        StructField("id", IntegerType(), True),
+        StructField("col_a", StringType(), True),
+        StructField("nested_col", StructType([
+            StructField("id", IntegerType(), True),
+            StructField("name", StringType(), True)
+        ]), True)
+    ])
+
+    # Define schema for target DataFrame
+    schema_target = StructType([
+        StructField("id", IntegerType(), True),
+        StructField("col_a", StringType(), True),
+        StructField("nested_col", StructType([
+            StructField("id", IntegerType(), True),
+            StructField("name", StringType(), True)
+        ]), True)
+    ])
+
+    # Create sample data for source DataFrame
+    data_source = [
+        (1, "A1", {"id": 100, "name": "John"}),
+        (2, "A2", {"id": 101, "name": "Jane"}),
+        (3, "A3", {"id": 102, "name": "Alice"})
+    ]
+
+    # Create sample data for target DataFrame
+    data_target = [
+        (1, "A1", {"id": 100, "name": "John"}),  # No mismatch
+        (2, "A2_modified", {"id": 101, "name": "Jane Doe"}),  # col_a and nested_col.name mismatch
+        (4, "A4", {"id": 103, "name": "Bob"})  # New record not in source
+    ]
+
+    # Create DataFrames
+    source_df = spark.createDataFrame(data_source, schema_source)
+    target_df = spark.createDataFrame(data_target, schema_target)
+
+    # Define join key
+    join_key = "id"
+
+    # Define columns to compare
+    columns_to_compare = [
+        "col_a",
+        "nested_col.id",
+        "nested_col.name"
+    ]
+
+    # Perform reconciliation
+    differences_df = compare_dataframes_with_nested_columns(
+        source_df=source_df,
+        target_df=target_df,
+        join_key=join_key,
+        columns_to_compare=columns_to_compare,
+        include_columns=columns_to_compare,
+        exclude_columns=[]
+    )
+
+    # Show differences
+    print("=== Example 1: Simple Flat DataFrames ===")
+    differences_df.show(truncate=False)
