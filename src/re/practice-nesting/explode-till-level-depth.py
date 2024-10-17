@@ -1,5 +1,8 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, MapType, DoubleType, DateType
+from pyspark.sql.types import (
+    StructType, StructField, StringType, IntegerType, ArrayType,
+    MapType, DoubleType, DateType
+)
 from pyspark.sql.functions import explode_outer, col, map_keys, map_values, when, concat_ws, concat
 from functools import reduce
 import logging
