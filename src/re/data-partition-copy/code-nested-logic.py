@@ -75,21 +75,19 @@ def create_sample_dataframes(spark: SparkSession) -> (DataFrame, DataFrame):
 def flatten_nested_entities(
         df: DataFrame,
         nested_col: str,
-        nested_fields: list,
-        parent_keys: list
+        nested_fields: list
 ) -> DataFrame:
     """
     Flatten nested entities by exploding the nested column and selecting relevant fields.
     """
-    exploded = df.select(
-        *parent_keys,
-        explode_outer(col(nested_col)).alias("nested_entity")
-    )
-
-    select_expr = parent_keys.copy()
+    # Explode the nested column
+    exploded = df.withColumn("nested_entity", explode_outer(col(nested_col)))
+    # Select all columns except the nested column
+    other_columns = [c for c in df.columns if c != nested_col]
+    select_expr = [col(c) for c in other_columns]
+    # Add nested fields
     for field in nested_fields:
         select_expr.append(col(f"nested_entity.{field}").alias(field))
-
     return exploded.select(*select_expr)
 
 def reconcile_dataframes(
@@ -241,9 +239,7 @@ def reconcile_dataframes(
     for c in nested_compare_cols:
         output_columns.extend([f"source_{c}", f"target_{c}"])
 
-    output_df = unified_report.select(*output_columns)
-
-    return output_df
+    return unified_report.select(*output_columns)
 
 def main():
     """
@@ -280,15 +276,13 @@ def main():
     source_flat = flatten_nested_entities(
         df=source_df,
         nested_col=nested_column,
-        nested_fields=nested_fields,
-        parent_keys=[parent_primary_key]
+        nested_fields=nested_fields
     )
 
     target_flat = flatten_nested_entities(
         df=target_df,
         nested_col=nested_column,
-        nested_fields=nested_fields,
-        parent_keys=[parent_primary_key]
+        nested_fields=nested_fields
     )
 
     # Display Flattened DataFrames
