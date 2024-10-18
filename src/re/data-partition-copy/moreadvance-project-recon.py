@@ -4,17 +4,12 @@ from pyspark.sql.functions import (
     col,
     when,
     lit,
-    coalesce,
-    struct,
-    array,
-    create_map,
-    to_json,
-    sha2
+    coalesce
 )
 from pyspark.sql.types import *
 from functools import reduce
 
-def initialize_spark(app_name: str = "FlexibleDataFrameReconciliation") -> SparkSession:
+def initialize_spark(app_name: str = "NestedDataFrameReconciliation") -> SparkSession:
     """
     Initialize a Spark session with the specified application name.
     """
@@ -24,40 +19,51 @@ def initialize_spark(app_name: str = "FlexibleDataFrameReconciliation") -> Spark
 
 def create_sample_dataframes(spark: SparkSession) -> (DataFrame, DataFrame):
     """
-    Create sample source and target DataFrames with complex nested structures.
+    Create sample source and target DataFrames with nested structures.
     """
+    # Define the schema with nested StructType fields
     schema = StructType([
-        StructField("id", IntegerType(), True),
-        StructField("attributes", StructType([
-            StructField("attr1", StringType(), True),
-            StructField("attr2", StringType(), True),
-            StructField("sub_attributes", ArrayType(StructType([
+        StructField("main_id", IntegerType(), True),
+        StructField("main_attr1", StringType(), True),
+        StructField("main_attr2", StringType(), True),
+        StructField("nested_entities", ArrayType(StructType([
+            StructField("nested_id", IntegerType(), True),
+            StructField("nested_attr1", StringType(), True),
+            StructField("nested_attr2", StringType(), True),
+            StructField("nested_struct", StructType([
                 StructField("sub_attr1", StringType(), True),
-                StructField("sub_attr2", StructType([
-                    StructField("deep_attr1", IntegerType(), True),
-                    StructField("deep_attr2", StringType(), True)
-                ]), True)
-            ])), True)
-        ]), True),
-        StructField("metadata", MapType(StringType(), StringType()), True)
+                StructField("sub_attr2", IntegerType(), True)
+            ]), True)
+        ])), True)
     ])
 
     data_source = [
-        (1, {"attr1": "A", "attr2": "B", "sub_attributes": [
-            {"sub_attr1": "SA1", "sub_attr2": {"deep_attr1": 10, "deep_attr2": "DA1"}},
-            {"sub_attr1": "SA2", "sub_attr2": {"deep_attr1": 20, "deep_attr2": "DA2"}}
-        ]}, {"key1": "value1", "key2": "value2"}),
-        (2, {"attr1": "C", "attr2": "D", "sub_attributes": None}, None),
-        (3, None, {"key3": "value3"}),
+        (1, "MainA", "Active", [
+            {"nested_id": 101, "nested_attr1": "NA1", "nested_attr2": "NY1", "nested_struct": {"sub_attr1": "SubA", "sub_attr2": 10}},
+            {"nested_id": 102, "nested_attr1": "NA2", "nested_attr2": "NY2", "nested_struct": {"sub_attr1": "SubB", "sub_attr2": 20}}
+        ]),
+        (2, "MainB", "Active", [
+            {"nested_id": 103, "nested_attr1": "NB1", "nested_attr2": "NY3", "nested_struct": {"sub_attr1": "SubC", "sub_attr2": 30}}
+        ]),
+        (3, "MainC", "Inactive", None),  # nested_entities is None
+        (5, None, "Active", [
+            {"nested_id": 107, "nested_attr1": None, "nested_attr2": "NY7", "nested_struct": {"sub_attr1": "SubD", "sub_attr2": 40}}
+        ])
     ]
 
     data_target = [
-        (1, {"attr1": "A", "attr2": "B_modified", "sub_attributes": [
-            {"sub_attr1": "SA1", "sub_attr2": {"deep_attr1": 10, "deep_attr2": "DA1"}},
-            {"sub_attr1": "SA2", "sub_attr2": {"deep_attr1": 25, "deep_attr2": "DA2_modified"}}
-        ]}, {"key1": "value1_modified", "key2": "value2"}),
-        (2, {"attr1": "C", "attr2": "D", "sub_attributes": None}, {"key4": "value4"}),
-        (4, {"attr1": "E", "attr2": "F", "sub_attributes": []}, None),
+        (1, "MainA", "Active", [
+            {"nested_id": 101, "nested_attr1": "NA1_modified", "nested_attr2": "NY1", "nested_struct": {"sub_attr1": "SubA", "sub_attr2": 10}},
+            {"nested_id": 102, "nested_attr1": "NA2", "nested_attr2": "NY2", "nested_struct": {"sub_attr1": "SubB_modified", "sub_attr2": 20}}
+        ]),
+        (2, "MainB", "Inactive", [
+            {"nested_id": 103, "nested_attr1": "NB1", "nested_attr2": "NY3_modified", "nested_struct": {"sub_attr1": "SubC", "sub_attr2": 35}},
+            {"nested_id": 105, "nested_attr1": "NB2", "nested_attr2": "NY5", "nested_struct": {"sub_attr1": "SubE", "sub_attr2": 50}}
+        ]),
+        (4, "MainD", "Active", [
+            {"nested_id": 106, "nested_attr1": "ND1", "nested_attr2": "NY6", "nested_struct": {"sub_attr1": "SubF", "sub_attr2": 60}}
+        ]),
+        (5, "MainE", "Active", None)  # nested_entities is None
     ]
 
     source_df = spark.createDataFrame(data_source, schema)
@@ -65,108 +71,107 @@ def create_sample_dataframes(spark: SparkSession) -> (DataFrame, DataFrame):
 
     return source_df, target_df
 
-def flatten_schema(schema, prefix=None):
+def flatten_struct(schema, prefix=""):
     """
-    Recursively flattens a nested schema.
+    Recursively flattens a StructType schema.
     """
     fields = []
     for field in schema.fields:
         field_name = f"{prefix}.{field.name}" if prefix else field.name
-        data_type = field.dataType
-        if isinstance(data_type, StructType):
-            fields += flatten_schema(data_type, prefix=field_name)
-        elif isinstance(data_type, ArrayType) and isinstance(data_type.elementType, StructType):
-            # Handle arrays of structs
-            fields.append((field_name, data_type, 'array_struct'))
+        if isinstance(field.dataType, StructType):
+            fields += flatten_struct(field.dataType, prefix=field_name)
         else:
-            fields.append((field_name, data_type, 'primitive'))
+            fields.append(col(field_name).alias(field_name.replace(".", "_")))
     return fields
 
-def flatten_dataframe(df, prefix=None):
+def flatten_dataframe(df, nested_column):
     """
-    Recursively flattens a DataFrame with nested structures.
+    Flattens a DataFrame with nested StructType and ArrayType columns.
     """
-    fields = flatten_schema(df.schema)
-    exprs = []
-    for field_name, data_type, field_type in fields:
-        if field_type == 'primitive':
-            exprs.append(col(field_name).alias(field_name.replace('.', '_')))
-        elif field_type == 'array_struct':
-            # Explode arrays of structs
-            exprs.append(explode_outer(col(field_name)).alias(field_name.replace('.', '_')))
-        # Additional cases can be added for MapType, etc.
-    return df.select(*exprs)
+    # Explode the nested array column
+    df = df.withColumn(nested_column, explode_outer(col(nested_column)))
+    # Get all columns except the nested struct columns
+    non_struct_cols = [col(c) for c in df.columns if not isinstance(df.schema[c].dataType, StructType)]
+    # Flatten the nested struct columns
+    struct_cols = []
+    for c in df.columns:
+        if isinstance(df.schema[c].dataType, StructType):
+            struct_cols.extend(flatten_struct(df.schema[c].dataType, prefix=c))
+    # Select all columns
+    return df.select(*non_struct_cols, *struct_cols)
 
-def generate_hash_column(df, exclude_cols):
-    """
-    Generates a hash column for the DataFrame based on all columns except those in exclude_cols.
-    """
-    cols_to_hash = [col(c) for c in df.columns if c not in exclude_cols]
-    return df.withColumn('hash_value', sha2(to_json(struct(*cols_to_hash)), 256))
-
-def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, primary_keys: list) -> DataFrame:
+def reconcile_dataframes(
+        source_df: DataFrame,
+        target_df: DataFrame,
+        primary_keys: list
+) -> DataFrame:
     """
     Reconcile source and target DataFrames by comparing all columns.
     """
     # Flatten the DataFrames
-    source_flat = flatten_dataframe(source_df)
-    target_flat = flatten_dataframe(target_df)
+    source_flat = flatten_dataframe(source_df, nested_column="nested_entities")
+    target_flat = flatten_dataframe(target_df, nested_column="nested_entities")
 
-    # Generate hash columns to compare entire rows
-    source_flat = generate_hash_column(source_flat, exclude_cols=primary_keys)
-    target_flat = generate_hash_column(target_flat, exclude_cols=primary_keys)
+    # Get the list of columns to compare (excluding primary keys)
+    compare_cols = [c for c in source_flat.columns if c not in primary_keys]
+
+    # Alias columns for source and target
+    source_flat = source_flat.select(
+        *[col(c).alias(f"source_{c}") for c in source_flat.columns]
+    )
+    target_flat = target_flat.select(
+        *[col(c).alias(f"target_{c}") for c in target_flat.columns]
+    )
 
     # Join on primary keys
-    joined_df = source_flat.alias('src').join(
-        target_flat.alias('tgt'),
-        on=[source_flat[c] == target_flat[c] for c in primary_keys],
-        how='full_outer'
+    join_conditions = [
+        source_flat[f"source_{pk}"] == target_flat[f"target_{pk}"] for pk in primary_keys
+    ]
+    joined_df = source_flat.join(
+        target_flat,
+        on=join_conditions,
+        how="full_outer"
     )
 
-    # Compare hash values to find differences
-    diff_df = joined_df.filter(
-        (col('src.hash_value') != col('tgt.hash_value')) |
-        col('src.hash_value').isNull() |
-        col('tgt.hash_value').isNull()
-    )
-
-    # Generate differences for each column
+    # Compare columns and collect differences
     diff_columns = []
-    for col_name in set(source_flat.columns).union(set(target_flat.columns)):
-        if col_name not in primary_keys + ['hash_value']:
-            src_col = col(f'src.{col_name}')
-            tgt_col = col(f'tgt.{col_name}')
-            diff_col_name = f"{col_name}_diff"
-            diff_columns.append(
-                when(
-                    ~src_col.eqNullSafe(tgt_col),
-                    struct(
-                        src_col.alias('source'),
-                        tgt_col.alias('target')
-                    )
-                ).alias(diff_col_name)
-            )
+    for c in compare_cols:
+        source_col = col(f"source_{c}")
+        target_col = col(f"target_{c}")
+        diff_col_name = f"{c}_diff"
+        diff_columns.extend([
+            source_col,
+            target_col,
+            when(
+                ~source_col.eqNullSafe(target_col),
+                lit(True)
+            ).otherwise(lit(False)).alias(diff_col_name)
+        ])
 
-    # Select primary keys and difference columns
-    result_df = diff_df.select(
-        *[coalesce(col(f'src.{pk}'), col(f'tgt.{pk}')).alias(pk) for pk in primary_keys],
+    # Build the final DataFrame
+    result_df = joined_df.select(
+        *[coalesce(col(f"source_{pk}"), col(f"target_{pk}")).alias(pk) for pk in primary_keys],
         *diff_columns
     )
+
+    # Filter rows with any differences
+    diff_cond = reduce(lambda a, b: a | b, [col(f"{c}_diff") for c in compare_cols])
+    result_df = result_df.filter(diff_cond)
 
     return result_df
 
 def main():
     """
-    Main function to execute the flexible reconciliation process.
+    Main function to execute the reconciliation process.
     """
     # Initialize Spark session
     spark = initialize_spark()
 
-    # Create sample DataFrames with complex nested structures
+    # Create sample DataFrames with nested structures
     source_df, target_df = create_sample_dataframes(spark)
 
     # Define primary keys
-    primary_keys = ['id']
+    primary_keys = ['main_id', 'nested_id']
 
     # Perform reconciliation
     reconciliation_report = reconcile_dataframes(
