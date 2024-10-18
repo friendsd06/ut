@@ -213,14 +213,29 @@ def reconcile_dataframes(
     # Add child_primary_key column to main_diff_df with null values
     main_diff_df = main_diff_df.withColumn("child_primary_key", lit(None).cast(IntegerType()))
 
-    # Align columns in both DataFrames
-    main_cols = main_diff_df.columns
-    nested_cols = nested_diff_df.columns
-    all_cols = list(set(main_cols + nested_cols))
+    # Define the full list of columns in order
+    output_columns = ["parent_primary_key", "child_primary_key"]
 
-    main_diff_df = main_diff_df.select(*all_cols)
-    nested_diff_df = nested_diff_df.select(*all_cols)
+    # Include main attributes and their differences
+    for c in main_compare_cols:
+        output_columns.extend([f"source_{c}", f"target_{c}", f"{c}_diff"])
 
+    # Include nested attributes and their differences
+    for c in nested_compare_cols:
+        output_columns.extend([f"source_{c}", f"target_{c}", f"{c}_diff"])
+
+    # Ensure all columns are present in both DataFrames
+    for col_name in output_columns:
+        if col_name not in main_diff_df.columns:
+            main_diff_df = main_diff_df.withColumn(col_name, lit(None))
+        if col_name not in nested_diff_df.columns:
+            nested_diff_df = nested_diff_df.withColumn(col_name, lit(None))
+
+    # Select the columns in the specified order
+    main_diff_df = main_diff_df.select(output_columns)
+    nested_diff_df = nested_diff_df.select(output_columns)
+
+    # Combine the DataFrames
     unified_report = main_diff_df.unionByName(nested_diff_df)
 
     # Order the report for readability
@@ -229,17 +244,7 @@ def reconcile_dataframes(
         col("child_primary_key").asc_nulls_first()
     )
 
-    # Select the desired columns for output
-    # We'll output source and target columns for attributes that have differences
-    output_columns = ["parent_primary_key", "child_primary_key"]
-
-    for c in main_compare_cols:
-        output_columns.extend([f"source_{c}", f"target_{c}"])
-
-    for c in nested_compare_cols:
-        output_columns.extend([f"source_{c}", f"target_{c}"])
-
-    return unified_report.select(*output_columns)
+    return unified_report
 
 def main():
     """
@@ -284,13 +289,6 @@ def main():
         nested_col=nested_column,
         nested_fields=nested_fields
     )
-
-    # Display Flattened DataFrames
-    print("=== Source Flattened DataFrame ===")
-    source_flat.show(truncate=False)
-
-    print("\n=== Target Flattened DataFrame ===")
-    target_flat.show(truncate=False)
 
     # Perform reconciliation
     reconciliation_report = reconcile_dataframes(
