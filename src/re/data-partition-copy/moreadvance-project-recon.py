@@ -77,11 +77,13 @@ def flatten_struct(schema, prefix=""):
     """
     fields = []
     for field in schema.fields:
-        field_name = f"{prefix}.{field.name}" if prefix else field.name
+        field_name = f"{prefix}{field.name}" if prefix else field.name
         if isinstance(field.dataType, StructType):
-            fields += flatten_struct(field.dataType, prefix=field_name)
+            # Flatten nested structs recursively
+            fields += flatten_struct(field.dataType, prefix=f"{field_name}_")
         else:
-            fields.append(col(field_name).alias(field_name.replace(".", "_")))
+            # Include the field with the current prefix
+            fields.append(col(f"{prefix}{field.name}").alias(field_name))
     return fields
 
 def flatten_dataframe(df, nested_column):
@@ -90,13 +92,18 @@ def flatten_dataframe(df, nested_column):
     """
     # Explode the nested array column
     df = df.withColumn(nested_column, explode_outer(col(nested_column)))
-    # Get all columns except the nested struct columns
-    non_struct_cols = [col(c) for c in df.columns if not isinstance(df.schema[c].dataType, StructType)]
-    # Flatten the nested struct columns
+    # Get all columns except the nested array column
+    non_struct_cols = [col(c) for c in df.columns if c != nested_column]
+    # Flatten the nested struct columns within the nested_column without prefix
     struct_cols = []
+    if nested_column in df.columns:
+        # Flatten the nested_column (which is now a struct after exploding) without prefix
+        nested_schema = df.schema[nested_column].dataType
+        struct_cols.extend(flatten_struct(nested_schema, prefix=""))
+    # Flatten other struct columns with prefixes
     for c in df.columns:
-        if isinstance(df.schema[c].dataType, StructType):
-            struct_cols.extend(flatten_struct(df.schema[c].dataType, prefix=c))
+        if c != nested_column and isinstance(df.schema[c].dataType, StructType):
+            struct_cols.extend(flatten_struct(df.schema[c].dataType, prefix=f"{c}_"))
     # Select all columns
     return df.select(*non_struct_cols, *struct_cols)
 
