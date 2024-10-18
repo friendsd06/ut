@@ -1,0 +1,1 @@
+parent_mismatches_df = parent_mismatches_df.withColumn('child_primary_key', lit(None).cast("string"))
