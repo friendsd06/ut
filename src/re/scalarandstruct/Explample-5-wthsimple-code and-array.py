@@ -38,16 +38,28 @@ def reconcile_dataframes(source_df, target_df, join_columns):
         """
         Compare array of structs with parent_id and id columns, showing differences only at the child level.
         """
-        # Explode arrays of structs in both source and target
-        exploded_source_df = source_df.withColumn("exploded_project", explode_outer(col(f"source.{array_col}")))
-        exploded_target_df = target_df.withColumn("exploded_project", explode_outer(col(f"target.{array_col}")))
+        # Explode arrays of structs in both source and target, renaming columns to avoid ambiguity
+        exploded_source_df = source_df.withColumn("exploded_project", explode_outer(col(f"source.{array_col}"))).select(
+            col("source.employee_id"),
+            col("exploded_project.parent_id").alias("source_parent_id"),
+            col("exploded_project.id").alias("source_id"),
+            *[col(f"exploded_project.{nested_col}").alias(f"source_{nested_col}") for nested_col in nested_columns]
+        )
 
-        # Join exploded arrays on parent_id and id using column expressions
+        exploded_target_df = target_df.withColumn("exploded_project", explode_outer(col(f"target.{array_col}"))).select(
+            col("target.employee_id"),
+            col("exploded_project.parent_id").alias("target_parent_id"),
+            col("exploded_project.id").alias("target_id"),
+            *[col(f"exploded_project.{nested_col}").alias(f"target_{nested_col}") for nested_col in nested_columns]
+        )
+
+        # Join exploded arrays on parent_id and id using renamed columns
         joined_projects_df = exploded_source_df.join(
             exploded_target_df,
             [
-                col("exploded_project.parent_id") == col("exploded_project.parent_id"),
-                col("exploded_project.id") == col("exploded_project.id")
+                col("source_parent_id") == col("target_parent_id"),
+                col("source_id") == col("target_id"),
+                col("source.employee_id") == col("target.employee_id")
             ],
             "full_outer"
         )
@@ -56,8 +68,8 @@ def reconcile_dataframes(source_df, target_df, join_columns):
         diff_keys = []
         diff_values = []
         for nested_col in nested_columns:
-            source_nested_col = col(f"exploded_project.{nested_col}")
-            target_nested_col = col(f"exploded_project.{nested_col}")
+            source_nested_col = col(f"source_{nested_col}")
+            target_nested_col = col(f"target_{nested_col}")
 
             diff_expr = compare_columns(source_nested_col, target_nested_col, nested_col.split('.')[-1])
             diff_keys.append(lit(nested_col.split('.')[-1]))
@@ -71,8 +83,8 @@ def reconcile_dataframes(source_df, target_df, join_columns):
 
         # Only show differences for projects with differences
         result_df = joined_projects_df.filter(diff_map.isNotNull()).select(
-            col("exploded_project.parent_id").alias("parent_id"),
-            col("exploded_project.id").alias("id"),
+            col("source_parent_id").alias("parent_id"),
+            col("source_id").alias("id"),
             diff_map.alias(array_col)
         )
 
