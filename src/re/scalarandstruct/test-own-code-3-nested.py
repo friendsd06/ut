@@ -8,14 +8,7 @@ from pyspark.sql.functions import (
 # 1. Initialize SparkSession
 # -----------------------------
 
-spark = SparkSession.builder \
-    .appName("DataFrameReconciliation") \
-    .config("spark.sql.shuffle.partitions", "400")  # Adjust based on your cluster
-.getOrCreate()
-
-# -----------------------------
-# 2. Define Schemas Using StructType
-# -----------------------------
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 
 # Define the schema for the 'address' struct
 address_schema = StructType([
@@ -51,10 +44,12 @@ main_schema = StructType([
     StructField("payments", ArrayType(payment_schema), True)
 ])
 
+
 # -----------------------------
 # 3. Create Sample DataFrames
 # -----------------------------
 
+# Sample data for source_df
 # Sample data for source_df
 source_data = [
     {
@@ -130,9 +125,12 @@ target_data = [
 source_df = spark.createDataFrame(source_data, schema=main_schema)
 target_df = spark.createDataFrame(target_data, schema=main_schema)
 
+
 # -----------------------------
 # 4. Define Helper Functions
 # -----------------------------
+
+
 
 def identify_column_types(df):
     """
@@ -257,10 +255,6 @@ def compare_flattened_nested_columns(joined_df, nested_columns):
         comparisons.append(struct_diff_col)
     return comparisons
 
-# -----------------------------
-# 5. Define Main Comparison Function
-# -----------------------------
-
 def compare_dataframes(
         source_df,
         target_df,
@@ -279,28 +273,42 @@ def compare_dataframes(
     """
 
     # Identify scalar and struct columns in source DataFrame
-    scalar_cols, struct_cols = identify_column_types(source_df)
+    scalar_cols_source, struct_cols_source = identify_column_types(source_df)
+    scalar_cols_target, struct_cols_target = identify_column_types(target_df)
 
-    # If there are nested columns to flatten, process them
+    # Ensure both DataFrames have the same column structure
+    # For simplicity, we'll assume they have the same structure
+
+    # Flatten nested columns in source and target DataFrames
     if nested_columns_to_flatten:
-        # Flatten nested columns in source and target DataFrames
         source_df = flatten_nested_columns(source_df, nested_columns_to_flatten, primary_keys)
         target_df = flatten_nested_columns(target_df, nested_columns_to_flatten, primary_keys)
 
-        # Update scalar and struct columns after flattening
-        scalar_cols, struct_cols = identify_column_types(source_df)
+    # After flattening, identify scalar and struct columns again
+    scalar_cols_source, struct_cols_source = identify_column_types(source_df)
+    scalar_cols_target, struct_cols_target = identify_column_types(target_df)
+
+    # Ensure that scalar and struct columns are consistent between source and target
+    # This step can be enhanced based on specific requirements
 
     # Select only necessary columns to reduce data size
-    # Include primary keys, scalar columns, struct columns, and nested columns to flatten
-    # Ensure columns exist before selecting
-    necessary_columns = primary_keys + scalar_cols + struct_cols + nested_columns_to_flatten
+    # Include primary keys, scalar columns, and flattened nested columns
+    necessary_columns = primary_keys + scalar_cols_source + struct_cols_source + nested_columns_to_flatten
     necessary_columns = [c for c in necessary_columns if c in source_df.columns]
+
     source_df = source_df.select(necessary_columns)
     target_df = target_df.select(necessary_columns)
 
     # Add prefixes to distinguish source and target columns
-    source_df_prefixed = add_prefix(source_df, "source_")
-    target_df_prefixed = add_prefix(target_df, "target_")
+    # Exclude primary keys from prefixing to handle them separately
+    def prefix_columns(df, prefix, exclude_columns):
+        return df.select([
+            col(column).alias(f"{prefix}{column}") if column not in exclude_columns else col(column)
+            for column in df.columns
+        ])
+
+    source_df_prefixed = prefix_columns(source_df, "source_", primary_keys)
+    target_df_prefixed = prefix_columns(target_df, "target_", primary_keys)
 
     # Repartition DataFrames on primary keys to optimize join
     num_partitions = 400  # Adjust based on cluster resources
@@ -324,12 +332,12 @@ def compare_dataframes(
     joined_df = source_df_prefixed.join(target_df_prefixed, on=join_conditions, how="full_outer")
 
     # Compare scalar columns
-    scalar_comparisons = compare_scalars(joined_df, scalar_cols)
+    scalar_comparisons = compare_scalars(joined_df, scalar_cols_source)
 
     # Compare struct columns (if any)
     struct_comparisons = []
-    if struct_cols:
-        for struct_col in struct_cols:
+    if struct_cols_source:
+        for struct_col in struct_cols_source:
             source_struct = col(f"source_{struct_col}")
             target_struct = col(f"target_{struct_col}")
             diff_col = when(
@@ -347,6 +355,7 @@ def compare_dataframes(
         nested_comparisons = compare_flattened_nested_columns(joined_df, nested_columns_to_flatten)
 
     # Prepare primary key columns for output by coalescing source and target
+    # This ensures that primary keys are unambiguous in the final DataFrame
     primary_key_cols = [
         coalesce(col(f"source_{pk}"), col(f"target_{pk}")).alias(pk) for pk in primary_keys
     ]
