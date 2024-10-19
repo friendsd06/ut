@@ -10,13 +10,14 @@ spark = SparkSession.builder \
     .config("spark.sql.shuffle.partitions", "400")  # Adjust based on your cluster
 .getOrCreate()
 
-# Define the schema for nested structures
+# Define the schema for the 'address' struct
 address_schema = StructType([
     StructField("street", StringType(), True),
     StructField("city", StringType(), True),
     StructField("zipcode", StringType(), True)
 ])
 
+# Define the schema for the 'order' struct
 order_schema = StructType([
     StructField("order_id", StringType(), True),
     StructField("order_date", StringType(), True),
@@ -24,11 +25,23 @@ order_schema = StructType([
     StructField("status", StringType(), True)
 ])
 
+# Define the schema for the 'payment' struct
 payment_schema = StructType([
     StructField("payment_id", StringType(), True),
     StructField("payment_date", StringType(), True),
     StructField("method", StringType(), True),
     StructField("amount", DoubleType(), True)
+])
+
+# Define the main schema for the DataFrames
+main_schema = StructType([
+    StructField("parent_primary_key", StringType(), True),
+    StructField("child_primary_key", StringType(), True),
+    StructField("name", StringType(), True),
+    StructField("age", IntegerType(), True),
+    StructField("address", address_schema, True),
+    StructField("orders", ArrayType(order_schema), True),
+    StructField("payments", ArrayType(payment_schema), True)
 ])
 
 # Create sample data for source_df
@@ -103,9 +116,8 @@ target_data = [
 ]
 
 # Create DataFrames
-source_df = spark.createDataFrame(source_data, schema="parent_primary_key STRING, child_primary_key STRING, name STRING, age INT, address STRUCT<street: STRING, city: STRING, zipcode: STRING>, orders ARRAY<STRUCT<order_id: STRING, order_date: STRING, amount: DOUBLE, status: STRING>>, payments ARRAY<STRUCT<payment_id: STRING, payment_date: STRING, method: STRING, amount: DOUBLE>>>")
-
-target_df = spark.createDataFrame(target_data, schema="parent_primary_key STRING, child_primary_key STRING, name STRING, age INT, address STRUCT<street: STRING, city: STRING, zipcode: STRING>, orders ARRAY<STRUCT<order_id: STRING, order_date: STRING, amount: DOUBLE, status: STRING>>, payments ARRAY<STRUCT<payment_id: STRING, payment_date: STRING, method: STRING, amount: DOUBLE>>>")
+source_df = spark.createDataFrame(source_data, schema=main_schema)
+target_df = spark.createDataFrame(target_data, schema=main_schema)
 
 def identify_column_types(df):
     """
@@ -185,6 +197,8 @@ def compare_flattened_nested_columns(joined_df, nested_columns):
     comparisons = []
     for nested_col in nested_columns:
         # Identify all attributes for this nested_col by extracting column names that start with nested_col_
+        # Exclude prefixed columns to get actual attributes
+        # Assuming all attributes are flattened as nested_col_attribute
         nested_attributes = [c for c in joined_df.columns if c.startswith(f"{nested_col}_") and not c.startswith(f"source_{nested_col}_") and not c.startswith(f"target_{nested_col}_")]
 
         # Extract unique attribute names by removing the nested_col prefix
@@ -203,7 +217,7 @@ def compare_flattened_nested_columns(joined_df, nested_columns):
             ).otherwise("")
             sub_field_comparisons.append(diff_expression)
 
-        # Concatenate all differences for this nested column
+        # Concatenate all differences for this nested column, ignoring empty strings
         struct_diff_col = concat_ws(", ", *sub_field_comparisons).alias(f"{nested_col}_diff")
         comparisons.append(struct_diff_col)
     return comparisons
@@ -238,9 +252,10 @@ def compare_dataframes(
         scalar_cols, struct_cols = identify_column_types(source_df)
 
     # Select only necessary columns to reduce data size
-    necessary_columns = primary_keys + scalar_cols + struct_cols + nested_columns_to_flatten
+    # Include primary keys, scalar columns, struct columns, and nested columns to flatten
     # Ensure columns exist before selecting
-    necessary_columns = [col for col in necessary_columns if col in source_df.columns]
+    necessary_columns = primary_keys + scalar_cols + struct_cols + nested_columns_to_flatten
+    necessary_columns = [c for c in necessary_columns if c in source_df.columns]
     source_df = source_df.select(necessary_columns)
     target_df = target_df.select(necessary_columns)
 
@@ -306,7 +321,6 @@ def compare_dataframes(
     )
 
     return final_df
-
 # Define primary keys
 primary_keys = ['parent_primary_key', 'child_primary_key']
 
@@ -323,6 +337,3 @@ result_df = compare_dataframes(
 
 # Display the comparison results
 result_df.show(truncate=False)
-
-# Optionally, write the results to a file in Parquet format
-# result_df.write.mode("overwrite").parquet("path_to_output_data")
