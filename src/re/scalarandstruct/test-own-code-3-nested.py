@@ -1,14 +1,4 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
-from pyspark.sql.functions import (
-    col, coalesce, when, lit, concat, concat_ws, broadcast
-)
-
-# Initialize SparkSession
-spark = SparkSession.builder \
-    .appName("DataFrameReconciliation") \
-    .config("spark.sql.shuffle.partitions", "400")  # Adjust based on your cluster
-.getOrCreate()
+ffrom pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 
 # Define the schema for the 'address' struct
 address_schema = StructType([
@@ -44,6 +34,7 @@ main_schema = StructType([
     StructField("payments", ArrayType(payment_schema), True)
 ])
 
+# Create sample data for source_df
 # Create sample data for source_df
 source_data = [
     {
@@ -115,9 +106,10 @@ target_data = [
     }
 ]
 
-# Create DataFrames
+# Create DataFrames with the defined schemas
 source_df = spark.createDataFrame(source_data, schema=main_schema)
 target_df = spark.createDataFrame(target_data, schema=main_schema)
+
 
 def identify_column_types(df):
     """
@@ -140,28 +132,47 @@ def add_prefix(df, prefix):
     """
     return df.select([col(column).alias(f"{prefix}{column}") for column in df.columns])
 
-def flatten_nested_columns(df, nested_columns):
+def flatten_nested_columns(df, nested_columns, primary_keys):
     """
-    Flatten specified nested (struct) columns by extracting their attributes one level deep.
+    Flatten specified nested (struct or array of structs) columns by extracting their attributes one level deep.
+    Excludes primary key columns from being flattened to prevent ambiguity.
 
     :param df: Input DataFrame
     :param nested_columns: List of nested column names to flatten
+    :param primary_keys: List of primary key column names to exclude from flattening
     :return: Flattened DataFrame
     """
     for nested_col in nested_columns:
-        # Check if the nested_col is indeed a struct
+        # Check if the nested_col is indeed a struct or array of structs
         if nested_col not in df.columns:
             continue  # Skip if the column does not exist
-        if not isinstance(df.schema[nested_col].dataType, StructType):
-            continue  # Skip if the column is not a struct
+        data_type = df.schema[nested_col].dataType
+        if isinstance(data_type, StructType):
+            # For StructType, flatten directly
+            sub_fields = [field.name for field in data_type.fields]
+            for sub_field in sub_fields:
+                # Skip if the sub_field is a primary key to prevent ambiguity
+                if sub_field in primary_keys:
+                    continue
+                df = df.withColumn(f"{nested_col}_{sub_field}", col(f"{nested_col}.{sub_field}"))
+            df = df.drop(nested_col)
+        elif isinstance(data_type, ArrayType) and isinstance(data_type.elementType, StructType):
+            # For Array of StructType, explode and flatten
+            from pyspark.sql.functions import explode_outer
 
-        # Extract sub-fields from the nested struct
-        sub_fields = df.select(f"{nested_col}.*").columns
-        for sub_field in sub_fields:
-            # Create new columns with a combined name
-            df = df.withColumn(f"{nested_col}_{sub_field}", col(f"{nested_col}.{sub_field}"))
-        # Drop the original nested column
-        df = df.drop(nested_col)
+            # Add a unique identifier for each array element to prevent ambiguity
+            df = df.withColumn(f"{nested_col}_exploded", explode_outer(col(nested_col)))
+
+            sub_fields = [field.name for field in data_type.elementType.fields]
+            for sub_field in sub_fields:
+                # Skip if the sub_field is a primary key to prevent ambiguity
+                if sub_field in primary_keys:
+                    continue
+                df = df.withColumn(f"{nested_col}_{sub_field}", col(f"{nested_col}_exploded.{sub_field}"))
+            df = df.drop(nested_col, f"{nested_col}_exploded")
+        else:
+            # Unsupported data type for flattening
+            continue
     return df
 
 def compare_scalars(joined_df, scalar_cols):
@@ -245,8 +256,8 @@ def compare_dataframes(
     # If there are nested columns to flatten, process them
     if nested_columns_to_flatten:
         # Flatten nested columns in source and target DataFrames
-        source_df = flatten_nested_columns(source_df, nested_columns_to_flatten)
-        target_df = flatten_nested_columns(target_df, nested_columns_to_flatten)
+        source_df = flatten_nested_columns(source_df, nested_columns_to_flatten, primary_keys)
+        target_df = flatten_nested_columns(target_df, nested_columns_to_flatten, primary_keys)
 
         # Update scalar and struct columns after flattening
         scalar_cols, struct_cols = identify_column_types(source_df)
@@ -321,6 +332,7 @@ def compare_dataframes(
     )
 
     return final_df
+
 # Define primary keys
 primary_keys = ['parent_primary_key', 'child_primary_key']
 
@@ -337,3 +349,4 @@ result_df = compare_dataframes(
 
 # Display the comparison results
 result_df.show(truncate=False)
+
