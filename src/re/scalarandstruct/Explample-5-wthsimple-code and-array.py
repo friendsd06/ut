@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, struct, when, lit, to_json, map_from_arrays, array, expr, explode_outer, isnull
+from pyspark.sql.functions import col, struct, when, lit, to_json, map_from_arrays, array, explode_outer, isnull
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
 
 # Initialize Spark Session
@@ -42,11 +42,13 @@ def reconcile_dataframes(source_df, target_df, join_columns):
         exploded_source_df = source_df.withColumn(array_col, explode_outer(col(f"source.{array_col}")))
         exploded_target_df = target_df.withColumn(array_col, explode_outer(col(f"target.{array_col}")))
 
-        # Join exploded arrays on parent_id and id
+        # Join exploded arrays on parent_id and id using column expressions
         joined_projects_df = exploded_source_df.join(
             exploded_target_df,
-            [f"source.{array_col}.parent_id" == f"target.{array_col}.parent_id",
-             f"source.{array_col}.id" == f"target.{array_col}.id"],
+            [
+                col(f"source.{array_col}.parent_id") == col(f"target.{array_col}.parent_id"),
+                col(f"source.{array_col}.id") == col(f"target.{array_col}.id")
+            ],
             "full_outer"
         )
 
