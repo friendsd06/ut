@@ -10,13 +10,14 @@ from pyspark.sql.functions import (
 # 1. Initialize SparkSession
 # -----------------------------
 
-
+spark = SparkSession.builder \
+    .appName("DataFrameReconciliation") \
+    .config("spark.sql.shuffle.partitions", "400")  # Adjust based on your cluster
+.getOrCreate()
 
 # -----------------------------
 # 2. Define Schemas Using StructType
 # -----------------------------
-
-# Schema definitions (same as before)
 
 # Schema for the 'address' struct
 address_schema = StructType([
@@ -56,7 +57,76 @@ main_schema = StructType([
 # 3. Create Sample DataFrames
 # -----------------------------
 
-# Sample data (same as before)
+# Sample data for source_df
+source_data = [
+    {
+        "parent_primary_key": "P1",
+        "child_primary_key": "C1",
+        "name": "Alice",
+        "age": 30,
+        "address": {"street": "123 Maple St", "city": "Springfield", "zipcode": "12345"},
+        "orders": [
+            {"order_id": "O1001", "order_date": "2023-01-10", "amount": 250.0, "status": "Shipped"},
+            {"order_id": "O1002", "order_date": "2023-02-15", "amount": 150.0, "status": "Processing"}
+        ],
+        "payments": [
+            {"payment_id": "PM2001", "payment_date": "2023-01-11", "method": "Credit Card", "amount": 250.0}
+        ]
+    },
+    {
+        "parent_primary_key": "P2",
+        "child_primary_key": "C2",
+        "name": "Bob",
+        "age": 25,
+        "address": {"street": "456 Oak St", "city": "Shelbyville", "zipcode": "67890"},
+        "orders": [
+            {"order_id": "O1003", "order_date": "2023-03-20", "amount": 300.0, "status": "Delivered"}
+        ],
+        "payments": [
+            {"payment_id": "PM2002", "payment_date": "2023-03-21", "method": "PayPal", "amount": 300.0}
+        ]
+    }
+]
+
+# Sample data for target_df with some differences
+target_data = [
+    {
+        "parent_primary_key": "P1",
+        "child_primary_key": "C1",
+        "name": "Alice",
+        "age": 31,  # Age difference
+        "address": {"street": "123 Maple St", "city": "Springfield", "zipcode": "12345"},
+        "orders": [
+            {"order_id": "O1001", "order_date": "2023-01-10", "amount": 250.0, "status": "Shipped"},
+            {"order_id": "O1002", "order_date": "2023-02-15", "amount": 175.0, "status": "Completed"}  # Amount and status difference
+        ],
+        "payments": [
+            {"payment_id": "PM2001", "payment_date": "2023-01-11", "method": "Credit Card", "amount": 250.0}
+        ]
+    },
+    {
+        "parent_primary_key": "P2",
+        "child_primary_key": "C2",
+        "name": "Bob",
+        "age": 25,
+        "address": {"street": "456 Oak St", "city": "Shelbyville", "zipcode": "67890"},
+        "orders": [
+            {"order_id": "O1003", "order_date": "2023-03-20", "amount": 300.0, "status": "Delivered"}
+        ],
+        "payments": [
+            {"payment_id": "PM2002", "payment_date": "2023-03-21", "method": "Credit Card", "amount": 300.0}  # Payment method difference
+        ]
+    },
+    {
+        "parent_primary_key": "P3",
+        "child_primary_key": "C3",
+        "name": "Charlie",
+        "age": 28,
+        "address": {"street": "789 Pine St", "city": "Capital City", "zipcode": "54321"},
+        "orders": [],
+        "payments": []
+    }
+]
 
 # Create DataFrames with the defined schemas
 source_df = spark.createDataFrame(source_data, schema=main_schema)
@@ -106,7 +176,7 @@ target_payments = explode_and_prefix(target_df, 'payments', 'target_', primary_k
 # 5. Join DataFrames on Primary Keys and Unique Identifiers
 # -----------------------------
 
-def join_exploded_dfs(source_df, target_df, source_keys, target_keys):
+def join_exploded_dfs(source_df, target_df, source_keys, target_keys, primary_keys):
     """
     Join source and target exploded DataFrames on primary keys and unique identifiers.
 
@@ -114,10 +184,19 @@ def join_exploded_dfs(source_df, target_df, source_keys, target_keys):
     :param target_df: Target DataFrame with prefixed columns
     :param source_keys: List of source key columns
     :param target_keys: List of target key columns
+    :param primary_keys: List of primary key columns
     :return: Joined DataFrame
     """
+    # Rename primary keys in target_df to avoid ambiguity
+    for key in primary_keys:
+        target_df = target_df.withColumnRenamed(key, f"{key}_target")
+
+    # Update target keys with renamed columns
+    target_keys_renamed = [f"{key}_target" if key in primary_keys else key for key in target_keys]
+
+    # Build join conditions
     join_condition = None
-    for s_key, t_key in zip(source_keys, target_keys):
+    for s_key, t_key in zip(source_keys, target_keys_renamed):
         condition = col(s_key).eqNullSafe(col(t_key))
         if join_condition is None:
             join_condition = condition
@@ -128,7 +207,6 @@ def join_exploded_dfs(source_df, target_df, source_keys, target_keys):
     return joined_df
 
 # Define unique keys for orders
-order_unique_keys = ['parent_primary_key', 'child_primary_key', 'order_id']
 source_order_keys = ['parent_primary_key', 'child_primary_key', 'source_order_id']
 target_order_keys = ['parent_primary_key', 'child_primary_key', 'target_order_id']
 
@@ -137,11 +215,11 @@ joined_orders = join_exploded_dfs(
     source_orders,
     target_orders,
     source_order_keys,
-    target_order_keys
+    target_order_keys,
+    primary_keys
 )
 
 # Define unique keys for payments
-payment_unique_keys = ['parent_primary_key', 'child_primary_key', 'payment_id']
 source_payment_keys = ['parent_primary_key', 'child_primary_key', 'source_payment_id']
 target_payment_keys = ['parent_primary_key', 'child_primary_key', 'target_payment_id']
 
@@ -150,14 +228,15 @@ joined_payments = join_exploded_dfs(
     source_payments,
     target_payments,
     source_payment_keys,
-    target_payment_keys
+    target_payment_keys,
+    primary_keys
 )
 
 # -----------------------------
 # 6. Compare Columns and Generate Differences
 # -----------------------------
 
-def compare_fields(joined_df, fields, source_prefix, target_prefix):
+def compare_fields(joined_df, fields, source_prefix, target_prefix, primary_keys):
     """
     Compare source and target fields and generate difference descriptions.
 
@@ -165,6 +244,7 @@ def compare_fields(joined_df, fields, source_prefix, target_prefix):
     :param fields: List of fields to compare (without prefixes)
     :param source_prefix: Prefix for source fields
     :param target_prefix: Prefix for target fields
+    :param primary_keys: List of primary key columns
     :return: DataFrame with difference descriptions
     """
     diff_expressions = []
@@ -172,6 +252,20 @@ def compare_fields(joined_df, fields, source_prefix, target_prefix):
         source_field = f"{source_prefix}{field}"
         target_field = f"{target_prefix}{field}"
         diff_col = when(
+            col(source_field).isNull() & col(target_field).isNotNull(),
+            concat(
+                lit(f"{field}: Source = null"),
+                lit(", Target = "),
+                col(target_field).cast("string")
+            )
+        ).when(
+            col(source_field).isNotNull() & col(target_field).isNull(),
+            concat(
+                lit(f"{field}: Source = "),
+                col(source_field).cast("string"),
+                lit(", Target = null")
+            )
+        ).when(
             ~col(source_field).eqNullSafe(col(target_field)),
             concat(
                 lit(f"{field}: Source = "),
@@ -182,8 +276,9 @@ def compare_fields(joined_df, fields, source_prefix, target_prefix):
         ).alias(f"{field}_diff")
         diff_expressions.append(diff_col)
 
+    # Include the original primary keys from source_df
     result_df = joined_df.select(
-        *primary_keys,
+        *[col(key) for key in primary_keys],
         *diff_expressions
     )
     return result_df
@@ -194,7 +289,8 @@ orders_diff = compare_fields(
     joined_orders,
     orders_fields,
     'source_',
-    'target_'
+    'target_',
+    primary_keys
 )
 
 # Compare Payments Fields
@@ -203,7 +299,8 @@ payments_diff = compare_fields(
     joined_payments,
     payments_fields,
     'source_',
-    'target_'
+    'target_',
+    primary_keys
 )
 
 # -----------------------------
