@@ -62,7 +62,7 @@ def compare_dataframes(source_df, target_df, primary_keys):
 
     # Join dataframes on primary keys using eqNullSafe to handle nulls
     join_conditions = [
-        eqNullSafe(col(f"source_{pk}"), col(f"target_{pk}")) for pk in primary_keys
+        col(f"source_{pk}").eqNullSafe(col(f"target_{pk}")) for pk in primary_keys
     ]
     joined_df = source_df_prefixed.join(target_df_prefixed, on=join_conditions, how="full_outer")
 
