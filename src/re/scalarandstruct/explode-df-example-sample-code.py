@@ -180,7 +180,6 @@ target_exploded_prefixed = add_prefix_to_columns(target_exploded, 'target_', pri
 # 6. Join DataFrames on Primary Keys and Unique Identifiers
 # -----------------------------
 
-# Function to perform full outer join on primary keys and unique identifiers
 def join_exploded_dfs(source_df, target_df, unique_keys):
     """
     Join source and target exploded DataFrames on primary keys and unique identifiers.
@@ -277,9 +276,11 @@ payments_diff = compare_fields(
 # 8. Display and Save Results
 # -----------------------------
 
+# Display Orders Differences
 print("=== Orders Differences ===")
 orders_diff.show(truncate=False)
 
+# Display Payments Differences
 print("=== Payments Differences ===")
 payments_diff.show(truncate=False)
 
