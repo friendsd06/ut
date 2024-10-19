@@ -1,6 +1,6 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import (
-    col as pyspark_col, struct as pyspark_struct, when, lit, explode_outer, collect_list
+    col as pyspark_col, struct as pyspark_struct, when, lit, explode_outer, collect_list, concat_ws
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, DoubleType, BooleanType, ArrayType
@@ -74,20 +74,20 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             # Get child primary keys for this array column
             child_keys = array_child_primary_keys.get(array_col_name, [])
             # Explode arrays in source and target
-            source_exploded = source_df.select(*[pyspark_col(f"source.{column_name}").alias(f"source_{column_name}") for column_name in join_columns],
+            source_exploded = source_df.select(*[pyspark_col(f"source.{col}") for col in join_columns],
                                                pyspark_col(f"source.{array_col_name}")) \
                 .withColumn("exploded", explode_outer(f"{array_col_name}")) \
-                .select(*[pyspark_col(f"source_{column_name}") for column_name in join_columns],
+                .select(*[pyspark_col(col) for col in join_columns],
                         *[pyspark_col(f"exploded.{field}").alias(f"source_{field}") for field in child_field_names]) \
                 .alias("source_arr")
-            target_exploded = target_df.select(*[pyspark_col(f"target.{column_name}").alias(f"target_{column_name}") for column_name in join_columns],
+            target_exploded = target_df.select(*[pyspark_col(f"target.{col}") for col in join_columns],
                                                pyspark_col(f"target.{array_col_name}")) \
                 .withColumn("exploded", explode_outer(f"{array_col_name}")) \
-                .select(*[pyspark_col(f"target_{column_name}") for column_name in join_columns],
+                .select(*[pyspark_col(col) for col in join_columns],
                         *[pyspark_col(f"exploded.{field}").alias(f"target_{field}") for field in child_field_names]) \
                 .alias("target_arr")
             # Perform full outer join on join_columns + child_keys
-            join_exprs = [pyspark_col(f"source_arr.source_{column_name}") == pyspark_col(f"target_arr.target_{column_name}") for column_name in join_columns] + \
+            join_exprs = [pyspark_col(f"source_arr.{col}") == pyspark_col(f"target_arr.{col}") for col in join_columns] + \
                          [pyspark_col(f"source_arr.source_{key}") == pyspark_col(f"target_arr.target_{key}") for key in child_keys]
             exploded_joined = source_exploded.join(
                 target_exploded,
@@ -115,13 +115,17 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             any_diff = functools_reduce(lambda x, y: x | y, any_diff_exprs)
             diff_row = exploded_joined.withColumn("diff_struct", when(any_diff, diff_struct).otherwise(lit(None))) \
                 .where(any_diff)
+            # Create a unique key for grouping
+            diff_row = diff_row.withColumn("join_key", concat_ws("_", *[pyspark_col(f"source_arr.{col}").cast("string") for col in join_columns]))
             # Collect the differences back into an array
-            group_by_columns = [pyspark_col(f"source_arr.source_{column_name}").alias(f"join_{column_name}") for column_name in join_columns]
-            differences = diff_row.groupBy(*group_by_columns) \
+            differences = diff_row.select("join_key", "diff_struct") \
+                .groupBy("join_key") \
                 .agg(collect_list("diff_struct").alias(array_col_name))
-            # Left join the differences back to the main DataFrame
-            join_conditions = [pyspark_col(f"source.{column_name}") == pyspark_col(f"join_{column_name}") for column_name in join_columns]
-            source_df = source_df.join(differences, on=join_conditions, how='left')
+            # Create the same 'join_key' in source_df
+            source_df = source_df.withColumn("join_key", concat_ws("_", *[pyspark_col(f"source.{col}").cast("string") for col in join_columns]))
+            # Join back to source_df
+            source_df = source_df.join(differences, on="join_key", how='left').drop("join_key")
+            # Add the comparison expression
             comparison_exprs.append(pyspark_col(array_col_name))
         return comparison_exprs, source_df
 
