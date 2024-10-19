@@ -10,3 +10,5 @@ struct_columns = [
 filtered_struct_columns = [col for col in struct_columns if col not in primary_keys]
 
 if field.name.replace('source_', '') not in struct_columns
+
+    struct_columns_with_prefix = ['source_' + col for col in struct_columns]
