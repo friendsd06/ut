@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
 from pyspark.sql.functions import (
-    explode_outer, col, when, lit, concat, coalesce, expr
+    explode_outer, col, when, lit, concat, coalesce
 )
 
 # -----------------------------
@@ -134,152 +134,107 @@ target_df = spark.createDataFrame(target_data, schema=main_schema)
 # 4. Flatten Array of Structs to One Level
 # -----------------------------
 
-# Function to explode array of structs to one level
-def explode_array_of_structs(df, array_columns):
+def explode_array_columns(df, array_columns, prefix):
     """
-    Explode array of structs to one level without flattening the struct attributes.
+    Explode array of structs to one level without flattening internal attributes.
 
     :param df: Input DataFrame
     :param array_columns: List of array column names to explode
-    :return: Dictionary of exploded DataFrames
+    :param prefix: Prefix to identify source or target
+    :return: Flattened DataFrame
     """
-    exploded_dfs = {}
     for array_col in array_columns:
-        exploded_df = df.select("*", explode_outer(array_col).alias(array_col.rstrip('s')))  # e.g., 'orders' -> 'order'
-        exploded_dfs[array_col] = exploded_df
-    return exploded_dfs
+        df = df.withColumn(f"{prefix}{array_col[:-1]}", explode_outer(col(array_col)))  # e.g., 'orders' -> 'order'
+    return df
 
-# Explode 'orders' and 'payments' arrays in both source and target DataFrames
-source_exploded = explode_array_of_structs(source_df, ['orders', 'payments'])
-target_exploded = explode_array_of_structs(target_df, ['orders', 'payments'])
-
-# For clarity, create separate DataFrames for orders and payments
-source_orders = source_exploded['orders'].select(
-    'parent_primary_key',
-    'child_primary_key',
-    'order_id',
-    'order_date',
-    'amount',
-    'status'
-)
-
-source_payments = source_exploded['payments'].select(
-    'parent_primary_key',
-    'child_primary_key',
-    'payment_id',
-    'payment_date',
-    'method',
-    'amount'
-)
-
-target_orders = target_exploded['orders'].select(
-    'parent_primary_key',
-    'child_primary_key',
-    'order_id',
-    'order_date',
-    'amount',
-    'status'
-)
-
-target_payments = target_exploded['payments'].select(
-    'parent_primary_key',
-    'child_primary_key',
-    'payment_id',
-    'payment_date',
-    'method',
-    'amount'
-)
+# Explode 'orders' and 'payments' arrays in source and target DataFrames
+source_exploded = explode_array_columns(source_df, ['orders', 'payments'], 'source_')
+target_exploded = explode_array_columns(target_df, ['orders', 'payments'], 'target_')
 
 # -----------------------------
 # 5. Add Prefixes to Non-Primary Key Columns
 # -----------------------------
 
-def add_prefix(df, prefix, unique_key_cols):
+def add_prefix_to_columns(df, prefix, exclude_columns):
     """
-    Add a prefix to all columns except the unique key columns.
+    Add a prefix to all columns except the specified ones.
 
     :param df: Input DataFrame
     :param prefix: Prefix string (e.g., 'source_', 'target_')
-    :param unique_key_cols: List of columns to exclude from prefixing
+    :param exclude_columns: List of column names to exclude from prefixing
     :return: DataFrame with prefixed column names
     """
     return df.select([
-        col(column).alias(column) if column in unique_key_cols else col(column).alias(f"{prefix}{column}")
+        col(column).alias(column) if column in exclude_columns else col(column).alias(f"{prefix}{column}")
         for column in df.columns
     ])
 
-# Define unique keys for orders and payments
-order_unique_keys = ['parent_primary_key', 'child_primary_key', 'order_id']
-payment_unique_keys = ['parent_primary_key', 'child_primary_key', 'payment_id']
+# Define primary keys
+primary_keys = ['parent_primary_key', 'child_primary_key']
 
-# Add prefixes to source and target orders
-source_orders_prefixed = add_prefix(source_orders, "source_", ['parent_primary_key', 'child_primary_key', 'order_id'])
-target_orders_prefixed = add_prefix(target_orders, "target_", ['parent_primary_key', 'child_primary_key', 'order_id'])
-
-# Add prefixes to source and target payments
-source_payments_prefixed = add_prefix(source_payments, "source_", ['parent_primary_key', 'child_primary_key', 'payment_id'])
-target_payments_prefixed = add_prefix(target_payments, "target_", ['parent_primary_key', 'child_primary_key', 'payment_id'])
+# Add prefixes to source and target DataFrames
+source_exploded_prefixed = add_prefix_to_columns(source_exploded, 'source_', primary_keys + ['source_orders', 'source_payments'])
+target_exploded_prefixed = add_prefix_to_columns(target_exploded, 'target_', primary_keys + ['target_orders', 'target_payments'])
 
 # -----------------------------
 # 6. Join DataFrames on Primary Keys and Unique Identifiers
 # -----------------------------
 
-# Function to join source and target exploded DataFrames on composite keys
-def join_exploded_dfs(source_df, target_df, unique_key_cols, additional_keys):
+# Function to perform full outer join on primary keys and unique identifiers
+def join_exploded_dfs(source_df, target_df, unique_keys):
     """
-    Join source and target exploded DataFrames on composite keys.
+    Join source and target exploded DataFrames on primary keys and unique identifiers.
 
     :param source_df: Source exploded DataFrame with prefixed columns
     :param target_df: Target exploded DataFrame with prefixed columns
-    :param unique_key_cols: List of unique key columns to join on (e.g., ['parent_primary_key', 'child_primary_key', 'order_id'])
-    :param additional_keys: List of additional key columns to handle differences
-    :return: Joined DataFrame with comparison results
+    :param unique_keys: List of unique key columns to join on
+    :return: Joined DataFrame
     """
-    # Construct join condition
-    join_condition = " AND ".join([
-        f"source_{col} = target_{col}" for col in unique_key_cols
-    ])
+    join_condition = True
+    for key in unique_keys:
+        source_key = f"source_{key}"
+        target_key = f"target_{key}"
+        join_condition = join_condition & (col(source_key) == col(target_key))
 
-    joined_df = source_df.join(
-        target_df,
-        expr(join_condition),
-        how="full_outer"
-    )
-
+    joined_df = source_df.join(target_df, on=join_condition, how="full_outer")
     return joined_df
 
-# Join orders
+# Define unique keys for 'orders' and 'payments'
+orders_unique_keys = ['parent_primary_key', 'child_primary_key', 'order_id']
+payments_unique_keys = ['parent_primary_key', 'child_primary_key', 'payment_id']
+
+# Join Orders
 joined_orders = join_exploded_dfs(
-    source_orders_prefixed,
-    target_orders_prefixed,
-    ['parent_primary_key', 'child_primary_key', 'order_id'],
-    []
+    source_exploded_prefixed.select(primary_keys + [col for col in source_exploded_prefixed.columns if 'order_' in col]),
+    target_exploded_prefixed.select(primary_keys + [col for col in target_exploded_prefixed.columns if 'order_' in col]),
+    ['parent_primary_key', 'child_primary_key', 'order_id']
 )
 
-# Join payments
+# Join Payments
 joined_payments = join_exploded_dfs(
-    source_payments_prefixed,
-    target_payments_prefixed,
-    ['parent_primary_key', 'child_primary_key', 'payment_id'],
-    []
+    source_exploded_prefixed.select(primary_keys + [col for col in source_exploded_prefixed.columns if 'payment_' in col]),
+    target_exploded_prefixed.select(primary_keys + [col for col in target_exploded_prefixed.columns if 'payment_' in col]),
+    ['parent_primary_key', 'child_primary_key', 'payment_id']
 )
 
 # -----------------------------
 # 7. Compare Columns and Generate Differences
 # -----------------------------
 
-def compare_fields(joined_df, fields):
+def compare_fields(joined_df, fields, prefix_source, prefix_target):
     """
     Compare source and target fields and generate difference descriptions.
 
     :param joined_df: Joined DataFrame with prefixed columns
     :param fields: List of fields to compare
+    :param prefix_source: Prefix for source fields
+    :param prefix_target: Prefix for target fields
     :return: DataFrame with difference descriptions
     """
-    diff_exprs = []
+    diff_expressions = []
     for field in fields:
-        source_field = f"source_{field}"
-        target_field = f"target_{field}"
+        source_field = f"{prefix_source}{field}"
+        target_field = f"{prefix_target}{field}"
         diff_col = when(
             ~col(source_field).eqNullSafe(col(target_field)),
             concat(
@@ -289,32 +244,42 @@ def compare_fields(joined_df, fields):
                 coalesce(col(target_field).cast("string"), lit("null"))
             )
         ).alias(f"{field}_diff")
-        diff_exprs.append(diff_col)
+        diff_expressions.append(diff_col)
 
-    # Select unique keys and difference columns
+    # Select primary keys and difference columns
     result_df = joined_df.select(
         'parent_primary_key',
         'child_primary_key',
-        *diff_exprs
+        *diff_expressions
     )
 
     return result_df
 
-# Compare Orders
-orders_diff = compare_fields(joined_orders, ['order_date', 'amount', 'status'])
+# Compare Orders Fields
+orders_fields = ['order_date', 'amount', 'status']
+orders_diff = compare_fields(
+    joined_orders,
+    orders_fields,
+    'source_order_',
+    'target_order_'
+)
 
-# Compare Payments
-payments_diff = compare_fields(joined_payments, ['payment_date', 'method', 'amount'])
+# Compare Payments Fields
+payments_fields = ['payment_date', 'method', 'amount']
+payments_diff = compare_fields(
+    joined_payments,
+    payments_fields,
+    'source_payment_',
+    'target_payment_'
+)
 
 # -----------------------------
 # 8. Display and Save Results
 # -----------------------------
 
-# Display Orders Differences
 print("=== Orders Differences ===")
 orders_diff.show(truncate=False)
 
-# Display Payments Differences
 print("=== Payments Differences ===")
 payments_diff.show(truncate=False)
 
