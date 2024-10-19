@@ -70,24 +70,24 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
 
     def compare_array_columns(source_df: DataFrame, target_df: DataFrame, array_columns: dict, array_child_primary_keys: dict):
         comparison_exprs = []
-        for array_col, child_field_names in array_columns.items():
+        for array_col_name, child_field_names in array_columns.items():
             # Get child primary keys for this array column
-            child_keys = array_child_primary_keys.get(array_col, [])
+            child_keys = array_child_primary_keys.get(array_col_name, [])
             # Explode arrays in source and target
-            source_exploded = source_df.select(*[col(f"source.{col}").alias(f"source_{col}") for col in join_columns],
-                                               col(f"source.{array_col}")) \
-                .withColumn("exploded", explode_outer(f"{array_col}")) \
-                .select(*[col(f"source_{col}") for col in join_columns],
+            source_exploded = source_df.select(*[col(f"source.{col_name}").alias(f"source_{col_name}") for col_name in join_columns],
+                                               col(f"source.{array_col_name}")) \
+                .withColumn("exploded", explode_outer(f"{array_col_name}")) \
+                .select(*[col(f"source_{col_name}") for col_name in join_columns],
                         *[col(f"exploded.{field}").alias(f"source_{field}") for field in child_field_names]) \
                 .alias("source_arr")
-            target_exploded = target_df.select(*[col(f"target.{col}").alias(f"target_{col}") for col in join_columns],
-                                               col(f"target.{array_col}")) \
-                .withColumn("exploded", explode_outer(f"{array_col}")) \
-                .select(*[col(f"target_{col}") for col in join_columns],
+            target_exploded = target_df.select(*[col(f"target.{col_name}").alias(f"target_{col_name}") for col_name in join_columns],
+                                               col(f"target.{array_col_name}")) \
+                .withColumn("exploded", explode_outer(f"{array_col_name}")) \
+                .select(*[col(f"target_{col_name}") for col_name in join_columns],
                         *[col(f"exploded.{field}").alias(f"target_{field}") for field in child_field_names]) \
                 .alias("target_arr")
             # Perform full outer join on join_columns + child_keys
-            join_exprs = [col(f"source_arr.source_{col}") == col(f"target_arr.target_{col}") for col in join_columns] + \
+            join_exprs = [col(f"source_arr.source_{col_name}") == col(f"target_arr.target_{col_name}") for col_name in join_columns] + \
                          [col(f"source_arr.source_{key}") == col(f"target_arr.target_{key}") for key in child_keys]
             exploded_joined = source_exploded.join(
                 target_exploded,
@@ -116,11 +116,11 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             diff_row = exploded_joined.withColumn("diff_struct", when(any_diff, diff_struct).otherwise(lit(None))) \
                 .where(any_diff)
             # Collect the differences back into an array
-            differences = diff_row.groupBy(*[col(f"source_arr.source_{col}").alias(col) for col in join_columns]) \
-                .agg(collect_list("diff_struct").alias(array_col))
+            differences = diff_row.groupBy(*[col(f"source_arr.source_{col_name}").alias(col_name) for col_name in join_columns]) \
+                .agg(collect_list("diff_struct").alias(array_col_name))
             # Left join the differences back to the main DataFrame
-            source_df = source_df.join(differences, on=[col(f"source.{col}") == col(col) for col in join_columns], how='left')
-            comparison_exprs.append(col(array_col))
+            source_df = source_df.join(differences, on=[col(f"source.{col_name}") == col(col_name) for col_name in join_columns], how='left')
+            comparison_exprs.append(col(array_col_name))
         return comparison_exprs, source_df
 
     # Identify scalar, struct, and array columns
