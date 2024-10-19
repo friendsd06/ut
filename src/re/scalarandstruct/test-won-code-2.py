@@ -14,13 +14,14 @@ def add_prefix(df, prefix):
     return df.select([col(column).alias(f"{prefix}{column}") for column in df.columns])
 
 # Function to compare scalar columns
+# Function to compare scalar columns
 def compare_scalars(joined_df, scalar_cols):
     comparisons = []
     for column in scalar_cols:
         source_col = col(f"source_{column}")
         target_col = col(f"target_{column}")
         diff_col = when(
-            ~eqNullSafe(source_col, target_col),
+            ~source_col.eqNullSafe(target_col),
             concat(
                 lit(f"{column}: Source = "), coalesce(source_col, lit("null")),
                 lit(", Target = "), coalesce(target_col, lit("null"))
@@ -39,7 +40,7 @@ def compare_structs(joined_df, struct_cols):
             source_sub_col = col(f"source_{struct_col}.{sub_field}")
             target_sub_col = col(f"target_{struct_col}.{sub_field}")
             diff_expression = when(
-                ~eqNullSafe(source_sub_col, target_sub_col),
+                ~source_sub_col.eqNullSafe(target_sub_col),
                 concat(
                     lit(f"{struct_col}.{sub_field}: Source = "),
                     coalesce(source_sub_col, lit("null")),
@@ -51,6 +52,7 @@ def compare_structs(joined_df, struct_cols):
         struct_diff_col = concat_ws(", ", *sub_field_comparisons).alias(f"{struct_col}_diff")
         struct_comparisons.append(struct_diff_col)
     return struct_comparisons
+
 
 # Main function to perform dataframe comparison
 def compare_dataframes(source_df, target_df, primary_keys):
