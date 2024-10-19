@@ -1,5 +1,5 @@
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, struct, when, lit, to_json, expr
+from pyspark.sql.functions import col, struct, when, lit, to_json, expr, map_from_arrays, array
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, BooleanType
 
 def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_columns: list) -> DataFrame:
@@ -34,23 +34,34 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
     def compare_struct_columns(source_df: DataFrame, target_df: DataFrame, struct_columns: dict):
         comparison_exprs = []
         for struct_col, nested_columns in struct_columns.items():
-            source_struct_col = expr(f"source.{struct_col}")
-            target_struct_col = expr(f"target.{struct_col}")
+            source_struct_col = col(f"source.{struct_col}")
+            target_struct_col = col(f"target.{struct_col}")
 
-            # Build the nested comparison expression
-            diff_map = expr("map()")
+            diff_keys = []
+            diff_values = []
+
             for nested_col in nested_columns:
-                source_nested_col = expr(f"source.{nested_col}")
-                target_nested_col = expr(f"target.{nested_col}")
-                diff_expr = when(source_nested_col != target_nested_col,
-                                 struct(
-                                     source_nested_col.alias("source_value"),
-                                     target_nested_col.alias("target_value")
-                                 )
-                                 ).otherwise(lit(None))
-                diff_map = expr(f"map_concat({diff_map}, map('{nested_col}', {diff_expr}))")
+                source_nested_col = col(f"source.{nested_col}")
+                target_nested_col = col(f"target.{nested_col}")
 
-            comparison_exprs.append(when(diff_map.isNotNull(), diff_map).alias(struct_col))
+                diff_expr = when(
+                    source_nested_col != target_nested_col,
+                    struct(
+                        source_nested_col.alias("source_value"),
+                        target_nested_col.alias("target_value")
+                    )
+                ).otherwise(lit(None))
+
+                diff_keys.append(lit(nested_col.split('.')[-1]))
+                diff_values.append(diff_expr)
+
+            diff_map = when(
+                map_from_arrays(array(*diff_keys), array(*diff_values)).isNotNull(),
+                map_from_arrays(array(*diff_keys), array(*diff_values))
+            ).otherwise(lit(None))
+
+            comparison_exprs.append(diff_map.alias(struct_col))
+
         return comparison_exprs
 
     # Identify scalar and struct columns
