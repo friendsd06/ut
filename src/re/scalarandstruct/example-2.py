@@ -1,26 +1,19 @@
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, struct, when, lit, create_map, to_json
+from pyspark.sql.functions import col, struct, when, lit, to_json, expr
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, BooleanType
 
 def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_columns: list) -> DataFrame:
     def get_column_types(df: DataFrame):
         return {field.name: field.dataType for field in df.schema.fields}
 
-    def flatten_struct_columns(df: DataFrame, parent: str = None):
-        column_types = get_column_types(df)
+    def flatten_struct_columns(schema: StructType, parent: str = ""):
         flat_columns = []
-
-        for column, data_type in column_types.items():
-            if parent:
-                full_name = f"{parent}.{column}"
+        for field in schema.fields:
+            col_name = f"{parent}.{field.name}" if parent else field.name
+            if isinstance(field.dataType, StructType):
+                flat_columns.extend(flatten_struct_columns(field.dataType, col_name))
             else:
-                full_name = column
-
-            if isinstance(data_type, StructType):
-                flat_columns.extend(flatten_struct_columns(df.select(full_name + ".*"), full_name))
-            else:
-                flat_columns.append(full_name)
-
+                flat_columns.append(col_name)
         return flat_columns
 
     def compare_scalar_columns(source_df: DataFrame, target_df: DataFrame, columns: list):
@@ -39,40 +32,31 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
         return comparison_exprs
 
     def compare_struct_columns(source_df: DataFrame, target_df: DataFrame, struct_columns: dict):
-        def compare_nested_struct(source_col, target_col, nested_columns):
-            diff_map = create_map()
-            for col_name in nested_columns:
-                source_nested_col = source_col[col_name.split('.')[-1]]
-                target_nested_col = target_col[col_name.split('.')[-1]]
-                if isinstance(source_nested_col.dataType, StructType):
-                    nested_diff = compare_nested_struct(source_nested_col, target_nested_col,
-                                                        [f"{col_name}.{subfield.name}" for subfield in source_nested_col.dataType.fields])
-                    diff_map = diff_map.add(lit(col_name.split('.')[-1]), nested_diff)
-                else:
-                    diff_map = diff_map.add(
-                        lit(col_name.split('.')[-1]),
-                        when(source_nested_col != target_nested_col,
-                             to_json(struct(
-                                 source_nested_col.alias("source_value"),
-                                 target_nested_col.alias("target_value")
-                             ))
-                             ).otherwise(lit(None))
-                    )
-            return when(diff_map.isNotNull(), diff_map).otherwise(lit(None))
-
         comparison_exprs = []
         for struct_col, nested_columns in struct_columns.items():
-            source_struct_col = col(f"source.{struct_col}")
-            target_struct_col = col(f"target.{struct_col}")
-            comparison_exprs.append(
-                compare_nested_struct(source_struct_col, target_struct_col, nested_columns).alias(struct_col)
-            )
+            source_struct_col = expr(f"source.{struct_col}")
+            target_struct_col = expr(f"target.{struct_col}")
+
+            # Build the nested comparison expression
+            diff_map = expr("map()")
+            for nested_col in nested_columns:
+                source_nested_col = expr(f"source.{nested_col}")
+                target_nested_col = expr(f"target.{nested_col}")
+                diff_expr = when(source_nested_col != target_nested_col,
+                                 struct(
+                                     source_nested_col.alias("source_value"),
+                                     target_nested_col.alias("target_value")
+                                 )
+                                 ).otherwise(lit(None))
+                diff_map = expr(f"map_concat({diff_map}, map('{nested_col}', {diff_expr}))")
+
+            comparison_exprs.append(when(diff_map.isNotNull(), diff_map).alias(struct_col))
         return comparison_exprs
 
     # Identify scalar and struct columns
     source_column_types = get_column_types(source_df)
     scalar_columns = [col for col, dtype in source_column_types.items() if not isinstance(dtype, StructType)]
-    struct_columns = {col: flatten_struct_columns(source_df.select(col + ".*"), col)
+    struct_columns = {col: flatten_struct_columns(source_column_types[col], col)
                       for col, dtype in source_column_types.items() if isinstance(dtype, StructType)}
 
     # Prepare DataFrames for comparison
@@ -101,7 +85,7 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
 
     return result_df
 
-# Example usage
+# Example usage (same as before)
 spark = SparkSession.builder.appName("DataFrameReconciliation").getOrCreate()
 
 # Define schema (same as before)
@@ -130,7 +114,7 @@ schema = StructType([
     ]), True)
 ])
 
-# Create source DataFrame
+# Create source and target DataFrames (same as before)
 source_data = [
     (1, "John", "Doe", 30, 75000.0, False,
      {"email": "john.doe@example.com", "phone": "123-456-7890",
@@ -148,7 +132,6 @@ source_data = [
 
 source_df = spark.createDataFrame(source_data, schema)
 
-# Create target DataFrame with some differences
 target_data = [
     (1, "John", "Doe", 31, 78000.0, False,
      {"email": "john.doe@example.com", "phone": "123-456-7890",
