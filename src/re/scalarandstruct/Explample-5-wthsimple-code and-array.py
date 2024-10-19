@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, struct, when, lit, to_json, map_from_arrays, array, explode_outer, isnull
+from pyspark.sql.functions import col, struct, when, lit, map_from_arrays, array, explode_outer, isnull
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
 
 # Initialize Spark Session
@@ -39,15 +39,15 @@ def reconcile_dataframes(source_df, target_df, join_columns):
         Compare array of structs with parent_id and id columns, showing differences only at the child level.
         """
         # Explode arrays of structs in both source and target
-        exploded_source_df = source_df.withColumn(array_col, explode_outer(col(f"source.{array_col}")))
-        exploded_target_df = target_df.withColumn(array_col, explode_outer(col(f"target.{array_col}")))
+        exploded_source_df = source_df.withColumn("exploded_project", explode_outer(col(f"source.{array_col}")))
+        exploded_target_df = target_df.withColumn("exploded_project", explode_outer(col(f"target.{array_col}")))
 
         # Join exploded arrays on parent_id and id using column expressions
         joined_projects_df = exploded_source_df.join(
             exploded_target_df,
             [
-                col(f"source.{array_col}.parent_id") == col(f"target.{array_col}.parent_id"),
-                col(f"source.{array_col}.id") == col(f"target.{array_col}.id")
+                col("exploded_project.parent_id") == col("exploded_project.parent_id"),
+                col("exploded_project.id") == col("exploded_project.id")
             ],
             "full_outer"
         )
@@ -56,8 +56,8 @@ def reconcile_dataframes(source_df, target_df, join_columns):
         diff_keys = []
         diff_values = []
         for nested_col in nested_columns:
-            source_nested_col = col(f"source.{array_col}.{nested_col}")
-            target_nested_col = col(f"target.{array_col}.{nested_col}")
+            source_nested_col = col(f"exploded_project.{nested_col}")
+            target_nested_col = col(f"exploded_project.{nested_col}")
 
             diff_expr = compare_columns(source_nested_col, target_nested_col, nested_col.split('.')[-1])
             diff_keys.append(lit(nested_col.split('.')[-1]))
@@ -71,8 +71,8 @@ def reconcile_dataframes(source_df, target_df, join_columns):
 
         # Only show differences for projects with differences
         result_df = joined_projects_df.filter(diff_map.isNotNull()).select(
-            col(f"source.{array_col}.parent_id").alias("parent_id"),
-            col(f"source.{array_col}.id").alias("id"),
+            col("exploded_project.parent_id").alias("parent_id"),
+            col("exploded_project.id").alias("id"),
             diff_map.alias(array_col)
         )
 
