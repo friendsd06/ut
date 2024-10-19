@@ -68,7 +68,7 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             comparison_exprs.append(diff_struct_non_null)
         return comparison_exprs
 
-    def compare_array_columns(source_df: DataFrame, target_df: DataFrame, array_columns: dict, array_child_primary_keys: dict):
+    def compare_array_columns(source_df: DataFrame, target_df: DataFrame, array_columns: dict, array_child_primary_keys: dict, join_columns: list):
         comparison_exprs = []
         for array_col_name, child_field_names in array_columns.items():
             # Get child primary keys for this array column
@@ -116,10 +116,12 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             diff_row = exploded_joined.withColumn("diff_struct", when(any_diff, diff_struct).otherwise(lit(None))) \
                 .where(any_diff)
             # Collect the differences back into an array
-            differences = diff_row.groupBy(*[pyspark_col(f"source_arr.source_{column_name}").alias(column_name) for column_name in join_columns]) \
+            group_by_columns = [pyspark_col(f"source_arr.source_{column_name}").alias(f"join_{column_name}") for column_name in join_columns]
+            differences = diff_row.groupBy(*group_by_columns) \
                 .agg(collect_list("diff_struct").alias(array_col_name))
             # Left join the differences back to the main DataFrame
-            source_df = source_df.join(differences, on=[pyspark_col(f"source.{column_name}") == pyspark_col(column_name) for column_name in join_columns], how='left')
+            join_conditions = [pyspark_col(f"source.{column_name}") == pyspark_col(f"join_{column_name}") for column_name in join_columns]
+            source_df = source_df.join(differences, on=join_conditions, how='left')
             comparison_exprs.append(pyspark_col(array_col_name))
         return comparison_exprs, source_df
 
@@ -140,7 +142,7 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
     struct_comparison = compare_struct_columns(source_df, target_df, struct_columns)
 
     # Compare array of struct columns with child primary keys
-    array_comparison, result_df = compare_array_columns(source_df, target_df, array_columns, array_child_primary_keys)
+    array_comparison, result_df = compare_array_columns(source_df, target_df, array_columns, array_child_primary_keys, join_columns)
 
     # Combine results
     all_comparisons = scalar_comparison + struct_comparison + array_comparison
