@@ -1,5 +1,7 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
+from pyspark.sql.types import (
+    StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
+)
 from pyspark.sql.functions import (
     explode_outer, col, when, lit, concat, coalesce
 )
@@ -17,14 +19,14 @@ spark = SparkSession.builder \
 # 2. Define Schemas Using StructType
 # -----------------------------
 
-# Define the schema for the 'address' struct
+# Schema for the 'address' struct
 address_schema = StructType([
     StructField("street", StringType(), True),
     StructField("city", StringType(), True),
     StructField("zipcode", StringType(), True)
 ])
 
-# Define the schema for the 'order' struct
+# Schema for the 'order' struct
 order_schema = StructType([
     StructField("order_id", StringType(), True),
     StructField("order_date", StringType(), True),
@@ -32,7 +34,7 @@ order_schema = StructType([
     StructField("status", StringType(), True)
 ])
 
-# Define the schema for the 'payment' struct
+# Schema for the 'payment' struct
 payment_schema = StructType([
     StructField("payment_id", StringType(), True),
     StructField("payment_date", StringType(), True),
@@ -40,7 +42,7 @@ payment_schema = StructType([
     StructField("amount", DoubleType(), True)
 ])
 
-# Define the main schema for the DataFrames
+# Main schema combining all fields
 main_schema = StructType([
     StructField("parent_primary_key", StringType(), True),
     StructField("child_primary_key", StringType(), True),
@@ -144,6 +146,7 @@ def explode_array_columns(df, array_columns, prefix):
     :return: Flattened DataFrame
     """
     for array_col in array_columns:
+        # Create a new column by exploding the array; keep the struct intact
         df = df.withColumn(f"{prefix}{array_col[:-1]}", explode_outer(col(array_col)))  # e.g., 'orders' -> 'order'
     return df
 
@@ -169,12 +172,23 @@ def add_prefix_to_columns(df, prefix, exclude_columns):
         for column in df.columns
     ])
 
-# Define primary keys
+# Define primary keys and unique identifiers for exploded arrays
 primary_keys = ['parent_primary_key', 'child_primary_key']
+order_unique_keys = ['parent_primary_key', 'child_primary_key', 'order_id']
+payment_unique_keys = ['parent_primary_key', 'child_primary_key', 'payment_id']
 
-# Add prefixes to source and target DataFrames
-source_exploded_prefixed = add_prefix_to_columns(source_exploded, 'source_', primary_keys + ['source_orders', 'source_payments'])
-target_exploded_prefixed = add_prefix_to_columns(target_exploded, 'target_', primary_keys + ['target_orders', 'target_payments'])
+# Add prefixes to source and target exploded DataFrames
+source_exploded_prefixed = add_prefix_to_columns(
+    source_exploded,
+    'source_',
+    primary_keys + ['source_orders', 'source_payments']
+)
+
+target_exploded_prefixed = add_prefix_to_columns(
+    target_exploded,
+    'target_',
+    primary_keys + ['target_orders', 'target_payments']
+)
 
 # -----------------------------
 # 6. Join DataFrames on Primary Keys and Unique Identifiers
@@ -198,22 +212,18 @@ def join_exploded_dfs(source_df, target_df, unique_keys):
     joined_df = source_df.join(target_df, on=join_condition, how="full_outer")
     return joined_df
 
-# Define unique keys for 'orders' and 'payments'
-orders_unique_keys = ['parent_primary_key', 'child_primary_key', 'order_id']
-payments_unique_keys = ['parent_primary_key', 'child_primary_key', 'payment_id']
-
 # Join Orders
 joined_orders = join_exploded_dfs(
     source_exploded_prefixed.select(primary_keys + [col for col in source_exploded_prefixed.columns if 'order_' in col]),
     target_exploded_prefixed.select(primary_keys + [col for col in target_exploded_prefixed.columns if 'order_' in col]),
-    ['parent_primary_key', 'child_primary_key', 'order_id']
+    order_unique_keys
 )
 
 # Join Payments
 joined_payments = join_exploded_dfs(
     source_exploded_prefixed.select(primary_keys + [col for col in source_exploded_prefixed.columns if 'payment_' in col]),
     target_exploded_prefixed.select(primary_keys + [col for col in target_exploded_prefixed.columns if 'payment_' in col]),
-    ['parent_primary_key', 'child_primary_key', 'payment_id']
+    payment_unique_keys
 )
 
 # -----------------------------
@@ -276,11 +286,9 @@ payments_diff = compare_fields(
 # 8. Display and Save Results
 # -----------------------------
 
-# Display Orders Differences
 print("=== Orders Differences ===")
 orders_diff.show(truncate=False)
 
-# Display Payments Differences
 print("=== Payments Differences ===")
 payments_diff.show(truncate=False)
 
