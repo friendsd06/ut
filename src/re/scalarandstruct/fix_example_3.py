@@ -1,11 +1,11 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import (
-    col, struct, when, lit, explode_outer, collect_list
+    col as pyspark_col, struct as pyspark_struct, when, lit, explode_outer, collect_list
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, DoubleType, BooleanType, ArrayType
 )
-from functools import reduce
+from functools import reduce as functools_reduce
 
 def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_columns: list, array_child_primary_keys: dict) -> DataFrame:
     def get_column_types(df: DataFrame):
@@ -26,31 +26,31 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
 
     def compare_scalar_columns(source_df: DataFrame, target_df: DataFrame, columns: list):
         comparison_exprs = []
-        for col_name in columns:
-            source_col = col(f"source.{col_name}")
-            target_col = col(f"target.{col_name}")
+        for column_name in columns:
+            source_col = pyspark_col(f"source.{column_name}")
+            target_col = pyspark_col(f"target.{column_name}")
             comparison_exprs.append(
                 when(source_col != target_col,
-                     struct(
+                     pyspark_struct(
                          source_col.alias("source_value"),
                          target_col.alias("target_value")
                      )
-                     ).otherwise(lit(None)).alias(col_name)
+                     ).otherwise(lit(None)).alias(column_name)
             )
         return comparison_exprs
 
     def compare_struct_columns(source_df: DataFrame, target_df: DataFrame, struct_columns: dict):
         comparison_exprs = []
-        for struct_col, nested_columns in struct_columns.items():
+        for struct_col_name, nested_columns in struct_columns.items():
             diff_exprs = []
             any_diff_exprs = []
             for nested_col in nested_columns:
                 field_name = nested_col.split('.')[-1]
-                source_nested_col = col(f"source.{nested_col}")
-                target_nested_col = col(f"target.{nested_col}")
+                source_nested_col = pyspark_col(f"source.{nested_col}")
+                target_nested_col = pyspark_col(f"target.{nested_col}")
                 diff_expr = when(
                     source_nested_col != target_nested_col,
-                    struct(
+                    pyspark_struct(
                         source_nested_col.alias("source_value"),
                         target_nested_col.alias("target_value")
                     )
@@ -58,13 +58,13 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
                 diff_exprs.append(diff_expr)
                 any_diff_exprs.append(source_nested_col != target_nested_col)
             # Create a struct of the differences
-            diff_struct = struct(*diff_exprs).alias(struct_col)
+            diff_struct = pyspark_struct(*diff_exprs).alias(struct_col_name)
             # Include the struct only if there are differences
-            any_diff = reduce(lambda x, y: x | y, any_diff_exprs)
+            any_diff = functools_reduce(lambda x, y: x | y, any_diff_exprs)
             diff_struct_non_null = when(
                 any_diff,
                 diff_struct
-            ).otherwise(lit(None)).alias(struct_col)
+            ).otherwise(lit(None)).alias(struct_col_name)
             comparison_exprs.append(diff_struct_non_null)
         return comparison_exprs
 
@@ -74,21 +74,21 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             # Get child primary keys for this array column
             child_keys = array_child_primary_keys.get(array_col_name, [])
             # Explode arrays in source and target
-            source_exploded = source_df.select(*[col(f"source.{col_name}").alias(f"source_{col_name}") for col_name in join_columns],
-                                               col(f"source.{array_col_name}")) \
+            source_exploded = source_df.select(*[pyspark_col(f"source.{column_name}").alias(f"source_{column_name}") for column_name in join_columns],
+                                               pyspark_col(f"source.{array_col_name}")) \
                 .withColumn("exploded", explode_outer(f"{array_col_name}")) \
-                .select(*[col(f"source_{col_name}") for col_name in join_columns],
-                        *[col(f"exploded.{field}").alias(f"source_{field}") for field in child_field_names]) \
+                .select(*[pyspark_col(f"source_{column_name}") for column_name in join_columns],
+                        *[pyspark_col(f"exploded.{field}").alias(f"source_{field}") for field in child_field_names]) \
                 .alias("source_arr")
-            target_exploded = target_df.select(*[col(f"target.{col_name}").alias(f"target_{col_name}") for col_name in join_columns],
-                                               col(f"target.{array_col_name}")) \
+            target_exploded = target_df.select(*[pyspark_col(f"target.{column_name}").alias(f"target_{column_name}") for column_name in join_columns],
+                                               pyspark_col(f"target.{array_col_name}")) \
                 .withColumn("exploded", explode_outer(f"{array_col_name}")) \
-                .select(*[col(f"target_{col_name}") for col_name in join_columns],
-                        *[col(f"exploded.{field}").alias(f"target_{field}") for field in child_field_names]) \
+                .select(*[pyspark_col(f"target_{column_name}") for column_name in join_columns],
+                        *[pyspark_col(f"exploded.{field}").alias(f"target_{field}") for field in child_field_names]) \
                 .alias("target_arr")
             # Perform full outer join on join_columns + child_keys
-            join_exprs = [col(f"source_arr.source_{col_name}") == col(f"target_arr.target_{col_name}") for col_name in join_columns] + \
-                         [col(f"source_arr.source_{key}") == col(f"target_arr.target_{key}") for key in child_keys]
+            join_exprs = [pyspark_col(f"source_arr.source_{column_name}") == pyspark_col(f"target_arr.target_{column_name}") for column_name in join_columns] + \
+                         [pyspark_col(f"source_arr.source_{key}") == pyspark_col(f"target_arr.target_{key}") for key in child_keys]
             exploded_joined = source_exploded.join(
                 target_exploded,
                 on=join_exprs,
@@ -98,11 +98,11 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
             diff_exprs = []
             any_diff_exprs = []
             for field_name in child_field_names:
-                source_field = col(f"source_arr.source_{field_name}")
-                target_field = col(f"target_arr.target_{field_name}")
+                source_field = pyspark_col(f"source_arr.source_{field_name}")
+                target_field = pyspark_col(f"target_arr.target_{field_name}")
                 diff_expr = when(
                     source_field != target_field,
-                    struct(
+                    pyspark_struct(
                         source_field.alias("source_value"),
                         target_field.alias("target_value")
                     )
@@ -110,22 +110,22 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
                 diff_exprs.append(diff_expr)
                 any_diff_exprs.append(source_field != target_field)
             # Create a struct of differences per array element
-            diff_struct = struct(*diff_exprs)
+            diff_struct = pyspark_struct(*diff_exprs)
             # Include only if there are differences
-            any_diff = reduce(lambda x, y: x | y, any_diff_exprs)
+            any_diff = functools_reduce(lambda x, y: x | y, any_diff_exprs)
             diff_row = exploded_joined.withColumn("diff_struct", when(any_diff, diff_struct).otherwise(lit(None))) \
                 .where(any_diff)
             # Collect the differences back into an array
-            differences = diff_row.groupBy(*[col(f"source_arr.source_{col_name}").alias(col_name) for col_name in join_columns]) \
+            differences = diff_row.groupBy(*[pyspark_col(f"source_arr.source_{column_name}").alias(column_name) for column_name in join_columns]) \
                 .agg(collect_list("diff_struct").alias(array_col_name))
             # Left join the differences back to the main DataFrame
-            source_df = source_df.join(differences, on=[col(f"source.{col_name}") == col(col_name) for col_name in join_columns], how='left')
-            comparison_exprs.append(col(array_col_name))
+            source_df = source_df.join(differences, on=[pyspark_col(f"source.{column_name}") == pyspark_col(column_name) for column_name in join_columns], how='left')
+            comparison_exprs.append(pyspark_col(array_col_name))
         return comparison_exprs, source_df
 
     # Identify scalar, struct, and array columns
     source_column_types = get_column_types(source_df)
-    scalar_columns = [col_name for col_name, dtype in source_column_types.items()
+    scalar_columns = [column_name for column_name, dtype in source_column_types.items()
                       if not isinstance(dtype, (StructType, ArrayType))]
     struct_columns, array_columns = get_struct_and_array_columns(source_df)
 
@@ -146,11 +146,11 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
     all_comparisons = scalar_comparison + struct_comparison + array_comparison
 
     # Create the result DataFrame
-    result_df = result_df.select(*[col(f"source.{col_name}").alias(col_name) for col_name in join_columns], *all_comparisons)
+    result_df = result_df.select(*[pyspark_col(f"source.{column_name}").alias(column_name) for column_name in join_columns], *all_comparisons)
 
     # Filter out rows with differences
-    diff_columns = [col_name for col_name in result_df.columns if col_name not in join_columns]
-    filter_condition = reduce(lambda x, y: x | y, [col(col_name).isNotNull() for col_name in diff_columns])
+    diff_columns = [column_name for column_name in result_df.columns if column_name not in join_columns]
+    filter_condition = functools_reduce(lambda x, y: x | y, [pyspark_col(column_name).isNotNull() for column_name in diff_columns])
     result_df = result_df.filter(filter_condition)
 
     return result_df
