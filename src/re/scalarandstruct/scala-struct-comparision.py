@@ -86,6 +86,7 @@ struct_fields = {
     'personal_info': ['marital_status', 'gender', 'age']
 }
 
+
 # Generate comparison for struct fields
 struct_comparisons = [consolidate_struct_diff(field, sub_fields) for field, sub_fields in struct_fields.items()]
 
