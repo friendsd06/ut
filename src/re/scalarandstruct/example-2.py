@@ -39,23 +39,33 @@ def reconcile_dataframes(source_df: DataFrame, target_df: DataFrame, join_column
         return comparison_exprs
 
     def compare_struct_columns(source_df: DataFrame, target_df: DataFrame, struct_columns: dict):
-        comparison_exprs = []
-        for struct_col, nested_columns in struct_columns.items():
+        def compare_nested_struct(source_col, target_col, nested_columns):
             diff_map = create_map()
             for col_name in nested_columns:
-                source_col = col(f"source.{col_name}")
-                target_col = col(f"target.{col_name}")
-                diff_map = diff_map.add(
-                    lit(col_name.split('.')[-1]),
-                    when(source_col != target_col,
-                         to_json(struct(
-                             source_col.alias("source_value"),
-                             target_col.alias("target_value")
-                         ))
-                         ).otherwise(lit(None))
-                )
+                source_nested_col = source_col[col_name.split('.')[-1]]
+                target_nested_col = target_col[col_name.split('.')[-1]]
+                if isinstance(source_nested_col.dataType, StructType):
+                    nested_diff = compare_nested_struct(source_nested_col, target_nested_col,
+                                                        [f"{col_name}.{subfield.name}" for subfield in source_nested_col.dataType.fields])
+                    diff_map = diff_map.add(lit(col_name.split('.')[-1]), nested_diff)
+                else:
+                    diff_map = diff_map.add(
+                        lit(col_name.split('.')[-1]),
+                        when(source_nested_col != target_nested_col,
+                             to_json(struct(
+                                 source_nested_col.alias("source_value"),
+                                 target_nested_col.alias("target_value")
+                             ))
+                             ).otherwise(lit(None))
+                    )
+            return when(diff_map.isNotNull(), diff_map).otherwise(lit(None))
+
+        comparison_exprs = []
+        for struct_col, nested_columns in struct_columns.items():
+            source_struct_col = col(f"source.{struct_col}")
+            target_struct_col = col(f"target.{struct_col}")
             comparison_exprs.append(
-                when(diff_map.isNotNull(), diff_map).otherwise(lit(None)).alias(struct_col)
+                compare_nested_struct(source_struct_col, target_struct_col, nested_columns).alias(struct_col)
             )
         return comparison_exprs
 
