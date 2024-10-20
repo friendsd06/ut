@@ -10,57 +10,11 @@ from functools import reduce
 # Initialize SparkSession
 spark = SparkSession.builder.appName("Comparison").getOrCreate()
 
-# Schema definitions
-# Schema for 'address' struct
-address_schema = StructType([
-    StructField("street", StringType(), True),
-    StructField("city", StringType(), True),
-    StructField("zipcode", StringType(), True)
-])
-
-# Schema for 'order' struct with foreign keys
-order_schema = StructType([
-    StructField("order_id", StringType(), True),          # Array-specific primary key
-    StructField("parent_primary_key", StringType(), True), # Foreign key to parent
-    StructField("child_primary_key", StringType(), True),  # Foreign key to parent
-    StructField("order_date", StringType(), True),
-    StructField("amount", DoubleType(), True),
-    StructField("status", StringType(), True)
-])
-
-# Schema for 'payment' struct with foreign keys
-payment_schema = StructType([
-    StructField("payment_id", StringType(), True),         # Array-specific primary key
-    StructField("parent_primary_key", StringType(), True), # Foreign key to parent
-    StructField("child_primary_key", StringType(), True),  # Foreign key to parent
-    StructField("payment_date", StringType(), True),
-    StructField("method", StringType(), True),
-    StructField("amount", DoubleType(), True)
-])
-
-# Schema for 'new_array' struct with multiple primary keys and foreign keys
-new_array_schema = StructType([
-    StructField("new_id1", StringType(), True),            # Part of composite primary key
-    StructField("new_id2", StringType(), True),            # Part of composite primary key
-    StructField("parent_primary_key", StringType(), True), # Foreign key to parent
-    StructField("child_primary_key", StringType(), True),  # Foreign key to parent
-    StructField("detail", StringType(), True)
-])
-
-# Main schema combining all fields
-main_schema = StructType([
-    StructField("parent_primary_key", StringType(), True), # Global primary key
-    StructField("child_primary_key", StringType(), True),  # Global primary key
-    StructField("name", StringType(), True),
-    StructField("age", IntegerType(), True),
-    StructField("address", address_schema, True),
-    StructField("orders", ArrayType(order_schema), True),
-    StructField("payments", ArrayType(payment_schema), True),
-    StructField("new_array", ArrayType(new_array_schema), True)
-])
+# Schema definitions (same as before)
+# ... [Schemas for address_schema, order_schema, payment_schema, new_array_schema, main_schema]
 
 # Sample data for source and target DataFrames (same as before)
-# ... [Same as provided earlier]
+# ... [source_data and target_data]
 
 # Create DataFrames with the defined schemas
 source_df = spark.createDataFrame(source_data, main_schema)
@@ -108,7 +62,7 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
         source_df = source_dfs[array_col]
         target_df = target_dfs[array_col]
 
-        # Build join keys: global primary keys, foreign keys, and array-specific primary keys
+        # Build join keys: global primary keys and array-specific primary keys
         join_keys = global_primary_keys + array_pks
 
         # Rename all columns in target_df with 'target_' prefix
@@ -116,7 +70,7 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
             *[col(c).alias(f"target_{c}") for c in target_df.columns]
         )
 
-        # Build join conditions using prefixed columns
+        # Build join conditions using the unprefixed columns from source_df and prefixed columns from target_df
         join_conditions = [
             source_df[pk] == target_df[f"target_{pk}"] for pk in join_keys
         ]
@@ -172,7 +126,8 @@ array_columns = {
 
 # Explode arrays and prefix columns
 source_exploded_dfs = explode_and_prefix(source_df, array_columns, "source_", global_primary_keys)
-target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", global_primary_keys)
+# For target_df, use an empty prefix to avoid double-prefixing
+target_exploded_dfs = explode_and_prefix(target_df, array_columns, "", global_primary_keys)
 
 # Join exploded DataFrames
 joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, global_primary_keys)
@@ -203,4 +158,5 @@ def display_differences(difference_results):
         print("\n")
 
 display_differences(difference_results)
+
 
