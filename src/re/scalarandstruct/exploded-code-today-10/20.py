@@ -225,20 +225,20 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, primary_keys):
         target_df = target_dfs[col_name]
 
         # Rename primary keys in target_df to avoid ambiguity
+        for key in primary_keys:
+            target_df = target_df.withColumnRenamed(key, f"{key}_target")
         for key in pk:
             target_df = target_df.withColumnRenamed(key, f"{key}_target")
 
-        # Identify unique identifier columns (fields ending with '_id' or other unique identifiers)
-        # Assuming that primary keys are the unique identifiers
+        # Identify join keys: global primary keys + array-specific primary keys
         source_join_keys = primary_keys + [f"{key}" for key in pk]
         target_join_keys = [f"{key}_target" for key in primary_keys] + [f"{key}_target" for key in pk]
 
         # Build join condition
         join_conditions = [
-                              source_df[pk_col].eqNullSafe(target_df[f"{pk_col}_target"]) for pk_col in primary_keys
-                          ] + [
-                              source_df[f"{key}"].eqNullSafe(target_df[f"{key}_target"]) for key in pk
-                          ]
+            source_df[pk_col] == target_df[pk_target_col]
+            for pk_col, pk_target_col in zip(source_join_keys, target_join_keys)
+        ]
 
         join_condition = reduce(lambda x, y: x & y, join_conditions)
 
@@ -247,7 +247,7 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, primary_keys):
         joined_dfs[col_name] = joined_df
     return joined_dfs
 
-def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, primary_keys, result_col_name):
+def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, primary_keys, array_specific_pks, result_col_name):
     """
     Compare fields between source and target DataFrames and combine differences into a single column.
 
@@ -256,7 +256,8 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
         compare_fields (list or None): List of field names to compare. If None or empty, compare all fields.
         source_prefix (str): Prefix of source fields.
         target_prefix (str): Prefix of target fields.
-        primary_keys (list): List of primary key column names.
+        primary_keys (list): List of global primary key column names.
+        array_specific_pks (list): List of array-specific primary key column names.
         result_col_name (str): Name of the result column for combined differences.
 
     Returns:
@@ -264,12 +265,12 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
     """
     # If compare_fields is None or empty, compare all fields except IDs and primary keys
     if not compare_fields:
-        all_fields = [
+        # Extract all fields from source prefix
+        all_source_fields = [
             col_name[len(source_prefix):] for col_name in joined_df.columns
-            if col_name.startswith(source_prefix) and not any(col_name[len(source_prefix):].startswith(pk) for pk in primary_keys)
+            if col_name.startswith(source_prefix) and not any(col_name[len(source_prefix):].startswith(pk) for pk in primary_keys + array_specific_pks)
         ]
-        # Remove primary key fields from comparison
-        compare_fields = [field for field in all_fields if field not in primary_keys]
+        compare_fields = all_source_fields
 
     difference_expressions = []
     for field in compare_fields:
@@ -299,6 +300,10 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
         *[
             col(key) if key in joined_df.columns else col(f"{key}_target").alias(key)
             for key in primary_keys
+        ],
+        *[
+            col(key) if key in joined_df.columns else col(f"{key}_target").alias(key)
+            for key in array_specific_pks
         ],
         combined_differences.alias(result_col_name)
     ).filter(col(result_col_name).isNotNull())
@@ -336,6 +341,8 @@ fields_to_compare = {
 # Compare fields and combine differences
 difference_results = {}
 for col_name, pk in array_columns.items():
+    if col_name not in joined_dfs:
+        continue  # Skip if no joined DataFrame for the column
     joined_df = joined_dfs[col_name]
     compare_fields = fields_to_compare.get(col_name)  # Will be None if not specified
     result_col_name = f"{col_name}_differences"
@@ -344,7 +351,8 @@ for col_name, pk in array_columns.items():
         compare_fields,
         "source_",
         "target_",
-        primary_keys + pk,  # Include array-specific primary keys
+        primary_keys,
+        pk,  # Array-specific primary keys
         result_col_name
     )
     difference_results[col_name] = diff_df
