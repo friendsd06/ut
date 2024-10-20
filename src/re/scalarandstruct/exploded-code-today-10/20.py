@@ -7,6 +7,8 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
+
+
 # Schema definitions
 # Schema for 'address' struct
 address_schema = StructType([
@@ -57,11 +59,12 @@ main_schema = StructType([
 ])
 
 # Sample data for source and target DataFrames (same as before)
-# ... [Same as provided earlier]
+# ... [Include source_data and target_data as previously defined]
 
 # Create DataFrames with the defined schemas
 source_df = spark.createDataFrame(source_data, main_schema)
 target_df = spark.createDataFrame(target_data, main_schema)
+
 def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
     exploded_dfs = {}
     for array_col, array_pks in array_columns.items():
@@ -104,15 +107,16 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
         source_df = source_dfs[array_col]
         target_df = target_dfs[array_col]
 
-        # Build join keys: global primary keys and array-specific primary keys
-        join_keys = global_primary_keys + array_pks
+        # Build join keys: array-specific primary keys and foreign keys
+        array_foreign_keys = [f"fk_{pk}" for pk in global_primary_keys]
+        join_keys = array_pks + array_foreign_keys
 
         # Rename all columns in target_df with 'target_' prefix
         target_df = target_df.select(
             *[col(c).alias(f"target_{c}") for c in target_df.columns]
         )
 
-        # Build join conditions using the unprefixed columns from source_df and prefixed columns from target_df
+        # Build join conditions using source and target columns
         join_conditions = [
             source_df[pk] == target_df[f"target_{pk}"] for pk in join_keys
         ]
@@ -201,4 +205,5 @@ def display_differences(difference_results):
 
 display_differences(difference_results)
 
-
+# Stop the SparkSession
+spark.stop()
