@@ -176,22 +176,36 @@ target_data = [
 source_df = spark.createDataFrame(source_data, main_schema)
 target_df = spark.createDataFrame(target_data, main_schema)
 
-# ------------------------------------
-# 4. Define Processing Functions
-# ------------------------------------
+# Optional: Display the schemas and sample data for verification
+print("Source DataFrame Schema:")
+source_df.printSchema()
 
-def explode_and_prefix(df, array_columns, prefix, primary_keys):
+print("Target DataFrame Schema:")
+target_df.printSchema()
+
+print("Source DataFrame Sample Data:")
+source_df.show(truncate=False)
+
+print("Target DataFrame Sample Data:")
+target_df.show(truncate=False)
+
+from pyspark.sql.functions import (
+    explode_outer, col, when, lit, concat, coalesce, array, concat_ws
+)
+from functools import reduce
+
+def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
     """
     Explode specified array columns and prefix the resulting fields.
 
     Parameters:
         df (DataFrame): The input DataFrame.
-        array_columns (dict): Dictionary mapping array column names to their primary keys.
+        array_columns (dict): Dictionary mapping array column names to their array-specific primary keys.
         prefix (str): Prefix to add to the exploded fields (e.g., 'source_' or 'target_').
-        primary_keys (list): List of global primary key column names.
+        global_primary_keys (list): List of global primary key column names.
 
     Returns:
-        dict: Dictionary of DataFrames with exploded and prefixed fields.
+        dict: Dictionary of exploded DataFrames keyed by array column names.
     """
     exploded_dfs = {}
     for array_col, array_pks in array_columns.items():
@@ -199,7 +213,7 @@ def explode_and_prefix(df, array_columns, prefix, primary_keys):
         exploded_col = df.withColumn(f"{array_col}_exploded", explode_outer(col(array_col)))
 
         # Select global primary keys
-        selected_cols = [col(pk) for pk in primary_keys]
+        selected_cols = [col(pk) for pk in global_primary_keys]
 
         # Select array-specific fields and prefix them
         if array_pks:
@@ -218,15 +232,15 @@ def explode_and_prefix(df, array_columns, prefix, primary_keys):
 
     return exploded_dfs
 
-def join_exploded_dfs(source_dfs, target_dfs, array_columns, primary_keys):
+def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys):
     """
     Join source and target exploded DataFrames on global and array-specific primary keys.
 
     Parameters:
-        source_dfs (dict): Dictionary of source DataFrames keyed by array column names.
-        target_dfs (dict): Dictionary of target DataFrames keyed by array column names.
-        array_columns (dict): Dictionary mapping array column names to their primary keys.
-        primary_keys (list): List of global primary key column names.
+        source_dfs (dict): Dictionary of source exploded DataFrames keyed by array column names.
+        target_dfs (dict): Dictionary of target exploded DataFrames keyed by array column names.
+        array_columns (dict): Dictionary mapping array column names to their array-specific primary keys.
+        global_primary_keys (list): List of global primary key column names.
 
     Returns:
         dict: Dictionary of joined DataFrames keyed by array column names.
@@ -242,7 +256,7 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, primary_keys):
 
         # Build join conditions: global primary keys and array-specific primary keys
         join_conditions = []
-        for pk in primary_keys:
+        for pk in global_primary_keys:
             join_conditions.append(source_df[pk] == target_df[pk])
         for pk in array_pks:
             source_pk = f"{pk}"
@@ -262,7 +276,7 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, primary_keys):
 
     return joined_dfs
 
-def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, primary_keys, array_pks, result_col_name):
+def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, global_primary_keys, array_pks, result_col_name):
     """
     Compare fields between source and target DataFrames and combine differences into a single column.
 
@@ -271,7 +285,7 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
         compare_fields (list or None): List of field names to compare. If None or empty, compare all non-primary key fields.
         source_prefix (str): Prefix of source fields.
         target_prefix (str): Prefix of target fields.
-        primary_keys (list): List of global primary key column names.
+        global_primary_keys (list): List of global primary key column names.
         array_pks (list): List of array-specific primary key column names.
         result_col_name (str): Name of the result column for combined differences.
 
@@ -284,7 +298,7 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
         all_source_fields = [
             col_name[len(source_prefix):] for col_name in joined_df.columns
             if col_name.startswith(source_prefix) and
-               not any(col_name[len(source_prefix):].startswith(pk) for pk in primary_keys + array_pks)
+               not any(col_name[len(source_prefix):].startswith(pk) for pk in global_primary_keys + array_pks)
         ]
         compare_fields = all_source_fields
 
@@ -313,7 +327,7 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
 
     # Select global primary keys and array-specific primary keys
     selected_columns = [
-                           col(pk) for pk in primary_keys
+                           col(pk) for pk in global_primary_keys
                        ] + [
                            col(f"target_{pk}") for pk in array_pks
                        ]
@@ -325,7 +339,6 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
     ).filter(col(result_col_name).isNotNull())
 
     return result_df
-
 # Define global primary keys
 global_primary_keys = ["parent_primary_key", "child_primary_key"]
 
@@ -340,8 +353,20 @@ array_columns = {
 source_exploded_dfs = explode_and_prefix(source_df, array_columns, "source_", global_primary_keys)
 target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", global_primary_keys)
 
+# Optional: Display exploded DataFrames for verification
+for array_col in array_columns.keys():
+    print(f"Source Exploded DataFrame for '{array_col}':")
+    source_exploded_dfs[array_col].show(truncate=False)
+    print(f"Target Exploded DataFrame for '{array_col}':")
+    target_exploded_dfs[array_col].show(truncate=False)
+
 # Join exploded DataFrames
 joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, global_primary_keys)
+
+# Optional: Display joined DataFrames for verification
+for array_col in array_columns.keys():
+    print(f"Joined DataFrame for '{array_col}':")
+    joined_dfs[array_col].show(truncate=False)
 
 # Define fields to compare for each array column (optional)
 fields_to_compare = {
@@ -368,7 +393,6 @@ for array_col, array_pks in array_columns.items():
         result_col_name
     )
     difference_results[array_col] = diff_df
-
 # Function to display differences
 def display_differences(difference_results, array_columns):
     for array_col in array_columns.keys():
