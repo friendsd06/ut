@@ -7,8 +7,7 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
-# Initialize SparkSession
-spark = SparkSession.builder.appName("Comparison").getOrCreate()
+
 
 # Schema definitions remain the same
 # Schema for 'address' struct
@@ -299,4 +298,5 @@ def display_differences(difference_results):
         print("\n")
 
 display_differences(difference_results)
+
 
