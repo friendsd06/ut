@@ -19,46 +19,46 @@ spark = SparkSession.builder \
 # 2. Define Schemas
 # ------------------------------------
 
-# Define schema for 'address' struct
+# Schema for 'address' struct
 address_schema = StructType([
-    StructField("street", StringType()),
-    StructField("city", StringType()),
-    StructField("zipcode", StringType())
+    StructField("street", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("zipcode", StringType(), True)
 ])
 
-# Define schema for 'order' struct
+# Schema for 'order' struct
 order_schema = StructType([
-    StructField("order_id", StringType()),
-    StructField("order_date", StringType()),
-    StructField("amount", DoubleType()),
-    StructField("status", StringType())
+    StructField("order_id", StringType(), True),
+    StructField("order_date", StringType(), True),
+    StructField("amount", DoubleType(), True),
+    StructField("status", StringType(), True)
 ])
 
-# Define schema for 'payment' struct
+# Schema for 'payment' struct
 payment_schema = StructType([
-    StructField("payment_id", StringType()),
-    StructField("payment_date", StringType()),
-    StructField("method", StringType()),
-    StructField("amount", DoubleType())
+    StructField("payment_id", StringType(), True),
+    StructField("payment_date", StringType(), True),
+    StructField("method", StringType(), True),
+    StructField("amount", DoubleType(), True)
 ])
 
-# Define schema for 'new_array' struct with multiple primary keys
+# Schema for 'new_array' struct with multiple primary keys
 new_array_schema = StructType([
-    StructField("new_id1", StringType()),
-    StructField("new_id2", StringType()),
-    StructField("detail", StringType())
+    StructField("new_id1", StringType(), True),
+    StructField("new_id2", StringType(), True),
+    StructField("detail", StringType(), True)
 ])
 
-# Define main schema combining all fields
+# Main schema combining all fields
 main_schema = StructType([
-    StructField("parent_primary_key", StringType()),
-    StructField("child_primary_key", StringType()),
-    StructField("name", StringType()),
-    StructField("age", IntegerType()),
-    StructField("address", address_schema),
-    StructField("orders", ArrayType(order_schema)),
-    StructField("payments", ArrayType(payment_schema)),
-    StructField("new_array", ArrayType(new_array_schema))  # Added new_array
+    StructField("parent_primary_key", StringType(), True),
+    StructField("child_primary_key", StringType(), True),
+    StructField("name", StringType(), True),
+    StructField("age", IntegerType(), True),
+    StructField("address", address_schema, True),
+    StructField("orders", ArrayType(order_schema), True),
+    StructField("payments", ArrayType(payment_schema), True),
+    StructField("new_array", ArrayType(new_array_schema), True)  # Added new_array
 ])
 
 # ------------------------------------
@@ -177,7 +177,7 @@ source_df = spark.createDataFrame(source_data, main_schema)
 target_df = spark.createDataFrame(target_data, main_schema)
 
 # ------------------------------------
-# 4. Functions to Process Array Columns
+# 4. Define Processing Functions
 # ------------------------------------
 
 def explode_and_prefix(df, array_columns, prefix, primary_keys):
@@ -187,88 +187,104 @@ def explode_and_prefix(df, array_columns, prefix, primary_keys):
     Parameters:
         df (DataFrame): The input DataFrame.
         array_columns (dict): Dictionary mapping array column names to their primary keys.
-        prefix (str): Prefix to add to the exploded fields.
-        primary_keys (list): List of primary key column names.
+        prefix (str): Prefix to add to the exploded fields (e.g., 'source_' or 'target_').
+        primary_keys (list): List of global primary key column names.
 
     Returns:
         dict: Dictionary of DataFrames with exploded and prefixed fields.
     """
     exploded_dfs = {}
-    for col_name, pk in array_columns.items():
+    for array_col, array_pks in array_columns.items():
         # Explode the array column
-        exploded_col = df.withColumn(f"{col_name}_exploded", explode_outer(col(col_name)))
+        exploded_col = df.withColumn(f"{array_col}_exploded", explode_outer(col(array_col)))
 
-        # Select primary keys and exploded struct fields
-        struct_fields = exploded_col.select(f"{col_name}_exploded.*").columns
-        prefixed_fields = [col(f"{col_name}_exploded.{field}").alias(f"{prefix}{field}") for field in struct_fields]
-        selected_cols = primary_keys + prefixed_fields
+        # Select global primary keys
+        selected_cols = [col(pk) for pk in primary_keys]
+
+        # Select array-specific fields and prefix them
+        if array_pks:
+            struct_fields = exploded_col.select(f"{array_col}_exploded.*").columns
+            prefixed_fields = [col(f"{array_col}_exploded.{field}").alias(f"{prefix}{field}") for field in struct_fields]
+            selected_cols += prefixed_fields
+        else:
+            # If no array-specific primary keys, select all fields
+            struct_fields = exploded_col.select(f"{array_col}_exploded.*").columns
+            prefixed_fields = [col(f"{array_col}_exploded.{field}").alias(f"{prefix}{field}") for field in struct_fields]
+            selected_cols += prefixed_fields
+
+        # Select the relevant columns
         exploded_df = exploded_col.select(*selected_cols)
-        exploded_dfs[col_name] = exploded_df
+        exploded_dfs[array_col] = exploded_df
+
     return exploded_dfs
 
 def join_exploded_dfs(source_dfs, target_dfs, array_columns, primary_keys):
     """
-    Join source and target exploded DataFrames on primary keys and unique identifiers.
+    Join source and target exploded DataFrames on global and array-specific primary keys.
 
     Parameters:
         source_dfs (dict): Dictionary of source DataFrames keyed by array column names.
         target_dfs (dict): Dictionary of target DataFrames keyed by array column names.
         array_columns (dict): Dictionary mapping array column names to their primary keys.
-        primary_keys (list): List of primary key column names.
+        primary_keys (list): List of global primary key column names.
 
     Returns:
-        dict: Dictionary of joined DataFrames.
+        dict: Dictionary of joined DataFrames keyed by array column names.
     """
     joined_dfs = {}
-    for col_name, pk in array_columns.items():
-        source_df = source_dfs[col_name]
-        target_df = target_dfs[col_name]
+    for array_col, array_pks in array_columns.items():
+        source_df = source_dfs[array_col]
+        target_df = target_dfs[array_col]
 
-        # Rename primary keys in target_df to avoid ambiguity
-        for key in primary_keys:
-            target_df = target_df.withColumnRenamed(key, f"{key}_target")
-        for key in pk:
-            target_df = target_df.withColumnRenamed(key, f"{key}_target")
+        # Rename target's array-specific primary keys with 'target_' prefix
+        for pk in array_pks:
+            target_df = target_df.withColumnRenamed(pk, f"target_{pk}")
 
-        # Identify join keys: global primary keys + array-specific primary keys
-        source_join_keys = primary_keys + [f"{key}" for key in pk]
-        target_join_keys = [f"{key}_target" for key in primary_keys] + [f"{key}_target" for key in pk]
+        # Build join conditions: global primary keys and array-specific primary keys
+        join_conditions = []
+        for pk in primary_keys:
+            join_conditions.append(source_df[pk] == target_df[pk])
+        for pk in array_pks:
+            source_pk = f"{pk}"
+            target_pk = f"target_{pk}"
+            join_conditions.append(source_df[source_pk] == target_df[target_pk])
 
-        # Build join condition
-        join_conditions = [
-            source_df[pk_col] == target_df[pk_target_col]
-            for pk_col, pk_target_col in zip(source_join_keys, target_join_keys)
-        ]
-
-        join_condition = reduce(lambda x, y: x & y, join_conditions)
+        # Combine all join conditions with AND
+        if join_conditions:
+            join_condition = reduce(lambda x, y: x & y, join_conditions)
+        else:
+            join_condition = lit(True)  # If no conditions, perform cross join
 
         # Perform the join
         joined_df = source_df.join(target_df, on=join_condition, how="full_outer")
-        joined_dfs[col_name] = joined_df
+
+        joined_dfs[array_col] = joined_df
+
     return joined_dfs
 
-def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, primary_keys, array_specific_pks, result_col_name):
+def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, primary_keys, array_pks, result_col_name):
     """
     Compare fields between source and target DataFrames and combine differences into a single column.
 
     Parameters:
         joined_df (DataFrame): The joined DataFrame.
-        compare_fields (list or None): List of field names to compare. If None or empty, compare all fields.
+        compare_fields (list or None): List of field names to compare. If None or empty, compare all non-primary key fields.
         source_prefix (str): Prefix of source fields.
         target_prefix (str): Prefix of target fields.
         primary_keys (list): List of global primary key column names.
-        array_specific_pks (list): List of array-specific primary key column names.
+        array_pks (list): List of array-specific primary key column names.
         result_col_name (str): Name of the result column for combined differences.
 
     Returns:
         DataFrame: DataFrame with primary keys and combined differences.
     """
-    # If compare_fields is None or empty, compare all fields except IDs and primary keys
+    # Determine fields to compare
     if not compare_fields:
-        # Extract all fields from source prefix
+        # Extract all fields from source prefix excluding primary keys
         all_source_fields = [
             col_name[len(source_prefix):] for col_name in joined_df.columns
-            if col_name.startswith(source_prefix) and not any(col_name[len(source_prefix):].startswith(pk) for pk in primary_keys + array_specific_pks)
+            if col_name.startswith(source_prefix) and
+               not any(col_name[len(source_prefix):].startswith(pk) for pk in primary_keys + array_pks)
         ]
         compare_fields = all_source_fields
 
@@ -295,29 +311,25 @@ def compare_and_combine_differences(joined_df, compare_fields, source_prefix, ta
     # Combine all differences into a single column, filtering out nulls
     combined_differences = concat_ws("; ", array(*difference_expressions))
 
+    # Select global primary keys and array-specific primary keys
+    selected_columns = [
+                           col(pk) for pk in primary_keys
+                       ] + [
+                           col(f"target_{pk}") for pk in array_pks
+                       ]
+
     # Select primary keys and combined differences
     result_df = joined_df.select(
-        *[
-            col(key) if key in joined_df.columns else col(f"{key}_target").alias(key)
-            for key in primary_keys
-        ],
-        *[
-            col(key) if key in joined_df.columns else col(f"{key}_target").alias(key)
-            for key in array_specific_pks
-        ],
+        *selected_columns,
         combined_differences.alias(result_col_name)
     ).filter(col(result_col_name).isNotNull())
 
     return result_df
 
-# ------------------------------------
-# 5. Process and Compare Array Columns
-# ------------------------------------
+# Define global primary keys
+global_primary_keys = ["parent_primary_key", "child_primary_key"]
 
-# Define primary keys
-primary_keys = ["parent_primary_key", "child_primary_key"]
-
-# Define array columns to process with their respective primary keys
+# Define array columns to process with their respective array-specific primary keys
 array_columns = {
     "orders": ["order_id"],
     "payments": ["payment_id"],
@@ -325,11 +337,11 @@ array_columns = {
 }
 
 # Explode and prefix arrays in source and target DataFrames
-source_exploded_dfs = explode_and_prefix(source_df, array_columns, "source_", primary_keys)
-target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", primary_keys)
+source_exploded_dfs = explode_and_prefix(source_df, array_columns, "source_", global_primary_keys)
+target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", global_primary_keys)
 
 # Join exploded DataFrames
-joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, primary_keys)
+joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, global_primary_keys)
 
 # Define fields to compare for each array column (optional)
 fields_to_compare = {
@@ -340,33 +352,32 @@ fields_to_compare = {
 
 # Compare fields and combine differences
 difference_results = {}
-for col_name, pk in array_columns.items():
-    if col_name not in joined_dfs:
-        continue  # Skip if no joined DataFrame for the column
-    joined_df = joined_dfs[col_name]
-    compare_fields = fields_to_compare.get(col_name)  # Will be None if not specified
-    result_col_name = f"{col_name}_differences"
+for array_col, array_pks in array_columns.items():
+    if array_col not in joined_dfs:
+        continue  # Skip if no joined DataFrame for the array column
+    joined_df = joined_dfs[array_col]
+    compare_fields = fields_to_compare.get(array_col)  # Will be None if not specified
+    result_col_name = f"{array_col}_differences"
     diff_df = compare_and_combine_differences(
         joined_df,
         compare_fields,
         "source_",
         "target_",
-        primary_keys,
-        pk,  # Array-specific primary keys
+        global_primary_keys,
+        array_pks,
         result_col_name
     )
-    difference_results[col_name] = diff_df
+    difference_results[array_col] = diff_df
 
-# ------------------------------------
-# 6. Display Results
-# ------------------------------------
+# Function to display differences
+def display_differences(difference_results, array_columns):
+    for array_col in array_columns.keys():
+        print(f"=== Differences in {array_col.capitalize()} ===")
+        if array_col in difference_results:
+            difference_results[array_col].show(truncate=False)
+        else:
+            print("No differences found.")
+        print("\n")
 
-for col_name in array_columns.keys():
-    print(f"=== Differences in {col_name.capitalize()} ===")
-    if col_name in difference_results:
-        difference_results[col_name].show(truncate=False)
-    else:
-        print("No differences found.")
-
-# Stop the SparkSession when done
-spark.stop()
+# Display the differences
+display_differences(difference_results, array_columns)
