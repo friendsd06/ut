@@ -7,19 +7,61 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
-# Initialize SparkSession
-spark = SparkSession.builder.appName("Comparison").getOrCreate()
+# Schema definitions
+# Schema for 'address' struct
+address_schema = StructType([
+    StructField("street", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("zipcode", StringType(), True)
+])
 
-# Schema definitions (same as before)
-# ... [Schemas for address_schema, order_schema, payment_schema, new_array_schema, main_schema]
+# Schema for 'order' struct with foreign keys
+order_schema = StructType([
+    StructField("order_id", StringType(), True),          # Array-specific primary key
+    StructField("parent_primary_key", StringType(), True), # Foreign key to parent
+    StructField("child_primary_key", StringType(), True),  # Foreign key to parent
+    StructField("order_date", StringType(), True),
+    StructField("amount", DoubleType(), True),
+    StructField("status", StringType(), True)
+])
+
+# Schema for 'payment' struct with foreign keys
+payment_schema = StructType([
+    StructField("payment_id", StringType(), True),         # Array-specific primary key
+    StructField("parent_primary_key", StringType(), True), # Foreign key to parent
+    StructField("child_primary_key", StringType(), True),  # Foreign key to parent
+    StructField("payment_date", StringType(), True),
+    StructField("method", StringType(), True),
+    StructField("amount", DoubleType(), True)
+])
+
+# Schema for 'new_array' struct with multiple primary keys and foreign keys
+new_array_schema = StructType([
+    StructField("new_id1", StringType(), True),            # Part of composite primary key
+    StructField("new_id2", StringType(), True),            # Part of composite primary key
+    StructField("parent_primary_key", StringType(), True), # Foreign key to parent
+    StructField("child_primary_key", StringType(), True),  # Foreign key to parent
+    StructField("detail", StringType(), True)
+])
+
+# Main schema combining all fields
+main_schema = StructType([
+    StructField("parent_primary_key", StringType(), True), # Global primary key
+    StructField("child_primary_key", StringType(), True),  # Global primary key
+    StructField("name", StringType(), True),
+    StructField("age", IntegerType(), True),
+    StructField("address", address_schema, True),
+    StructField("orders", ArrayType(order_schema), True),
+    StructField("payments", ArrayType(payment_schema), True),
+    StructField("new_array", ArrayType(new_array_schema), True)
+])
 
 # Sample data for source and target DataFrames (same as before)
-# ... [source_data and target_data]
+# ... [Same as provided earlier]
 
 # Create DataFrames with the defined schemas
 source_df = spark.createDataFrame(source_data, main_schema)
 target_df = spark.createDataFrame(target_data, main_schema)
-
 def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
     exploded_dfs = {}
     for array_col, array_pks in array_columns.items():
