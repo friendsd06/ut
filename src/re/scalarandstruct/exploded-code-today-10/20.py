@@ -7,17 +7,9 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
-# ------------------------------------
-# 1. Initialize SparkSession
-# ------------------------------------
-
-spark = SparkSession.builder \
-    .appName("DataFrameReconciliation") \
-    .getOrCreate()
-
-# ------------------------------------
-# 2. Define Schemas
-# ------------------------------------
+from pyspark.sql.types import (
+    StructType, StructField, StringType, IntegerType, ArrayType, DoubleType
+)
 
 # Schema for 'address' struct
 address_schema = StructType([
@@ -60,11 +52,6 @@ main_schema = StructType([
     StructField("payments", ArrayType(payment_schema), True),
     StructField("new_array", ArrayType(new_array_schema), True)  # Added new_array
 ])
-
-# ------------------------------------
-# 3. Create Sample DataFrames
-# ------------------------------------
-
 # Sample data for source DataFrame
 source_data = [
     {
@@ -188,7 +175,6 @@ source_df.show(truncate=False)
 
 print("Target DataFrame Sample Data:")
 target_df.show(truncate=False)
-
 from pyspark.sql.functions import (
     explode_outer, col, when, lit, concat, coalesce, array, concat_ws
 )
@@ -353,19 +339,23 @@ array_columns = {
 source_exploded_dfs = explode_and_prefix(source_df, array_columns, "source_", global_primary_keys)
 target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", global_primary_keys)
 
-# Optional: Display exploded DataFrames for verification
+# Debug: Display exploded DataFrames for verification
 for array_col in array_columns.keys():
     print(f"Source Exploded DataFrame for '{array_col}':")
+    source_exploded_dfs[array_col].printSchema()
     source_exploded_dfs[array_col].show(truncate=False)
+
     print(f"Target Exploded DataFrame for '{array_col}':")
+    target_exploded_dfs[array_col].printSchema()
     target_exploded_dfs[array_col].show(truncate=False)
 
 # Join exploded DataFrames
 joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, global_primary_keys)
 
-# Optional: Display joined DataFrames for verification
+# Debug: Display joined DataFrames for verification
 for array_col in array_columns.keys():
     print(f"Joined DataFrame for '{array_col}':")
+    joined_dfs[array_col].printSchema()
     joined_dfs[array_col].show(truncate=False)
 
 # Define fields to compare for each array column (optional)
