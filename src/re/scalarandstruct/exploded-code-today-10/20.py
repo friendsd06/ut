@@ -7,8 +7,10 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
+# Initialize SparkSession
+spark = SparkSession.builder.appName("Comparison").getOrCreate()
 
-
+# Schema definitions remain the same
 # Schema for 'address' struct
 address_schema = StructType([
     StructField("street", StringType(), True),
@@ -164,10 +166,6 @@ target_data = [
 source_df = spark.createDataFrame(source_data, main_schema)
 target_df = spark.createDataFrame(target_data, main_schema)
 
-# Create DataFrames with the defined schemas
-source_df = spark.createDataFrame(source_data, main_schema)
-target_df = spark.createDataFrame(target_data, main_schema)
-
 def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
     exploded_dfs = {}
     for array_col, array_pks in array_columns.items():
@@ -211,10 +209,14 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
         for pk in global_primary_keys + array_pks:
             join_conditions.append(source_df[pk] == target_df[pk])
 
-        # Combine all join conditions with AND
-        join_condition = reduce(lambda x, y: x & y, join_conditions)
+        # Before joining, rename target_df columns to avoid ambiguity
+        # Exclude columns used in join conditions
+        columns_to_rename = [c for c in target_df.columns if c not in (global_primary_keys + array_pks)]
+        for col_name in columns_to_rename:
+            target_df = target_df.withColumnRenamed(col_name, f"target_{col_name}")
 
         # Perform the join
+        join_condition = reduce(lambda x, y: x & y, join_conditions)
         joined_df = source_df.join(target_df, on=join_condition, how="full_outer")
 
         joined_dfs[array_col] = joined_df
@@ -297,3 +299,4 @@ def display_differences(difference_results):
         print("\n")
 
 display_differences(difference_results)
+
