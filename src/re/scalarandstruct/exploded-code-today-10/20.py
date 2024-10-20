@@ -7,6 +7,8 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
+# Initialize SparkSession
+spark = SparkSession.builder.appName("Comparison").getOrCreate()
 
 # Schema definitions
 # Schema for 'address' struct
@@ -57,133 +59,8 @@ main_schema = StructType([
     StructField("new_array", ArrayType(new_array_schema), True)
 ])
 
-# Sample data for source DataFrame
-source_data = [
-    {
-        "parent_primary_key": "P1",
-        "child_primary_key": "C1",
-        "name": "Alice",
-        "age": 30,
-        "address": {
-            "street": "123 Maple St",
-            "city": "Springfield",
-            "zipcode": "12345"
-        },
-        "orders": [
-            {"order_id": "O1001", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "order_date": "2023-01-10", "amount": 250.0, "status": "Shipped"},
-            {"order_id": "O1002", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "order_date": "2023-02-15", "amount": 150.0, "status": "Processing"},
-            {"order_id": "O1004", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "order_date": "2023-04-01", "amount": 200.0, "status": "Pending"}  # Extra order
-        ],
-        "payments": [
-            {"payment_id": "PM2001", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "payment_date": "2023-01-11", "method": "Credit Card", "amount": 250.0}
-        ],
-        "new_array": [
-            {"new_id1": "N3001", "new_id2": "N4001", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "detail": "Detail A"},
-            {"new_id1": "N3002", "new_id2": "N4002", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "detail": "Detail B"}
-        ]
-    },
-    {
-        "parent_primary_key": "P2",
-        "child_primary_key": "C2",
-        "name": "Bob",
-        "age": 25,
-        "address": {
-            "street": "456 Oak St",
-            "city": "Shelbyville",
-            "zipcode": "67890"
-        },
-        "orders": [
-            {"order_id": "O1003", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "order_date": "2023-03-20", "amount": 300.0, "status": "Delivered"}
-        ],
-        "payments": [
-            {"payment_id": "PM2002", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "payment_date": "2023-03-21", "method": "PayPal", "amount": 300.0}
-        ],
-        "new_array": [
-            {"new_id1": "N3003", "new_id2": "N4003", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "detail": "Detail C"}
-        ]
-    }
-]
-
-# Sample data for target DataFrame with some differences
-target_data = [
-    {
-        "parent_primary_key": "P1",
-        "child_primary_key": "C1",
-        "name": "Alice",
-        "age": 31,  # Age difference
-        "address": {
-            "street": "123 Maple St",
-            "city": "Springfield",
-            "zipcode": "12345"
-        },
-        "orders": [
-            {"order_id": "O1001", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "order_date": "2023-01-10", "amount": 250.0, "status": "Shipped"},
-            {"order_id": "O1002", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "order_date": "2023-02-15", "amount": 175.0, "status": "Completed"},  # Differences here
-            {"order_id": "O1005", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "order_date": "2023-05-01", "amount": 300.0, "status": "Processing"}  # New order
-        ],
-        "payments": [
-            {"payment_id": "PM2001", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "payment_date": "2023-01-11", "method": "Credit Card", "amount": 250.0}
-        ],
-        "new_array": [
-            {"new_id1": "N3001", "new_id2": "N4001", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "detail": "Detail A"},
-            {"new_id1": "N3002", "new_id2": "N4002", "parent_primary_key": "P1", "child_primary_key": "C1",
-             "detail": "Detail B Modified"}  # Difference here
-        ]
-    },
-    {
-        "parent_primary_key": "P2",
-        "child_primary_key": "C2",
-        "name": "Bob",
-        "age": 25,
-        "address": {
-            "street": "456 Oak St",
-            "city": "Shelbyville",
-            "zipcode": "67890"
-        },
-        "orders": [
-            {"order_id": "O1003", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "order_date": "2023-03-20", "amount": 300.0, "status": "Delivered"}
-        ],
-        "payments": [
-            {"payment_id": "PM2002", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "payment_date": "2023-03-21", "method": "Credit Card", "amount": 300.0}  # Difference here
-        ],
-        "new_array": [
-            {"new_id1": "N3003", "new_id2": "N4003", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "detail": "Detail C"},
-            {"new_id1": "N3004", "new_id2": "N4004", "parent_primary_key": "P2", "child_primary_key": "C2",
-             "detail": "Detail D"}  # New entry
-        ]
-    },
-    {
-        "parent_primary_key": "P3",
-        "child_primary_key": "C3",
-        "name": "Charlie",
-        "age": 28,
-        "address": {
-            "street": "789 Pine St",
-            "city": "Capital City",
-            "zipcode": "54321"
-        },
-        "orders": [],
-        "payments": [],
-        "new_array": []  # No entries
-    }
-]
+# Sample data for source and target DataFrames (same as before)
+# ... [Same as provided earlier]
 
 # Create DataFrames with the defined schemas
 source_df = spark.createDataFrame(source_data, main_schema)
@@ -215,7 +92,7 @@ def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
                 # Prefix other fields
                 selected_cols.append(col(full_field).alias(f"{prefix}{field}"))
 
-        # Add global primary keys (from parent DataFrame)
+        # Add global primary keys from parent DataFrame
         for pk in global_primary_keys:
             selected_cols.append(col(pk))
 
@@ -234,17 +111,17 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
         # Build join keys: global primary keys, foreign keys, and array-specific primary keys
         join_keys = global_primary_keys + array_pks
 
-        # Rename all columns in target_df with 'target_' prefix, including join keys
+        # Rename all columns in target_df with 'target_' prefix
         target_df = target_df.select(
             *[col(c).alias(f"target_{c}") for c in target_df.columns]
         )
 
-        # Create unprefixed join keys in target_df for joining
-        for pk in join_keys:
-            target_df = target_df.withColumn(pk, col(f"target_{pk}"))
+        # Build join conditions using prefixed columns
+        join_conditions = [
+            source_df[pk] == target_df[f"target_{pk}"] for pk in join_keys
+        ]
 
-        # Perform the join using join keys
-        join_conditions = [source_df[pk] == target_df[pk] for pk in join_keys]
+        # Perform the join
         joined_df = source_df.join(target_df, on=join_conditions, how="full_outer")
 
         joined_dfs[array_col] = joined_df
@@ -300,13 +177,14 @@ target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", gl
 # Join exploded DataFrames
 joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, global_primary_keys)
 
-# Compare fields and collect differences
+# Define fields to compare for each array column
 fields_to_compare = {
     "orders": ["order_date", "amount", "status"],
     "payments": ["payment_date", "method", "amount"],
     "new_array": ["detail"]
 }
 
+# Compare fields and collect differences
 difference_results = {}
 for array_col, array_pks in array_columns.items():
     joined_df = joined_dfs[array_col]
@@ -325,5 +203,4 @@ def display_differences(difference_results):
         print("\n")
 
 display_differences(difference_results)
-
 
