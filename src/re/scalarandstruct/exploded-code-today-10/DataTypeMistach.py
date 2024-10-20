@@ -21,3 +21,11 @@ diff_expr = when(
         ).otherwise(None)
     )
 )
+
+
+if source_field in joined_df.columns and target_field in joined_df.columns:
+    # Get data types of the source and target columns
+    source_dtype = dict(joined_df.dtypes).get(source_field)
+    target_dtype = dict(joined_df.dtypes).get(target_field)
+
+    if source_dtype == target_dtype:
