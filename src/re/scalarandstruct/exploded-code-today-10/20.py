@@ -7,8 +7,6 @@ from pyspark.sql.functions import (
 )
 from functools import reduce
 
-# Initialize SparkSession
-spark = SparkSession.builder.appName("Comparison").getOrCreate()
 
 # Schema definitions
 # Schema for 'address' struct
@@ -191,15 +189,11 @@ target_data = [
 source_df = spark.createDataFrame(source_data, main_schema)
 target_df = spark.createDataFrame(target_data, main_schema)
 
-# Function to explode arrays and prefix columns
 def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
     exploded_dfs = {}
     for array_col, array_pks in array_columns.items():
         # Explode the array column
         exploded_col = df.withColumn(f"{array_col}_exploded", explode_outer(col(array_col)))
-
-        # Select global primary keys
-        selected_cols = [col(pk) for pk in global_primary_keys]
 
         # Get all fields from the exploded array
         struct_fields = exploded_col.select(f"{array_col}_exploded.*").columns
@@ -207,21 +201,23 @@ def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
         # Identify foreign keys (fields with the same names as global primary keys)
         foreign_keys = set(global_primary_keys) & set(struct_fields)
 
-        # Prefix foreign keys to avoid ambiguity
-        prefixed_fields = []
+        # Select and prefix columns appropriately
+        selected_cols = []
         for field in struct_fields:
-            if field in foreign_keys:
+            full_field = f"{array_col}_exploded.{field}"
+            if field in array_pks:
+                # Array-specific primary keys remain unprefixed
+                selected_cols.append(col(full_field))
+            elif field in foreign_keys:
                 # Prefix foreign keys with 'fk_'
-                prefixed_fields.append(col(f"{array_col}_exploded.{field}").alias(f"fk_{field}"))
-            elif field in array_pks:
-                # Keep array-specific primary keys as is
-                prefixed_fields.append(col(f"{array_col}_exploded.{field}"))
+                selected_cols.append(col(full_field).alias(f"fk_{field}"))
             else:
                 # Prefix other fields
-                prefixed_fields.append(col(f"{array_col}_exploded.{field}").alias(f"{prefix}{field}"))
+                selected_cols.append(col(full_field).alias(f"{prefix}{field}"))
 
-        # Combine global primary keys and array fields
-        selected_cols += prefixed_fields
+        # Add global primary keys (from parent DataFrame)
+        for pk in global_primary_keys:
+            selected_cols.append(col(pk))
 
         # Create the exploded DataFrame
         exploded_df = exploded_col.select(*selected_cols)
@@ -229,7 +225,6 @@ def explode_and_prefix(df, array_columns, prefix, global_primary_keys):
 
     return exploded_dfs
 
-# Function to join exploded DataFrames
 def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys):
     joined_dfs = {}
     for array_col, array_pks in array_columns.items():
@@ -239,13 +234,16 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
         # Build join keys: global primary keys, foreign keys, and array-specific primary keys
         join_keys = global_primary_keys + array_pks
 
-        # Rename columns in target_df to avoid ambiguity, excluding join keys
-        target_columns = target_df.columns
-        columns_to_rename = [c for c in target_columns if c not in join_keys and not c.startswith('fk_')]
-        for col_name in columns_to_rename:
-            target_df = target_df.withColumnRenamed(col_name, f"target_{col_name}")
+        # Rename all columns in target_df with 'target_' prefix, including join keys
+        target_df = target_df.select(
+            *[col(c).alias(f"target_{c}") for c in target_df.columns]
+        )
 
-        # Perform the join using join keys and foreign keys
+        # Create unprefixed join keys in target_df for joining
+        for pk in join_keys:
+            target_df = target_df.withColumn(pk, col(f"target_{pk}"))
+
+        # Perform the join using join keys
         join_conditions = [source_df[pk] == target_df[pk] for pk in join_keys]
         joined_df = source_df.join(target_df, on=join_conditions, how="full_outer")
 
@@ -253,12 +251,11 @@ def join_exploded_dfs(source_dfs, target_dfs, array_columns, global_primary_keys
 
     return joined_dfs
 
-# Function to compare fields and collect differences
 def compare_and_combine_differences(joined_df, compare_fields, source_prefix, target_prefix, global_primary_keys, array_pks, result_col_name):
     difference_expressions = []
     for field in compare_fields:
         source_field = f"{source_prefix}{field}"
-        target_field = f"target_{field}"
+        target_field = f"{target_prefix}{field}"
 
         diff_expr = when(
             col(source_field).isNull() & col(target_field).isNotNull(),
@@ -298,31 +295,18 @@ array_columns = {
 
 # Explode arrays and prefix columns
 source_exploded_dfs = explode_and_prefix(source_df, array_columns, "source_", global_primary_keys)
-target_exploded_dfs = explode_and_prefix(target_df, array_columns, "source_", global_primary_keys)  # Use same prefix
-
-# Debugging: Display exploded DataFrames
-for array_col in array_columns.keys():
-    print(f"Source Exploded DataFrame for '{array_col}':")
-    source_exploded_dfs[array_col].show(truncate=False)
-    print(f"Target Exploded DataFrame for '{array_col}':")
-    target_exploded_dfs[array_col].show(truncate=False)
+target_exploded_dfs = explode_and_prefix(target_df, array_columns, "target_", global_primary_keys)
 
 # Join exploded DataFrames
 joined_dfs = join_exploded_dfs(source_exploded_dfs, target_exploded_dfs, array_columns, global_primary_keys)
 
-# Debugging: Display joined DataFrames
-for array_col in array_columns.keys():
-    print(f"Joined DataFrame for '{array_col}':")
-    joined_dfs[array_col].show(truncate=False)
-
-# Define fields to compare for each array column
+# Compare fields and collect differences
 fields_to_compare = {
     "orders": ["order_date", "amount", "status"],
     "payments": ["payment_date", "method", "amount"],
     "new_array": ["detail"]
 }
 
-# Compare fields and collect differences
 difference_results = {}
 for array_col, array_pks in array_columns.items():
     joined_df = joined_dfs[array_col]
