@@ -10,7 +10,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     concat_ws, col, lit, when, countDistinct, approx_count_distinct,
-    mean, stddev, min, max, expr, levenshtein
+    mean, stddev, min, max, expr, levenshtein, abs
 )
 from pyspark.sql.types import *
 import matplotlib.pyplot as plt
@@ -63,7 +63,9 @@ dbutils.widgets.text('source_query', '', '📝 Source Query (Optional)')
 dbutils.widgets.text('target_query', '', '📝 Target Query (Optional)')
 
 # Feature 4: Attribute Selection
-dbutils.widgets.multiselect('attributes', 'ID,Name', [f.name for f in source_df.schema.fields], '🔎 Select Attributes')
+attribute_choices = [f.name for f in source_df.schema.fields]
+default_attributes = ['ID', 'Name']  # Default attributes to select
+dbutils.widgets.multiselect('attributes', ','.join(default_attributes), attribute_choices, '🔎 Select Attributes')
 
 # Feature 5: Reconciliation Option Selection
 dbutils.widgets.dropdown('recon_option', 'All', ['Match', 'Mismatch', 'All'], '⚙️ Reconciliation Option')
@@ -85,7 +87,11 @@ dbutils.widgets.dropdown('visualization_type', 'Bar Chart', ['Bar Chart', 'Pie C
 # Retrieve widget values
 source_query = dbutils.widgets.get('source_query')
 target_query = dbutils.widgets.get('target_query')
-attributes = dbutils.widgets.get('attributes').split(',')
+attributes = dbutils.widgets.get('attributes')
+if attributes:
+    attributes = [attr.strip() for attr in attributes.split(',')]
+else:
+    attributes = []
 recon_option = dbutils.widgets.get('recon_option')
 numeric_threshold = float(dbutils.widgets.get('numeric_threshold'))
 fuzzy_matching = dbutils.widgets.get('fuzzy_matching') == 'Yes'
@@ -114,9 +120,11 @@ data_profiling(target_df, 'Target Dataset')
 # COMMAND ----------
 
 # Feature 11: Attribute Handling
-if attributes and attributes != ['']:
+if attributes:
     source_df = source_df.select(*attributes)
     target_df = target_df.select(*attributes)
+else:
+    attributes = source_df.columns  # Use all columns if none are selected
 
 # COMMAND ----------
 
@@ -173,26 +181,32 @@ for col_name in attributes:
     else:
         status_conditions.append((col(f'src.{col_name}') == col(f'tgt.{col_name}')).alias(f'{col_name}_match'))
 
-status_expr = [col(cond.alias) for cond in status_conditions]
-
-joined_df = joined_df.select('key', 'src.*', 'tgt.*', *status_expr)
+# Add key and status columns
+joined_df = joined_df.select(
+    'key',
+    *[col(f'src.{col_name}').alias(f'src_{col_name}') for col_name in attributes],
+    *[col(f'tgt.{col_name}').alias(f'tgt_{col_name}') for col_name in attributes],
+    *status_conditions
+)
 
 # COMMAND ----------
 
 # Feature 16: Status Determination
-def determine_status(row):
-    if all([row[f'{col}_match'] for col in attributes if f'{col}_match' in row]):
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StringType
+
+def determine_status(*cols):
+    matches = cols
+    if all(matches):
         return '✅ Match'
-    elif any([row[f'{col}_match'] == False for col in attributes if f'{col}_match' in row]):
+    elif any(match == False for match in matches):
         return '❌ Mismatch'
     else:
         return '🔍 Partial Match'
 
-from pyspark.sql.functions import udf
-from pyspark.sql.types import StringType
-
+match_cols = [f'{col}_match' for col in attributes if col not in key_cols]
 status_udf = udf(determine_status, StringType())
-joined_df = joined_df.withColumn('status', status_udf(expr('*')))
+joined_df = joined_df.withColumn('status', status_udf(*match_cols))
 
 # COMMAND ----------
 
@@ -230,42 +244,56 @@ result_df, diff_columns = highlight_differences(result_df)
 summary_df = result_df.groupBy('status').count().toPandas()
 
 # Visualization based on user selection
-if visualization_type == 'Bar Chart':
-    plt.figure(figsize=(8,6))
-    plt.bar(summary_df['status'], summary_df['count'], color=['green', 'red', 'orange'])
-    plt.title('Reconciliation Summary')
-    plt.xlabel('Status')
-    plt.ylabel('Record Count')
-    plt.xticks(rotation=45)
-    plt.grid(axis='y')
-    display(plt.gcf())
-elif visualization_type == 'Pie Chart':
-    plt.figure(figsize=(6,6))
-    plt.pie(summary_df['count'], labels=summary_df['status'], autopct='%1.1f%%', colors=['green', 'red', 'orange'])
-    plt.title('Reconciliation Summary')
-    display(plt.gcf())
+if not summary_df.empty:
+    if visualization_type == 'Bar Chart':
+        plt.figure(figsize=(8,6))
+        plt.bar(summary_df['status'], summary_df['count'], color=['green', 'red', 'orange'])
+        plt.title('Reconciliation Summary')
+        plt.xlabel('Status')
+        plt.ylabel('Record Count')
+        plt.xticks(rotation=45)
+        plt.grid(axis='y')
+        display(plt.gcf())
+    elif visualization_type == 'Pie Chart':
+        plt.figure(figsize=(6,6))
+        plt.pie(summary_df['count'], labels=summary_df['status'], autopct='%1.1f%%', colors=['green', 'red', 'orange'])
+        plt.title('Reconciliation Summary')
+        display(plt.gcf())
+else:
+    displayHTML("<h3>No data available for visualization.</h3>")
 
 # COMMAND ----------
 
 # Feature 20: Drill-Down Capability
 displayHTML("<h3>Drill-Down into Reconciliation Results</h3>")
-display(result_df.select('key', *attributes, 'status', *diff_columns))
+display(result_df.select('key', *[f'src_{col}' for col in attributes], *[f'tgt_{col}' for col in attributes], 'status', *diff_columns))
 
 # COMMAND ----------
 
 # Feature 21: Export Results
 if export_option != 'None':
     export_path = f'/FileStore/recon_results.{export_option.lower()}'
+    pandas_df = result_df.toPandas()
     if export_option == 'CSV':
-        result_df.toPandas().to_csv(f'/dbfs{export_path}', index=False)
+        pandas_df.to_csv(f'/dbfs{export_path}', index=False)
     elif export_option == 'Excel':
-        result_df.toPandas().to_excel(f'/dbfs{export_path}', index=False)
+        pandas_df.to_excel(f'/dbfs{export_path}', index=False)
     displayHTML(f"<a href='files/recon_results.{export_option.lower()}'>Download Reconciliation Results ({export_option})</a>")
 
 # COMMAND ----------
 
 # Feature 22: Save and Load Recon Configurations
-# For simplicity, this feature will be demonstrated as storing and retrieving configurations from widgets
+# Simulating saving configurations by printing the current settings
+configurations = {
+    'attributes': attributes,
+    'recon_option': recon_option,
+    'numeric_threshold': numeric_threshold,
+    'fuzzy_matching': fuzzy_matching,
+    'export_option': export_option,
+    'visualization_type': visualization_type
+}
+print("Current Reconciliation Configurations:")
+print(configurations)
 
 # COMMAND ----------
 
@@ -273,7 +301,6 @@ if export_option != 'None':
 import datetime
 
 log_entry = f"{datetime.datetime.now()}: Recon performed with options - Attributes: {attributes}, Recon Option: {recon_option}, Numeric Threshold: {numeric_threshold}, Fuzzy Matching: {fuzzy_matching}"
-
 dbutils.fs.put('/FileStore/recon_logs.txt', log_entry + '\n', True)
 
 # COMMAND ----------
@@ -313,12 +340,12 @@ if alert_condition:
 
 # Feature 27: Side-by-Side Comparison
 def side_by_side(df, cols):
-    left_cols = [f'src.{col}' for col in cols]
-    right_cols = [f'tgt.{col}' for col in cols]
+    left_cols = [f'src_{col}' for col in cols]
+    right_cols = [f'tgt_{col}' for col in cols]
     select_expr = []
     for l_col, r_col in zip(left_cols, right_cols):
-        select_expr.extend([col(l_col).alias(f'Source_{l_col.split(".")[1]}'), col(r_col).alias(f'Target_{r_col.split(".")[1]}')])
-    return df.select(*select_expr, 'status')
+        select_expr.extend([col(l_col).alias(f'Source_{l_col.split("_")[1]}'), col(r_col).alias(f'Target_{r_col.split("_")[1]}')])
+    return df.select('key', *select_expr, 'status')
 
 side_by_side_df = side_by_side(result_df, attributes)
 display(side_by_side_df)
