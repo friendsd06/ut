@@ -27,6 +27,12 @@ def clean_redundant_nulls(df, columns):
     return df
 
 
+def replace_null_strings(df, columns):
+    for column in columns:
+        df = df.withColumn(column, when(col(column) == "null", None).otherwise(col(column)))
+    return df
+
+
 from pyspark.sql.functions import col, concat, coalesce, lit, when, regexp_replace, concat_ws
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StringType
