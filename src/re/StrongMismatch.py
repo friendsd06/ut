@@ -1,3 +1,4 @@
+
 # Step 8: Introduce a mismatch column
 mismatch_expression = reduce(
     lambda acc, c: acc | (c.isNotNull()),
