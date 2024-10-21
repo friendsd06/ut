@@ -62,10 +62,10 @@ dbutils.widgets.dropdown('target_dataset', 'Sample Target', ['Sample Target'], '
 dbutils.widgets.text('source_query', '', '📝 Source Query (Optional)')
 dbutils.widgets.text('target_query', '', '📝 Target Query (Optional)')
 
-# Feature 4: Attribute Selection
+# Feature 4: Attribute Selection using text input
 attribute_choices = [f.name for f in source_df.schema.fields]
-default_attributes = ['ID', 'Name']  # Default attributes to select
-dbutils.widgets.multiselect('attributes', ','.join(default_attributes), attribute_choices, '🔎 Select Attributes')
+default_attributes = 'ID,Name'  # Default attributes as a comma-separated string
+dbutils.widgets.text('attributes', default_attributes, '🔎 Enter Attributes (Comma-Separated)')
 
 # Feature 5: Reconciliation Option Selection
 dbutils.widgets.dropdown('recon_option', 'All', ['Match', 'Mismatch', 'All'], '⚙️ Reconciliation Option')
@@ -87,11 +87,13 @@ dbutils.widgets.dropdown('visualization_type', 'Bar Chart', ['Bar Chart', 'Pie C
 # Retrieve widget values
 source_query = dbutils.widgets.get('source_query')
 target_query = dbutils.widgets.get('target_query')
-attributes = dbutils.widgets.get('attributes')
-if attributes:
-    attributes = [attr.strip() for attr in attributes.split(',')]
+attributes_input = dbutils.widgets.get('attributes')
+
+if attributes_input.strip():
+    attributes = [attr.strip() for attr in attributes_input.split(',') if attr.strip() in attribute_choices]
 else:
-    attributes = []
+    attributes = attribute_choices  # Use all columns if none are provided
+
 recon_option = dbutils.widgets.get('recon_option')
 numeric_threshold = float(dbutils.widgets.get('numeric_threshold'))
 fuzzy_matching = dbutils.widgets.get('fuzzy_matching') == 'Yes'
@@ -197,7 +199,7 @@ from pyspark.sql.types import StringType
 
 def determine_status(*cols):
     matches = cols
-    if all(matches):
+    if all(match == True for match in matches):
         return '✅ Match'
     elif any(match == False for match in matches):
         return '❌ Mismatch'
@@ -221,8 +223,6 @@ else:
 # COMMAND ----------
 
 # Feature 18: Highlighting Differences
-from pyspark.sql.functions import array, when, size
-
 def highlight_differences(df):
     diff_columns = []
     for col_name in attributes:
@@ -319,7 +319,7 @@ displayHTML("""
 <ul>
   <li><b>Select Datasets:</b> Choose the source and target datasets (using sample data).</li>
   <li><b>Custom Queries:</b> Optionally, provide PySpark SQL queries to filter or transform the datasets.</li>
-  <li><b>Select Attributes:</b> Choose the columns you want to compare.</li>
+  <li><b>Select Attributes:</b> Enter the columns you want to compare, separated by commas.</li>
   <li><b>Reconciliation Options:</b> Decide whether to view matches, mismatches, or all records.</li>
   <li><b>Numeric Threshold:</b> Set a threshold for numeric comparisons.</li>
   <li><b>Enable Fuzzy Matching:</b> Toggle fuzzy matching for string comparisons.</li>
@@ -344,7 +344,7 @@ def side_by_side(df, cols):
     right_cols = [f'tgt_{col}' for col in cols]
     select_expr = []
     for l_col, r_col in zip(left_cols, right_cols):
-        select_expr.extend([col(l_col).alias(f'Source_{l_col.split("_")[1]}'), col(r_col).alias(f'Target_{r_col.split("_")[1]}')])
+        select_expr.extend([col(l_col).alias(f'Source_{l_col.split("_", 1)[1]}'), col(r_col).alias(f'Target_{r_col.split("_", 1)[1]}')])
     return df.select('key', *select_expr, 'status')
 
 side_by_side_df = side_by_side(result_df, attributes)
