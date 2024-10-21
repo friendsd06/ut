@@ -14,3 +14,14 @@ def clean_redundant_nulls(df, columns):
         df = df.withColumn(column, regexp_replace(col(column), r"^,|,$", ""))
 
     return df
+
+
+def clean_redundant_nulls(df, columns):
+    for column in columns:
+        # Replace multiple "null, null" with a single "null"
+        df = df.withColumn(column, regexp_replace(col(column), r"(null,\s*)+null", "null"))
+
+        # Alternatively, replace with an empty string
+        # df = df.withColumn(column, regexp_replace(col(column), r"(null,\s*)+null", ""))
+
+    return df
