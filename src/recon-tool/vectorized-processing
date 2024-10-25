@@ -1,0 +1,5 @@
+Key Concepts of Vectorized Column Processing in PySpark
+Columnar Operations:
+
+Instead of iterating over each row to perform computations, vectorized processing applies operations across entire columns at once.
+Utilizes Spark’s Catalyst optimizer to efficiently plan and execute these operations.
