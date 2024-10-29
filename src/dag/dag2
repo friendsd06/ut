@@ -1,0 +1,26 @@
+This high-level architecture shows the main components and workflow:
+
+Core Components:
+
+DAG Execution Engine: Central component orchestrating the entire execution
+Task Management: Handles task creation and execution
+Execution Services: Plans and validates the execution flow
+
+
+Main Workflow:
+
+Client submits a DAG for execution
+Engine creates tasks through the Task Factory
+Planner determines execution sequence
+Validator ensures DAG integrity
+Scheduler executes tasks in the correct order
+
+
+Monitoring:
+
+Event Listeners: Handle execution events (audit, logging, notifications)
+Metrics: Track execution progress and statistics
+
+
+
+This architecture emphasizes the main data flow and responsibility separation without diving into implementation details. Would you like me to explain any specific aspect of this high-level design?
