@@ -1,0 +1,215 @@
+1. Dynamic DAG Generation with PythonOperator and BranchPythonOperator
+Description: Creates a dynamic DAG that generates a list of tasks based on input, followed by a branching condition.
+Use Case: Processing data in multiple stages based on conditions and custom logic.
+python
+Copy code
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from datetime import datetime
+
+def generate_task_list():
+    return ["task_a", "task_b", "task_c"]
+
+def choose_branch(task_list):
+    # Example logic to choose a branch
+    return task_list[0] if len(task_list) > 2 else "final_task"
+
+def task_func(task_name):
+    print(f"Running task: {task_name}")
+
+with DAG("dynamic_dag", start_date=datetime(2023, 11, 1), schedule_interval="@daily") as dag:
+    generate_task = PythonOperator(
+        task_id="generate_task_list",
+        python_callable=generate_task_list
+    )
+
+    branch_task = BranchPythonOperator(
+        task_id="branch_task",
+        python_callable=lambda: choose_branch(generate_task.output)
+    )
+
+    tasks = [PythonOperator(task_id=name, python_callable=task_func, op_kwargs={"task_name": name}) for name in generate_task.output]
+    final_task = PythonOperator(task_id="final_task", python_callable=lambda: print("All tasks completed"))
+
+    generate_task >> branch_task >> tasks >> final_task
+Explanation:
+generate_task_list dynamically generates tasks based on some input.
+branch_task uses branching logic to decide which tasks to execute.
+Tasks execute conditionally, and the flow concludes with a final task.
+2. ETL Pipeline Using BigQueryOperator, PythonOperator, and EmailOperator
+Description: Executes a three-step ETL process: extraction from BigQuery, transformation with Python, and loading results.
+Use Case: Moving data from Google BigQuery to an email report after processing.
+python
+Copy code
+from airflow import DAG
+from airflow.providers.google.cloud.operators.bigquery import BigQueryOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.email import EmailOperator
+from datetime import datetime
+
+def transform_data(**kwargs):
+    extracted_data = kwargs['ti'].xcom_pull(task_ids="extract_data")
+    transformed_data = [row['value'] * 2 for row in extracted_data]  # Example transformation
+    return transformed_data
+
+with DAG("etl_pipeline", start_date=datetime(2023, 11, 1), schedule_interval="@daily") as dag:
+    extract_data = BigQueryOperator(
+        task_id="extract_data",
+        sql="SELECT * FROM `my_project.my_dataset.my_table`",
+        use_legacy_sql=False
+    )
+
+    transform_task = PythonOperator(
+        task_id="transform_task",
+        python_callable=transform_data,
+        provide_context=True
+    )
+
+    load_task = EmailOperator(
+        task_id="load_task",
+        to="data_team@example.com",
+        subject="ETL Results",
+        html_content="{{ task_instance.xcom_pull(task_ids='transform_task') }}"
+    )
+
+    extract_data >> transform_task >> load_task
+Explanation:
+Data is extracted from BigQuery, processed in transform_task, and loaded by sending it as an email.
+3. Data Validation with GreatExpectationsOperator and Email Alerts
+Description: Runs data validation checks with Great Expectations and sends an alert if checks fail.
+Use Case: Automated data quality checks for ETL pipelines.
+python
+Copy code
+from airflow import DAG
+from airflow.providers.great_expectations.operators.great_expectations import GreatExpectationsOperator
+from airflow.operators.email import EmailOperator
+from datetime import datetime
+
+with DAG("data_validation", start_date=datetime(2023, 11, 1), schedule_interval="@daily") as dag:
+    data_validation = GreatExpectationsOperator(
+        task_id="data_validation",
+        expectation_suite_name="suite_name",
+        batch_kwargs={
+            "path": "s3://my-bucket/data/",
+            "datasource": "my_datasource",
+        }
+    )
+
+    email_alert = EmailOperator(
+        task_id="email_alert",
+        to="admin@example.com",
+        subject="Data Validation Failed",
+        html_content="Data validation checks failed.",
+        trigger_rule="one_failed"
+    )
+
+    data_validation >> email_alert
+Explanation:
+Validates data quality using Great Expectations.
+Sends an email if data validation fails.
+4. Parallel Processing Using SubDAGs with PythonOperator
+Description: Processes data files in parallel using SubDAGs.
+Use Case: Splitting large datasets across multiple tasks for parallel processing.
+python
+Copy code
+from airflow import DAG
+from airflow.operators.subdag_operator import SubDagOperator
+from airflow.operators.python import PythonOperator
+from datetime import datetime
+
+def process_file(file):
+    print(f"Processing file {file}")
+
+def create_subdag(parent_dag_name, child_dag_name, args, files):
+    subdag = DAG(f"{parent_dag_name}.{child_dag_name}", default_args=args)
+    for i, file in enumerate(files):
+        PythonOperator(
+            task_id=f"process_file_{i}",
+            python_callable=process_file,
+            op_args=[file],
+            dag=subdag
+        )
+    return subdag
+
+with DAG("parallel_processing", start_date=datetime(2023, 11, 1), schedule_interval="@daily") as dag:
+    files = ["file1.csv", "file2.csv", "file3.csv"]
+    process_files_subdag = SubDagOperator(
+        task_id="process_files",
+        subdag=create_subdag("parallel_processing", "process_files", dag.default_args, files)
+    )
+Explanation:
+Files are processed in parallel by creating a sub-DAG for each file.
+Helps with processing large datasets simultaneously.
+5. Dynamic Task Creation Using PythonOperator and Task Groups
+Description: Dynamically generates tasks within Task Groups.
+Use Case: Complex workflows with a need for flexible task creation based on input.
+python
+Copy code
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.utils.task_group import TaskGroup
+from datetime import datetime
+
+def dynamic_task(file):
+    print(f"Processing file {file}")
+
+with DAG("dynamic_task_group", start_date=datetime(2023, 11, 1), schedule_interval="@daily") as dag:
+    files = ["fileA.csv", "fileB.csv", "fileC.csv"]
+
+    with TaskGroup("file_processing_group") as group:
+        for file in files:
+            PythonOperator(
+                task_id=f"process_{file}",
+                python_callable=dynamic_task,
+                op_args=[file]
+            )
+Explanation:
+TaskGroup organizes multiple dynamic tasks.
+Useful for grouping similar tasks for better visualization and management.
+6. Real-Time Data Processing with Kafka and SparkSubmitOperator
+Description: Consumes data from Kafka and processes it in Spark.
+Use Case: Real-time data processing for streaming analytics.
+python
+Copy code
+from airflow import DAG
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from datetime import datetime
+
+with DAG("kafka_spark_processing", start_date=datetime(2023, 11, 1), schedule_interval="@hourly") as dag:
+    spark_task = SparkSubmitOperator(
+        task_id="spark_job",
+        application="/path/to/spark_application.py",
+        java_class="com.example.SparkJob",
+        application_args=["--input", "kafka_topic", "--output", "s3://output-bucket"],
+        dag=dag
+    )
+Explanation:
+Consumes data from Kafka, processes it using Spark, and saves results to S3.
+7. ML Pipeline with DataFlowJavaOperator and Model Monitoring with PythonOperator
+Description: Trains a machine learning model on DataFlow and monitors its performance.
+Use Case: Training and monitoring ML models.
+python
+Copy code
+from airflow import DAG
+from airflow.providers.google.cloud.operators.dataflow import DataflowCreateJavaJobOperator
+from airflow.operators.python import PythonOperator
+from datetime import datetime
+
+def monitor_model():
+    # Custom logic for model monitoring
+    print("Monitoring Model Performance")
+
+with DAG("ml_pipeline", start_date=datetime(2023, 11, 1), schedule_interval="@weekly") as dag:
+    train_model = DataflowCreateJavaJobOperator(
+        task_id="train_model",
+        jar="/path/to/model_training.jar",
+        options={"output": "gs://output_bucket"},
+        dag=dag
+    )
+
+    monitor_task = PythonOperator(
+        task_id="monitor_model",
+        python_callable=monitor_model
+    )
+
+    train_model >> monitor_task

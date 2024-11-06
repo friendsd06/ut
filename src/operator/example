@@ -1,0 +1,256 @@
+1. PythonOperator
+Description: Runs Python functions.
+Example:
+python
+Copy code
+from airflow.operators.python_operator import PythonOperator
+
+def hello_world():
+    print("Hello, World!")
+
+hello_task = PythonOperator(task_id='hello_task', python_callable=hello_world, dag=dag)
+2. BashOperator
+Description: Executes Bash commands.
+Example:
+python
+Copy code
+from airflow.operators.bash import BashOperator
+
+bash_task = BashOperator(task_id='bash_task', bash_command="echo 'Hello from Bash'", dag=dag)
+3. EmailOperator
+Description: Sends an email.
+Example:
+python
+Copy code
+from airflow.operators.email_operator import EmailOperator
+
+email_task = EmailOperator(
+    task_id='send_email',
+    to='example@example.com',
+    subject='Test Email',
+    html_content='<p>Test email from Airflow</p>',
+    dag=dag
+)
+4. DummyOperator
+Description: A placeholder that does nothing.
+Example:
+python
+Copy code
+from airflow.operators.dummy_operator import DummyOperator
+
+start_task = DummyOperator(task_id='start', dag=dag)
+5. MySqlOperator
+Description: Executes SQL on a MySQL database.
+Example:
+python
+Copy code
+from airflow.providers.mysql.operators.mysql import MySqlOperator
+
+mysql_task = MySqlOperator(
+    task_id='mysql_task',
+    sql="SELECT * FROM my_table;",
+    mysql_conn_id='my_mysql_connection',
+    dag=dag
+)
+6. PostgresOperator
+Description: Executes SQL on a Postgres database.
+Example:
+python
+Copy code
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+
+postgres_task = PostgresOperator(
+    task_id='postgres_task',
+    sql="SELECT * FROM my_table;",
+    postgres_conn_id='my_postgres_connection',
+    dag=dag
+)
+7. BigQueryOperator
+Description: Executes SQL on Google BigQuery.
+Example:
+python
+Copy code
+from airflow.providers.google.cloud.operators.bigquery import BigQueryOperator
+
+bq_task = BigQueryOperator(
+    task_id='bq_task',
+    sql="SELECT * FROM `my_project.my_dataset.my_table`",
+    use_legacy_sql=False,
+    dag=dag
+)
+8. S3FileTransformOperator
+Description: Transforms files on Amazon S3.
+Example:
+python
+Copy code
+from airflow.providers.amazon.aws.transfers.s3_to_s3 import S3FileTransformOperator
+
+s3_transform_task = S3FileTransformOperator(
+    task_id='s3_transform_task',
+    source_s3_key='s3://source-bucket/file.txt',
+    dest_s3_key='s3://dest-bucket/transformed_file.txt',
+    transform_script='transform_script.sh',
+    dag=dag
+)
+9. BranchPythonOperator
+Description: Branches a DAG based on conditions.
+Example:
+python
+Copy code
+from airflow.operators.python import BranchPythonOperator
+
+def choose_branch():
+    return 'branch_a' if condition else 'branch_b'
+
+branch_task = BranchPythonOperator(task_id='branch_task', python_callable=choose_branch, dag=dag)
+10. HttpSensor
+Description: Waits for an HTTP response.
+Example:
+python
+Copy code
+from airflow.sensors.http_sensor import HttpSensor
+
+http_sensor_task = HttpSensor(
+    task_id='http_sensor_task',
+    http_conn_id='my_http_connection',
+    endpoint='api/status',
+    response_check=lambda response: response.json()['status'] == 'complete',
+    poke_interval=5,
+    dag=dag
+)
+11. FileSensor
+Description: Waits for a file to be created.
+Example:
+python
+Copy code
+from airflow.sensors.filesystem import FileSensor
+
+file_sensor_task = FileSensor(
+    task_id='file_sensor_task',
+    filepath='/path/to/file.txt',
+    poke_interval=5,
+    dag=dag
+)
+12. SlackAPIPostOperator
+Description: Posts a message to Slack.
+Example:
+python
+Copy code
+from airflow.providers.slack.operators.slack import SlackAPIPostOperator
+
+slack_task = SlackAPIPostOperator(
+    task_id='slack_task',
+    token='your_slack_token',
+    channel='#alerts',
+    text='DAG execution completed!',
+    dag=dag
+)
+13. S3ToRedshiftOperator
+Description: Transfers data from S3 to Redshift.
+Example:
+python
+Copy code
+from airflow.providers.amazon.aws.transfers.s3_to_redshift import S3ToRedshiftOperator
+
+s3_to_redshift_task = S3ToRedshiftOperator(
+    task_id='s3_to_redshift_task',
+    schema='public',
+    table='my_table',
+    s3_bucket='my_bucket',
+    s3_key='my_key',
+    copy_options=['CSV'],
+    aws_conn_id='my_aws_conn',
+    dag=dag
+)
+14. TriggerDagRunOperator
+Description: Triggers another DAG.
+Example:
+python
+Copy code
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+
+trigger_dag_task = TriggerDagRunOperator(
+    task_id='trigger_dag_task',
+    trigger_dag_id='target_dag_id',
+    dag=dag
+)
+15. DockerOperator
+Description: Runs tasks in Docker containers.
+Example:
+python
+Copy code
+from airflow.providers.docker.operators.docker import DockerOperator
+
+docker_task = DockerOperator(
+    task_id='docker_task',
+    image='my_image',
+    command='echo "Hello from Docker"',
+    dag=dag
+)
+16. DataflowJavaOperator
+Description: Runs Java jobs on Google Dataflow.
+Example:
+python
+Copy code
+from airflow.providers.google.cloud.operators.dataflow import DataflowCreateJavaJobOperator
+
+dataflow_task = DataflowCreateJavaJobOperator(
+    task_id="dataflow_task",
+    jar="/path/to/jarfile",
+    options={"output": "gs://my-bucket/output"},
+    dag=dag
+)
+17. SqliteOperator
+Description: Executes SQL on a SQLite database.
+Example:
+python
+Copy code
+from airflow.providers.sqlite.operators.sqlite import SqliteOperator
+
+sqlite_task = SqliteOperator(
+    task_id='sqlite_task',
+    sql="INSERT INTO my_table VALUES ('data');",
+    dag=dag
+)
+18. SnowflakeOperator
+Description: Executes SQL on Snowflake.
+Example:
+python
+Copy code
+from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
+
+snowflake_task = SnowflakeOperator(
+    task_id='snowflake_task',
+    sql="SELECT * FROM my_table;",
+    snowflake_conn_id='my_snowflake_connection',
+    dag=dag
+)
+19. SSHOperator
+Description: Executes commands over SSH.
+Example:
+python
+Copy code
+from airflow.providers.ssh.operators.ssh import SSHOperator
+
+ssh_task = SSHOperator(
+    task_id='ssh_task',
+    ssh_conn_id='my_ssh_connection',
+    command='echo "Hello from SSH"',
+    dag=dag
+)
+20. PythonVirtualenvOperator
+Description: Runs Python code in a virtual environment.
+Example:
+python
+Copy code
+from airflow.operators.python import PythonVirtualenvOperator
+
+def my_function():
+    print("Hello from a virtual environment")
+
+virtualenv_task = PythonVirtualenvOperator(
+    task_id='virtualenv_task',
+    python_callable=my_function,
+    requirements=["requests"],
+    dag=dag
+)

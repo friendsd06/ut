@@ -1,0 +1,169 @@
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.amazon.aws.transfers.s3_to_local import S3ToLocalOperator
+from airflow.providers.amazon.aws.operators.s3 import S3ListOperator
+from airflow.providers.http.operators.http import SimpleHttpOperator
+from airflow.providers.mysql.operators.mysql import MySqlOperator
+from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
+from airflow.models import Variable
+from datetime import datetime, timedelta
+import pandas as pd
+import requests
+
+# Define the DAG
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5)
+}
+
+dag = DAG(
+    'complex_etl_pipeline',
+    default_args=default_args,
+    description='A very complex ETL pipeline',
+    schedule_interval="@daily",
+    start_date=datetime(2023, 11, 1),
+    catchup=False
+)
+
+# 1. EXTRACT
+def extract_from_api():
+    response = requests.get("https://api.example.com/data")
+    return response.json()
+
+def extract_from_mysql():
+    # Logic to extract data from MySQL
+    pass
+
+# Extraction tasks
+api_extraction = PythonOperator(
+    task_id='extract_from_api',
+    python_callable=extract_from_api,
+    dag=dag
+)
+
+mysql_extraction = MySqlOperator(
+    task_id='extract_from_mysql',
+    sql='SELECT * FROM my_table',
+    mysql_conn_id='mysql_default',
+    dag=dag
+)
+
+# 2. DATA CLEANING
+def clean_data(**kwargs):
+    ti = kwargs['ti']
+    data = ti.xcom_pull(task_ids=['extract_from_api', 'extract_from_mysql'])
+    df = pd.DataFrame(data)
+
+    # Remove duplicates
+    df.drop_duplicates(inplace=True)
+
+    # Handle missing values
+    df.fillna(method='ffill', inplace=True)
+
+    # Format columns
+    df['date'] = pd.to_datetime(df['date'])
+
+    ti.xcom_push(key='cleaned_data', value=df.to_dict())
+
+clean_data_task = PythonOperator(
+    task_id='clean_data',
+    python_callable=clean_data,
+    provide_context=True,
+    dag=dag
+)
+
+# 3. DATA FILTERING
+def filter_data(**kwargs):
+    ti = kwargs['ti']
+    data = ti.xcom_pull(task_ids='clean_data', key='cleaned_data')
+    df = pd.DataFrame(data)
+
+    # Apply filtering conditions
+    filtered_df = df[df['status'] == 'active']
+    filtered_df = filtered_df[filtered_df['value'] > 100]
+
+    ti.xcom_push(key='filtered_data', value=filtered_df.to_dict())
+
+filter_data_task = PythonOperator(
+    task_id='filter_data',
+    python_callable=filter_data,
+    provide_context=True,
+    dag=dag
+)
+
+# 4. DATA TRANSFORMATION
+def transform_data(**kwargs):
+    ti = kwargs['ti']
+    data = ti.xcom_pull(task_ids='filter_data', key='filtered_data')
+    df = pd.DataFrame(data)
+
+    # Encode categorical data
+    df['category'] = df['category'].astype('category').cat.codes
+
+    # Normalize numerical data
+    df['value'] = (df['value'] - df['value'].mean()) / df['value'].std()
+
+    # Calculate new columns
+    df['value_squared'] = df['value'] ** 2
+
+    ti.xcom_push(key='transformed_data', value=df.to_dict())
+
+transform_data_task = PythonOperator(
+    task_id='transform_data',
+    python_callable=transform_data,
+    provide_context=True,
+    dag=dag
+)
+
+# 5. DATA ENRICHMENT
+def enrich_data(**kwargs):
+    ti = kwargs['ti']
+    data = ti.xcom_pull(task_ids='transform_data', key='transformed_data')
+    df = pd.DataFrame(data)
+
+    # Fetch additional data from an external API for enrichment
+    additional_data = requests.get("https://api.example.com/enrichment").json()
+    enrichment_df = pd.DataFrame(additional_data)
+
+    # Merge with existing data
+    enriched_df = pd.merge(df, enrichment_df, on='id', how='left')
+
+    ti.xcom_push(key='enriched_data', value=enriched_df.to_dict())
+
+enrich_data_task = PythonOperator(
+    task_id='enrich_data',
+    python_callable=enrich_data,
+    provide_context=True,
+    dag=dag
+)
+
+# 6. DATA AGGREGATION
+def aggregate_data(**kwargs):
+    ti = kwargs['ti']
+    data = ti.xcom_pull(task_ids='enrich_data', key='enriched_data')
+    df = pd.DataFrame(data)
+
+    # Aggregate data by category and calculate the average value
+    aggregated_df = df.groupby('category').agg({'value': 'mean'}).reset_index()
+
+    ti.xcom_push(key='aggregated_data', value=aggregated_df.to_dict())
+
+aggregate_data_task = PythonOperator(
+    task_id='aggregate_data',
+    python_callable=aggregate_data,
+    provide_context=True,
+    dag=dag
+)
+
+# 7. LOAD
+load_data_task = SnowflakeOperator(
+    task_id='load_data_to_snowflake',
+    sql="INSERT INTO my_table SELECT * FROM external_stage",
+    snowflake_conn_id='snowflake_default',
+    dag=dag
+)
+
+# Define task dependencies
+(api_extraction >> mysql_extraction) >> clean_data_task >> filter_data_task >> transform_data_task >> enrich_data_task >> aggregate_data_task >> load_data_task
