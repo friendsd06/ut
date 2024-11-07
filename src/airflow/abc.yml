@@ -35,12 +35,9 @@ services:
     image: apache/airflow:2.7.2
     container_name: airflow_webserver
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
+      - postgres
+      - redis
+      - airflow-init
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -58,9 +55,11 @@ services:
       - ./config:/opt/airflow/config
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
+      - ./wait-for-it.sh:/wait-for-it.sh
     ports:
       - "8080:8080"
-    command: ["webserver"]
+    entrypoint: /wait-for-it.sh
+    command: ["postgres:5432", "--", "/entrypoint", "webserver"]
     networks:
       - airflow
 
@@ -68,8 +67,7 @@ services:
     image: apache/airflow:2.7.2
     container_name: airflow_scheduler
     depends_on:
-      airflow-webserver:
-        condition: service_started
+      - airflow-webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -84,7 +82,9 @@ services:
       - ./config:/opt/airflow/config
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-    command: ["scheduler"]
+      - ./wait-for-it.sh:/wait-for-it.sh
+    entrypoint: /wait-for-it.sh
+    command: ["postgres:5432", "--", "/entrypoint", "scheduler"]
     networks:
       - airflow
 
@@ -92,8 +92,7 @@ services:
     image: apache/airflow:2.7.2
     container_name: airflow_worker
     depends_on:
-      airflow-webserver:
-        condition: service_started
+      - airflow-webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -108,7 +107,9 @@ services:
       - ./config:/opt/airflow/config
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-    command: ["celery", "worker"]
+      - ./wait-for-it.sh:/wait-for-it.sh
+    entrypoint: /wait-for-it.sh
+    command: ["postgres:5432", "--", "/entrypoint", "celery", "worker"]
     networks:
       - airflow
 
@@ -116,10 +117,8 @@ services:
     image: apache/airflow:2.7.2
     container_name: airflow_init
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -137,16 +136,16 @@ services:
       - ./config:/opt/airflow/config
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-    entrypoint: /bin/bash
-    command: -c "\
-      airflow db init && \
-      airflow users create \
-      --username admin \
-      --firstname Admin \
-      --lastname User \
-      --role Admin \
-      --email admin@example.com \
-      --password admin"
+      - ./wait-for-it.sh:/wait-for-it.sh
+    entrypoint: /wait-for-it.sh
+    command:
+      [
+          "postgres:5432",
+          "--",
+          "bash",
+          "-c",
+          "airflow db init && airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin",
+      ]
     networks:
       - airflow
 
