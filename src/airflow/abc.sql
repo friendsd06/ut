@@ -30,3 +30,12 @@ docker exec -it postgres_db psql -U airflow -d airflow
 AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
 
 - postgres_data:/var/lib/postgresql/data
+
+ALTER TABLE "public"."ab_permission_view" ALTER COLUMN "id" SET DEFAULT nextval('ab_permission_view_id_seq'::regclass);
+ALTER TABLE "public"."ab_permission" ALTER COLUMN "id" SET DEFAULT nextval('ab_permission_id_seq'::regclass);
+ALTER TABLE "public"."ab_permission_view_role" ALTER COLUMN "id" SET DEFAULT nextval('ab_permission_view_role_id_seq'::regclass);
+ALTER TABLE "public"."ab_register_user" ALTER COLUMN "id" SET DEFAULT nextval('ab_register_user_id_seq'::regclass);
+ALTER TABLE "public"."ab_role" ALTER COLUMN "id" SET DEFAULT nextval('ab_role_id_seq'::regclass);
+ALTER TABLE "public"."ab_user" ALTER COLUMN "id" SET DEFAULT nextval('ab_user_id_seq'::regclass);
+ALTER TABLE "public"."ab_user_role" ALTER COLUMN "id" SET DEFAULT nextval('ab_user_role_id_seq'::regclass);
+ALTER TABLE "public"."ab_view_menu" ALTER COLUMN "id" SET DEFAULT nextval('ab_view_menu_id_seq'::regclass);
