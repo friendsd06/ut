@@ -1,0 +1,21 @@
+-- List all tables
+.tables
+
+-- Show schema of a specific table
+.schema DAG_CONFIGS
+.schema TASKS
+
+-- Query tables
+SELECT * FROM DAG_CONFIGS;
+SELECT * FROM DAG_VERSIONS;
+SELECT * FROM TASKS;
+
+-- Format output
+.mode column   -- Set output mode to column
+.headers on    -- Show column headers
+.width 20 20   -- Set column widths
+
+-- Export results to file
+.output results.txt
+SELECT * FROM DAG_CONFIGS;
+.output stdout  -- Return to console output
