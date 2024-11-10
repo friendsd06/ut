@@ -28,3 +28,5 @@ docker exec -it postgres_db psql -U postgres -c "\l"
 docker exec -it postgres_db psql -U airflow -d airflow
 
 AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+
+- postgres_data:/var/lib/postgresql/data
