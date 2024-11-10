@@ -66,3 +66,42 @@ ORDER BY t.task_order;
 
 -- Use the view
 SELECT * FROM active_dag_tasks;
+
+========================
+Explanation of What's Removed and Why:
+
+Removed Runtime Tables:
+
+
+DAG_RUNS
+TASK_RUNS
+TASK_METRICS
+TASK_LOGS
+
+Reason: These are already managed by Airflow's internal database (metadata database) which stores:
+
+DAG run history
+Task instance states
+XCom data
+Logs (or in external logging system)
+Performance metrics
+Execution timestamps
+Retry information
+Runtime configurations
+
+
+Removed Redundant Configurations:
+
+
+Removed separate scheduling tables
+Removed separate monitoring tables
+Removed separate resource tables
+
+Reason: Airflow handles these through:
+
+Airflow's scheduler
+Airflow's built-in monitoring
+Airflow's resource pools
+Airflow's configuration system
+
+What This Schema is Designed For:
