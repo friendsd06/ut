@@ -16,3 +16,13 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO airflow;
 
 init-scripts/01-init.sql
 ./init-scripts:/docker-entrypoint-initdb.d
+
+
+# Check if the user was created
+docker exec -it postgres_db psql -U postgres -c "\du"
+
+# Check if the database was created
+docker exec -it postgres_db psql -U postgres -c "\l"
+
+# Test connecting as airflow user
+docker exec -it postgres_db psql -U airflow -d airflow
