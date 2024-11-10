@@ -26,3 +26,5 @@ docker exec -it postgres_db psql -U postgres -c "\l"
 
 # Test connecting as airflow user
 docker exec -it postgres_db psql -U airflow -d airflow
+
+AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
