@@ -1,9 +1,11 @@
--- Create the user if it doesn't exist
-CREATE USER myuser WITH PASSWORD 'mypassword';
+CREATE USER airflow WITH PASSWORD 'airflow';
 
--- Grant privileges to the user
-ALTER USER myuser WITH SUPERUSER;
-GRANT ALL PRIVILEGES ON DATABASE mydatabase TO myuser;
+-- Create Airflow database
+CREATE DATABASE airflow;
+
+-- Grant privileges
+ALTER USER airflow WITH SUPERUSER;
+GRANT ALL PRIVILEGES ON DATABASE airflow TO airflow;
 
 init-scripts/01-init.sql
 ./init-scripts:/docker-entrypoint-initdb.d
