@@ -45,3 +45,4 @@ EXPOSE 8080
 
 # Define the entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
+docker cp 92e230a9f89c:/usr/local/airflow/airflow.db ./airflow.db
