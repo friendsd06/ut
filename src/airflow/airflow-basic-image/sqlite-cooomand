@@ -19,3 +19,50 @@ SELECT * FROM TASKS;
 .output results.txt
 SELECT * FROM DAG_CONFIGS;
 .output stdout  -- Return to console output
+
+
+=====================================================
+
+-- Check DAG configurations
+SELECT dag_id, description, owner, environment
+FROM DAG_CONFIGS
+WHERE is_active = 1;
+
+-- View current DAG versions
+SELECT dc.dag_id, dv.version, dv.deployed_at
+FROM DAG_CONFIGS dc
+JOIN DAG_VERSIONS dv ON dc.id = dv.dag_config_id
+WHERE dv.is_current = 1;
+
+-- View tasks and their dependencies
+SELECT t.task_id, t.task_group, td.dependency_type,
+       upstream.task_id as upstream_task
+FROM TASKS t
+LEFT JOIN TASK_DEPENDENCIES td ON t.id = td.task_id
+LEFT JOIN TASKS upstream ON td.upstream_task_id = upstream.id
+ORDER BY t.task_order;
+
+-- View task configurations
+SELECT t.task_id, tc.config_type, tc.config_value
+FROM TASKS t
+JOIN TASK_CONFIGS tc ON t.id = tc.task_id;
+
+
+=========================================
+
+-- Create a view for active DAGs and their tasks
+CREATE VIEW active_dag_tasks AS
+SELECT
+    dc.dag_id,
+    t.task_id,
+    t.task_group,
+    t.operator_class,
+    t.task_order
+FROM DAG_CONFIGS dc
+JOIN DAG_VERSIONS dv ON dc.id = dv.dag_config_id
+JOIN TASKS t ON dv.id = t.dag_version_id
+WHERE dc.is_active = 1 AND dv.is_current = 1
+ORDER BY t.task_order;
+
+-- Use the view
+SELECT * FROM active_dag_tasks;
