@@ -1,156 +1,102 @@
-# synthetic_data_generator.py
-
+# Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
-from pyspark.sql.types import StringType, IntegerType, LongType, DoubleType, FloatType, DateType, TimestampType
+from pyspark.sql.functions import col, count
 import dbldatagen as dg
 import sys
 
-class SyntheticDataGenerator:
-    def __init__(self, spark, input_data=None, input_schema=None, config=None, rows=10000):
-        """
-        Initialize the SyntheticDataGenerator.
+# Initialize Spark session
+spark = SparkSession.builder \
+    .appName("DBDataGenExample") \
+    .getOrCreate()
 
-        Parameters:
-        - spark: SparkSession object
-        - input_data: Spark DataFrame containing the input data
-        - input_schema: StructType schema if input_data is not provided
-        - config: Dictionary containing column-specific configurations
-        - rows: Number of rows to generate
-        """
-        self.spark = spark
-        self.input_data = input_data
-        self.input_schema = input_schema if input_schema else input_data.schema if input_data else None
-        self.config = config if config else {}
-        self.rows = rows
-        self.string_columns = []
-        self.data_generator = None
+# Path to your input data file (CSV format)
+input_file_path = "/path/to/your/data/input_data.csv"
 
-        if not self.input_schema:
-            raise ValueError("Either input_data or input_schema must be provided.")
+# Read data from the file
+try:
+    input_data = spark.read.format("csv") \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .load(input_file_path)
+    print("Input data schema:")
+    input_data.printSchema()
+except Exception as e:
+    print(f"Error reading input data: {e}")
+    spark.stop()
+    sys.exit(1)
 
-        self._identify_string_columns()
-        self._initialize_data_generator()
+# Get the schema from the input data
+input_schema = input_data.schema
 
-    def _identify_string_columns(self):
-        """Identify string columns in the schema."""
-        self.string_columns = [field.name for field in self.input_schema.fields if isinstance(field.dataType, StringType)]
+# Identify string columns
+string_columns = [field.name for field in input_schema.fields if str(field.dataType) == 'StringType']
 
-    def _initialize_data_generator(self):
-        """Initialize the DataGenerator with the input schema."""
-        self.data_generator = dg.DataGenerator(
-            sparkSession=self.spark,
-            name="synthetic_data",
-            rows=self.rows,
-            schema=self.input_schema
-        )
+# Initialize the DataGenerator with the input schema
+data_generator = dg.DataGenerator(sparkSession=spark, name="synthetic_data", rows=10000, schema=input_schema)
 
-    def _configure_string_columns(self):
-        """Configure data generation for string columns."""
-        if not self.input_data:
-            # If no input data is provided, generate random string values
-            for col_name in self.string_columns:
-                col_config = self.config.get(col_name, {})
-                self.data_generator = self.data_generator.withColumnSpec(
-                    col_name,
-                    **col_config.get('generation_params', {'prefix': f"{col_name}_", 'random': True})
-                )
-            return
+# For string columns, extract actual values and use them in data generation
+for col_name in string_columns:
+    # Collect unique values and their frequencies
+    value_counts = input_data.groupBy(col_name).count()
+    total_count = input_data.count()
 
-        for col_name in self.string_columns:
-            col_config = self.config.get(col_name, {})
-            # Use actual values from input data
-            value_counts = self.input_data.groupBy(col_name).count()
-            total_count = self.input_data.count()
+    # Collect values and their probabilities
+    value_prob_df = value_counts.withColumn('probability', col('count') / total_count)
+    value_prob_list = value_prob_df.select(col_name, 'probability').collect()
 
-            value_prob_df = value_counts.withColumn('probability', col('count') / total_count)
-            value_prob_list = value_prob_df.select(col_name, 'probability').collect()
+    # Prepare lists of values and weights
+    values_list = []
+    weights_list = []
+    for row in value_prob_list:
+        value = row[col_name]
+        probability = row['probability']
+        if value is not None:
+            values_list.append(value)
+            weights_list.append(probability)
 
-            values_list = []
-            weights_list = []
-            for row in value_prob_list:
-                value = row[col_name]
-                probability = row['probability']
-                if value is not None:
-                    values_list.append(value)
-                    weights_list.append(probability)
+    # Configure data generator to use these values and weights
+    if values_list:
+        data_generator = data_generator.withColumnSpec(col_name, values=values_list, weights=weights_list, random=True)
+    else:
+        # If no values are available, handle accordingly
+        data_generator = data_generator.withColumnSpec(col_name, prefix="Value_", random=True)
 
-            if values_list:
-                self.data_generator = self.data_generator.withColumnSpec(
-                    col_name,
-                    values=values_list,
-                    weights=weights_list,
-                    random=True,
-                    **col_config.get('generation_params', {})
-                )
-            else:
-                self.data_generator = self.data_generator.withColumnSpec(
-                    col_name,
-                    prefix=f"{col_name}_",
-                    random=True,
-                    **col_config.get('generation_params', {})
-                )
+# Customize data generation for non-string columns (e.g., integers, dates)
+# Example for integer and date columns
+for field in input_schema.fields:
+    col_name = field.name
+    data_type = str(field.dataType)
+    if col_name not in string_columns:
+        if data_type == 'IntegerType' or data_type == 'LongType':
+            data_generator = data_generator.withColumnSpec(col_name, minValue=1, maxValue=1000, random=True)
+        elif data_type == 'DoubleType' or data_type == 'FloatType':
+            data_generator = data_generator.withColumnSpec(col_name, minValue=0.0, maxValue=100.0, random=True)
+        elif data_type == 'DateType' or data_type == 'TimestampType':
+            data_generator = data_generator.withColumnSpec(col_name, begin="2015-01-01", end="2021-12-31", random=True)
+        # Add other data types as needed
 
-    def _configure_non_string_columns(self):
-        """Configure data generation for non-string columns."""
-        for field in self.input_schema.fields:
-            col_name = field.name
-            data_type = field.dataType
-            if col_name in self.string_columns:
-                continue
+# Generate the data
+try:
+    generated_data = data_generator.build()
+    print("Generated data sample:")
+    generated_data.show(5)
+except Exception as e:
+    print(f"Error generating data: {e}")
+    spark.stop()
+    sys.exit(1)
 
-            col_config = self.config.get(col_name, {})
-            generation_params = col_config.get('generation_params', {'random': True})
+# Write the generated data to a CSV file
+output_file_path = "/path/to/your/data/generated_data.csv"
+try:
+    generated_data.write.format("csv") \
+        .option("header", "true") \
+        .mode("overwrite") \
+        .save(output_file_path)
+    print(f"Generated data saved to: {output_file_path}")
+except Exception as e:
+    print(f"Error writing generated data to file: {e}")
+    spark.stop()
+    sys.exit(1)
 
-            if isinstance(data_type, (IntegerType, LongType)):
-                default_params = {'minValue': 1, 'maxValue': 1000}
-            elif isinstance(data_type, (DoubleType, FloatType)):
-                default_params = {'minValue': 0.0, 'maxValue': 100.0}
-            elif isinstance(data_type, (DateType, TimestampType)):
-                default_params = {'begin': "2015-01-01", 'end': "2021-12-31"}
-            else:
-                # For other data types, you can define default behavior or skip
-                continue
-
-            # Merge default_params with any user-provided params
-            final_params = {**default_params, **generation_params}
-
-            self.data_generator = self.data_generator.withColumnSpec(col_name, **final_params)
-
-    def configure_data_generator(self):
-        """Configure data generator for all columns."""
-        self._configure_string_columns()
-        self._configure_non_string_columns()
-
-    def generate_data(self):
-        """Generate synthetic data."""
-        if not self.data_generator:
-            raise RuntimeError("Data generator is not initialized.")
-        try:
-            synthetic_data = self.data_generator.build()
-            return synthetic_data
-        except Exception as e:
-            print(f"Error generating data: {e}")
-            self.spark.stop()
-            sys.exit(1)
-
-    def save_data(self, data, output_path, format="csv", options=None):
-        """Save the generated data to a file.
-
-        Parameters:
-        - data: Spark DataFrame containing the synthetic data
-        - output_path: Path to save the data
-        - format: File format (default: "csv")
-        - options: Dictionary of write options
-        """
-        options = options if options else {}
-        try:
-            data.write.format(format) \
-                .options(**options) \
-                .mode("overwrite") \
-                .save(output_path)
-            print(f"Generated data saved to: {output_path}")
-        except Exception as e:
-            print(f"Error writing generated data to file: {e}")
-            self.spark.stop()
-            sys.exit(1)
+# Stop the Spark session
+spark.stop()
