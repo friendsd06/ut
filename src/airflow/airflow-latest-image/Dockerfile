@@ -71,3 +71,5 @@ RUN chmod +x /entrypoint.sh
 
 # Set the entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
+
+docker run --rm --entrypoint airflow my-airflow-image airflow db init
