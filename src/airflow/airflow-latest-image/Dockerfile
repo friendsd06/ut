@@ -73,3 +73,16 @@ RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 
 docker run --rm --entrypoint airflow my-airflow-image airflow db init
+
+
+#!/bin/bash
+
+# Initialize the Airflow database
+airflow db init
+
+# Start the scheduler in the background
+airflow scheduler &
+
+# Start the webserver in the foreground (so Docker keeps running)
+exec airflow webserver
+
