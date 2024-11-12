@@ -1,0 +1,6 @@
+Data-Aware Scheduling with Datasets. This example will demonstrate how to set up three ingestion DAGs and an enrichment DAG that triggers only after all three ingestion DAGs have successfully completed.
+
+Overview
+Define Datasets: Represent the output of each ingestion job.
+Create Ingestion DAGs: Each ingestion DAG will perform its task and produce its respective Dataset.
+Create Enrichment DAG: This DAG will be scheduled based on the completion of all three ingestion Datasets.
