@@ -58,3 +58,16 @@ docker run --rm \
     -v airflow_data:/opt/airflow/airflow.db \
     my-airflow-image \
     airflow db init
+
+
+#!/bin/bash
+airflow db init
+exec airflow "$@"
+
+
+# Copy the entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
