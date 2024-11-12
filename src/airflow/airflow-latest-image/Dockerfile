@@ -86,3 +86,7 @@ airflow scheduler &
 # Start the webserver in the foreground (so Docker keeps running)
 exec airflow webserver
 
+#!/bin/bash
+
+echo "PATH is: $PATH"
+
