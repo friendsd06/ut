@@ -7,7 +7,7 @@ ENV AIRFLOW_VERSION=2.9.2
 ENV PYTHON_VERSION=3.9
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libssl-dev \
     libffi-dev \
@@ -20,15 +20,26 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip and install Airflow dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install Apache Airflow and necessary providers and Celery support
-RUN pip install "apache-airflow[celery,postgres]==${AIRFLOW_VERSION}" \
+# Install Apache Airflow and necessary providers with constraints
+RUN pip install --no-cache-dir \
+    "apache-airflow[celery,postgres]==${AIRFLOW_VERSION}" \
     apache-airflow-providers-postgres \
     apache-airflow-providers-amazon \
     apache-airflow-providers-google \
-    apache-airflow-providers-docker
+    apache-airflow-providers-docker \
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
 
 # Create necessary directories
 RUN mkdir -p ${AIRFLOW_HOME}/dags ${AIRFLOW_HOME}/logs ${AIRFLOW_HOME}/plugins
+
+# Create an airflow user
+RUN useradd -ms /bin/bash airflow
+
+# Change ownership to airflow user
+RUN chown -R airflow: ${AIRFLOW_HOME}
+
+# Switch to airflow user
+USER airflow
 
 # Set the working directory
 WORKDIR ${AIRFLOW_HOME}
@@ -38,3 +49,4 @@ EXPOSE 8080
 
 # Set the entrypoint for Airflow
 ENTRYPOINT ["airflow"]
+CMD ["webserver"]
