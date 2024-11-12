@@ -50,3 +50,11 @@ EXPOSE 8080
 # Set the entrypoint for Airflow
 ENTRYPOINT ["airflow"]
 CMD ["webserver"]
+
+
+# Initialize the Airflow database
+docker run --rm \
+    -e AIRFLOW__CORE__LOAD_EXAMPLES=False \
+    -v airflow_data:/opt/airflow/airflow.db \
+    my-airflow-image \
+    airflow db init
