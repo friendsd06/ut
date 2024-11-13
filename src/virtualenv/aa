@@ -2,27 +2,31 @@
 $PROJECT_NAME = "my_project"
 
 # Create the main project directory
-mkdir $PROJECT_NAME
-cd $PROJECT_NAME
+New-Item -ItemType Directory -Path $PROJECT_NAME
+Set-Location -Path $PROJECT_NAME
 
 # Create primary directories and files
-mkdir -p "src\$PROJECT_NAME\$PROJECT_NAME\subpackage" "tests" "docs"
-ni README.md -Force
-ni .gitignore -Force
-ni requirements.txt -Force
-ni pyproject.toml -Force
-ni setup.cfg -Force
+New-Item -ItemType Directory -Path "src\$PROJECT_NAME\$PROJECT_NAME\subpackage" -Force
+New-Item -ItemType Directory -Path "tests" -Force
+New-Item -ItemType Directory -Path "docs" -Force
 
-# Create Python package __init__.py files
-ni "src\$PROJECT_NAME\__init__.py" -Force
-ni "src\$PROJECT_NAME\main.py" -Force
-ni "src\$PROJECT_NAME\$PROJECT_NAME\__init__.py" -Force
-ni "src\$PROJECT_NAME\$PROJECT_NAME\subpackage\__init__.py" -Force
-ni "src\$PROJECT_NAME\$PROJECT_NAME\subpackage\module.py" -Force
+# Create README, .gitignore, requirements.txt, pyproject.toml, and setup.cfg files
+New-Item -ItemType File -Path "README.md" -Force | Out-Null
+New-Item -ItemType File -Path ".gitignore" -Force | Out-Null
+New-Item -ItemType File -Path "requirements.txt" -Force | Out-Null
+New-Item -ItemType File -Path "pyproject.toml" -Force | Out-Null
+New-Item -ItemType File -Path "setup.cfg" -Force | Out-Null
 
-# Create a sample test file
-ni "tests\test_main.py" -Force
-ni "tests\test_subpackage.py" -Force
+# Create Python package __init__.py files and main.py
+New-Item -ItemType File -Path "src\$PROJECT_NAME\__init__.py" -Force | Out-Null
+New-Item -ItemType File -Path "src\$PROJECT_NAME\main.py" -Force | Out-Null
+New-Item -ItemType File -Path "src\$PROJECT_NAME\$PROJECT_NAME\__init__.py" -Force | Out-Null
+New-Item -ItemType File -Path "src\$PROJECT_NAME\$PROJECT_NAME\subpackage\__init__.py" -Force | Out-Null
+New-Item -ItemType File -Path "src\$PROJECT_NAME\$PROJECT_NAME\subpackage\module.py" -Force | Out-Null
+
+# Create sample test files
+New-Item -ItemType File -Path "tests\test_main.py" -Force | Out-Null
+New-Item -ItemType File -Path "tests\test_subpackage.py" -Force | Out-Null
 
 # Initialize a Git repository
 git init
@@ -37,15 +41,13 @@ __pycache__/
 # Create a virtual environment in the project directory
 python -m venv venv
 
-# Activate the virtual environment (for Windows)
-.\venv\Scripts\activate
-
-# Install basic dependencies and freeze them into requirements.txt
+# Activate the virtual environment and install dependencies
+& .\venv\Scripts\Activate
 pip install --upgrade pip
 pip install pytest
 pip freeze > requirements.txt
 
-# Add virtual environment instructions to README.md
+# Add virtual environment setup instructions to README.md
 @"
 ## Setting up the virtual environment
 
