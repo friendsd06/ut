@@ -1,0 +1,8 @@
+-- Connect to the airflow database and create a demo table
+CREATE TABLE IF NOT EXISTS demo (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
