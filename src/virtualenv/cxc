@@ -1,4 +1,4 @@
-# Windows Python Project Setup Script with Error Handling
+# Windows Python Project Setup Script with Code Implementation
 param(
     [string]$projectName = "dag_generator",
     [string]$pythonVersion = "3.9"
@@ -7,49 +7,6 @@ param(
 function Write-Step {
     param([string]$message)
     Write-Host "`n=== $message ===" -ForegroundColor Cyan
-}
-
-function Test-CommandExists {
-    param([string]$command)
-    $oldPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'stop'
-    try {
-        if (Get-Command $command) { return $true }
-    } catch {
-        return $false
-    } finally {
-        $ErrorActionPreference = $oldPreference
-    }
-}
-
-function Find-Python {
-    # Check common Python installation paths
-    $pythonPaths = @(
-        "C:\Python39\python.exe",
-        "C:\Python310\python.exe",
-        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python39\python.exe",
-        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python310\python.exe",
-        "${env:ProgramFiles}\Python39\python.exe",
-        "${env:ProgramFiles}\Python310\python.exe",
-        "${env:ProgramFiles(x86)}\Python39\python.exe",
-        "${env:ProgramFiles(x86)}\Python310\python.exe"
-    )
-
-    foreach ($path in $pythonPaths) {
-        if (Test-Path $path) {
-            return $path
-        }
-    }
-
-    # Check if Python is in PATH
-    if (Test-CommandExists "python") {
-        return "python"
-    }
-    if (Test-CommandExists "py") {
-        return "py"
-    }
-
-    return $null
 }
 
 function Create-PyFile {
@@ -65,50 +22,229 @@ function Create-PyFile {
     }
 }
 
-# Check for Python installation
-Write-Step "Checking Python installation"
-$pythonCmd = Find-Python
-if ($null -eq $pythonCmd) {
-    Write-Host "Python not found! Please install Python 3.8 or later from python.org" -ForegroundColor Red
-    Write-Host "After installing Python:"
-    Write-Host "1. Make sure to check 'Add Python to PATH' during installation"
-    Write-Host "2. Restart PowerShell"
-    Write-Host "3. Run this script again"
-    exit 1
+# Python file contents
+$applicationGeneratorContent = @"
+from typing import Dict, Any, Optional
+from core.domain.models import DagTemplate
+from infrastructure.templating.jinja_engine import JinjaTemplateEngine
+
+class DagGenerator:
+    def __init__(self):
+        self.template_engine = JinjaTemplateEngine()
+        self.template: Optional[DagTemplate] = None
+
+    def set_template(self, template: DagTemplate) -> None:
+        self.template = template
+
+    def generate_dag(self, context: Dict[str, Any]) -> str:
+        if not self.template:
+            raise ValueError("Template not set")
+        return self.template_engine.render(self.template, context)
+"@
+
+$domainModelsContent = @"
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+
+@dataclass
+class DagTemplate:
+    name: str
+    content: str
+    parameters: Optional[List[str]] = None
+
+    def validate(self) -> bool:
+        """Validate template basic requirements"""
+        return bool(self.name and self.content)
+
+    def get_parameter_defaults(self) -> Dict[str, Any]:
+        """Get default parameters if any"""
+        return {param: None for param in (self.parameters or [])}
+"@
+
+$domainExceptionsContent = @"
+class DagGeneratorError(Exception):
+    """Base exception for DAG generator errors"""
+    pass
+
+class TemplateNotFoundError(DagGeneratorError):
+    """Raised when template is not found"""
+    pass
+
+class ValidationError(DagGeneratorError):
+    """Raised when validation fails"""
+    pass
+"@
+
+$jinjaEngineContent = @"
+from typing import Dict, Any
+from jinja2 import Template
+from core.domain.models import DagTemplate
+from core.domain.exceptions import ValidationError
+
+class JinjaTemplateEngine:
+    def render(self, template: DagTemplate, context: Dict[str, Any]) -> str:
+        if not template.validate():
+            raise ValidationError("Invalid template")
+
+        jinja_template = Template(template.content)
+        return jinja_template.render(**context)
+"@
+
+$localStorageContent = @"
+import os
+from typing import Optional
+from core.domain.models import DagTemplate
+from core.domain.exceptions import TemplateNotFoundError
+
+class LocalStorage:
+    def __init__(self, base_path: str = "templates"):
+        self.base_path = base_path
+        os.makedirs(base_path, exist_ok=True)
+
+    def save_template(self, template: DagTemplate) -> None:
+        file_path = os.path.join(self.base_path, f"{template.name}.j2")
+        with open(file_path, 'w') as f:
+            f.write(template.content)
+
+    def load_template(self, template_name: str) -> DagTemplate:
+        file_path = os.path.join(self.base_path, f"{template_name}.j2")
+        if not os.path.exists(file_path):
+            raise TemplateNotFoundError(f"Template {template_name} not found")
+
+        with open(file_path, 'r') as f:
+            content = f.read()
+        return DagTemplate(name=template_name, content=content)
+"@
+
+$testModelsContent = @"
+import pytest
+from core.domain.models import DagTemplate
+
+def test_dag_template_validation():
+    # Valid template
+    template = DagTemplate(
+        name="test_dag",
+        content="some content",
+        parameters=["param1"]
+    )
+    assert template.validate() is True
+
+    # Invalid template
+    invalid_template = DagTemplate(
+        name="",
+        content="",
+        parameters=[]
+    )
+    assert invalid_template.validate() is False
+
+def test_template_parameter_defaults():
+    template = DagTemplate(
+        name="test_dag",
+        content="content",
+        parameters=["param1", "param2"]
+    )
+    defaults = template.get_parameter_defaults()
+    assert defaults == {"param1": None, "param2": None}
+"@
+
+$testJinjaEngineContent = @"
+import pytest
+from infrastructure.templating.jinja_engine import JinjaTemplateEngine
+from core.domain.models import DagTemplate
+from core.domain.exceptions import ValidationError
+
+def test_jinja_template_rendering():
+    engine = JinjaTemplateEngine()
+    template = DagTemplate(
+        name="test",
+        content="Hello {{ name }}!",
+        parameters=["name"]
+    )
+
+    result = engine.render(template, {"name": "World"})
+    assert result == "Hello World!"
+
+def test_invalid_template_rendering():
+    engine = JinjaTemplateEngine()
+    template = DagTemplate(name="", content="")
+
+    with pytest.raises(ValidationError):
+        engine.render(template, {})
+"@
+
+$testIntegrationContent = @"
+import pytest
+from application.services.generator import DagGenerator
+from core.domain.models import DagTemplate
+
+def test_complete_dag_generation():
+    # Setup
+    generator = DagGenerator()
+    template = DagTemplate(
+        name="test_dag",
+        content='''
+        from airflow import DAG
+        from datetime import datetime
+
+        dag = DAG(
+            '{{ dag_id }}',
+            start_date=datetime({{ year }}, {{ month }}, {{ day }})
+        )
+        ''',
+        parameters=["dag_id", "year", "month", "day"]
+    )
+
+    # Test
+    generator.set_template(template)
+    context = {
+        "dag_id": "test_dag_1",
+        "year": 2024,
+        "month": 1,
+        "day": 1
+    }
+
+    result = generator.generate_dag(context)
+    assert "test_dag_1" in result
+    assert "datetime(2024, 1, 1)" in result
+"@
+
+$confTestContent = @"
+import pytest
+import os
+import tempfile
+
+@pytest.fixture
+def temp_dir():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        old_pwd = os.getcwd()
+        os.chdir(tmpdirname)
+        yield tmpdirname
+        os.chdir(old_pwd)
+"@
+
+# Directory structure with content mapping
+$contentMapping = @{
+    "application/services/generator.py" = $applicationGeneratorContent
+    "application/services/__init__.py" = ""
+    "application/__init__.py" = ""
+    "core/domain/models.py" = $domainModelsContent
+    "core/domain/exceptions.py" = $domainExceptionsContent
+    "core/domain/__init__.py" = ""
+    "core/ports/__init__.py" = ""
+    "core/__init__.py" = ""
+    "infrastructure/templating/jinja_engine.py" = $jinjaEngineContent
+    "infrastructure/templating/__init__.py" = ""
+    "infrastructure/storage/local_storage.py" = $localStorageContent
+    "infrastructure/storage/__init__.py" = ""
+    "infrastructure/__init__.py" = ""
+    "tests/unit/test_models.py" = $testModelsContent
+    "tests/unit/test_jinja_engine.py" = $testJinjaEngineContent
+    "tests/unit/__init__.py" = ""
+    "tests/integration/test_dag_generation.py" = $testIntegrationContent
+    "tests/integration/__init__.py" = ""
+    "tests/conftest.py" = $confTestContent
+    "tests/__init__.py" = ""
 }
-
-# Verify Python version
-$pythonVersion = & $pythonCmd --version 2>&1
-Write-Host "Found Python: $pythonVersion"
-
-# Project structure definition
-$structure = @(
-    "application/services/__init__.py",
-    "application/services/generator.py",
-    "application/__init__.py",
-    "core/domain/__init__.py",
-    "core/domain/exceptions.py",
-    "core/domain/models.py",
-    "core/ports/__init__.py",
-    "core/examples/sql/__init__.py",
-    "core/examples/sql/init_db.sql",
-    "core/examples/sql/sample_data.sql",
-    "core/examples/templates/dag.pyj2",
-    "core/examples/templates/python-operator.j2",
-    "generated_dags/__init__.py",
-    "infrastructure/persistence/__init__.py",
-    "infrastructure/persistence/sqlite_repository.py",
-    "infrastructure/storage/__init__.py",
-    "infrastructure/storage/local_storage.py",
-    "infrastructure/templating/__init__.py",
-    "infrastructure/templating/jinja_engine.py",
-    "infrastructure/__init__.py",
-    "templates/python_operator.j2",
-    "test-template/bashTest.py",
-    "tests/__init__.py",
-    "tests/unit/__init__.py",
-    "tests/integration/__init__.py"
-)
 
 try {
     # Create project directory
@@ -116,39 +252,27 @@ try {
     New-Item -ItemType Directory -Path $projectName -Force
     Set-Location $projectName
 
-    # Create directories and files
-    foreach ($path in $structure) {
-        $fullPath = Join-Path $PWD $path
+    # Create files with content
+    foreach ($filePath in $contentMapping.Keys) {
+        $fullPath = Join-Path $PWD $filePath
         $directory = Split-Path -Parent $fullPath
 
         if (-not (Test-Path $directory)) {
             New-Item -ItemType Directory -Path $directory -Force
         }
-        Create-PyFile -path $fullPath
+        Create-PyFile -path $fullPath -content $contentMapping[$filePath]
     }
 
-    # Create setup.py
-    $setupPyContent = @"
-from setuptools import setup, find_packages
+    # Create virtual environment
+    Write-Step "Creating virtual environment"
+    python -m venv venv
 
-setup(
-    name='$projectName',
-    version='0.1.0',
-    packages=find_packages(),
-    install_requires=[
-        'pytest',
-        'black',
-        'flake8',
-        'mypy',
-        'jinja2'
-    ],
-    python_requires='>=3.8',
-)
-"@
-    Create-PyFile -path "setup.py" -content $setupPyContent
+    # Activate virtual environment
+    Write-Step "Activating virtual environment"
+    & .\venv\Scripts\Activate.ps1
 
-    # Create requirements file
-    Create-PyFile -path "requirements-dev.txt" -content @"
+    # Create and update requirements.txt
+    $requirementsContent = @"
 pytest>=7.0.0
 pytest-cov>=4.0.0
 black>=23.0.0
@@ -156,80 +280,40 @@ flake8>=6.0.0
 mypy>=1.0.0
 jinja2>=3.0.0
 "@
-
-    # Create virtual environment
-    Write-Step "Creating virtual environment"
-    & $pythonCmd -m venv venv
-
-    # Activate virtual environment
-    Write-Step "Activating virtual environment"
-    $activateScript = ".\venv\Scripts\Activate.ps1"
-    if (Test-Path $activateScript) {
-        & $activateScript
-    } else {
-        Write-Host "Virtual environment activation script not found at: $activateScript" -ForegroundColor Red
-        exit 1
-    }
+    Create-PyFile -path "requirements.txt" -content $requirementsContent
 
     # Install dependencies
     Write-Step "Installing dependencies"
-    $pipCmd = ".\venv\Scripts\pip.exe"
-    if (Test-Path $pipCmd) {
-        & $pipCmd install --upgrade pip
-        & $pipCmd install -r requirements-dev.txt
-        & $pipCmd install -e .
-        & $pipCmd freeze > requirements.txt
-    } else {
-        Write-Host "pip not found in virtual environment" -ForegroundColor Red
-        exit 1
-    }
-
-    # Add example code
-    $generatorPyContent = @"
-from typing import Dict, Any
-
-class DagGenerator:
-    def __init__(self):
-        self.template_path = None
-
-    def set_template(self, template_path: str) -> None:
-        self.template_path = template_path
-
-    def generate_dag(self, context: Dict[str, Any]) -> str:
-        # Add your DAG generation logic here
-        pass
-"@
-    Create-PyFile -path "application/services/generator.py" -content $generatorPyContent
+    & .\venv\Scripts\pip.exe install --upgrade pip
+    & .\venv\Scripts\pip.exe install -r requirements.txt
 
     Write-Step "Project setup completed successfully!"
     Write-Host @"
 
-Your project is ready! Here's what you need to know:
+Your project is ready! Here's what you can do:
 
-1. Your virtual environment is activated
-   - You'll see '(venv)' in your prompt
-   - To deactivate, run: 'deactivate'
-   - To reactivate later, run: '.\venv\Scripts\Activate.ps1'
+1. Run the tests:
+   .\venv\Scripts\pytest.exe tests\
 
-2. Start developing:
-   - Open the project in your IDE
-   - Run '.\venv\Scripts\pytest.exe tests/' for testing
+2. Project structure created with:
+   - Application layer (DagGenerator)
+   - Core domain (models and exceptions)
+   - Infrastructure (templating and storage)
+   - Complete test suite
 
-3. Common issues:
-   - If Python commands aren't recognized, restart PowerShell
-   - Make sure Python is added to your PATH
-   - Use '.\venv\Scripts\python.exe' for Python commands
-   - Use '.\venv\Scripts\pip.exe' for pip commands
+3. Virtual environment is activated
+   - To deactivate: deactivate
+   - To reactivate later: .\venv\Scripts\Activate.ps1
 
-The project structure is ready for development!
+4. Dependencies installed:
+   - pytest for testing
+   - jinja2 for templating
+   - Development tools (black, flake8, mypy)
+
+The project is ready for development!
 "@ -ForegroundColor Green
 
 } catch {
-    Write-Host "An error occurred during setup: $_" -ForegroundColor Red
-    Write-Host "Tips to resolve common issues:" -ForegroundColor Yellow
-    Write-Host "1. Make sure Python is installed and added to PATH"
-    Write-Host "2. Run PowerShell as Administrator"
-    Write-Host "3. Try running 'Set-ExecutionPolicy RemoteSigned' in PowerShell as Administrator"
-    Write-Host "4. Make sure you have write permissions in the current directory"
+    Write-Host "An error occurred: $_" -ForegroundColor Red
     exit 1
 }
