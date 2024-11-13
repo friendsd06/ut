@@ -66,3 +66,63 @@ Supports integration with tools like Slack or PagerDuty for efficient incident m
 Benefits:
 
 By using these features, Astronomer enhances the monitoring experience for multiple executions of the same DAG, making it easier to observe and operate workflows effectively.
+
+Astronomer's Enhanced Monitoring over Apache Airflow:
+
+Real-Time Metrics and Dashboards:
+
+Customizable dashboards with real-time DAG and task metrics.
+Monitor resource utilization (CPU, memory, disk).
+Check cluster health (scheduler and worker statuses).
+Centralized Logging:
+
+Aggregate logs from all Airflow components in one place.
+Advanced log search and filtering options.
+Set log retention policies as needed.
+Kubernetes and Infrastructure Monitoring:
+
+Visibility into Kubernetes pods, nodes, and cluster health.
+Monitor auto-scaling activities.
+Track network and storage performance metrics.
+Integration with External Monitoring Tools:
+
+Integrate with Prometheus and Grafana for advanced metrics.
+Support for tools like Datadog, New Relic, and Splunk.
+APIs available for custom monitoring solutions.
+Enhanced Alerting and Notifications:
+
+Create custom alert rules for specific events or metrics.
+Receive notifications via email, Slack, PagerDuty, etc.
+Integrate with incident management systems.
+Audit Logs and Compliance Monitoring:
+
+Track user activities within the Airflow environment.
+Generate compliance reports (e.g., GDPR, HIPAA).
+Monitor security with access logs and unauthorized access detection.
+SLA Monitoring and Reporting:
+
+Automatically detect SLA breaches in tasks and DAGs.
+Analyze historical data for trends affecting SLAs.
+Define and monitor custom SLAs.
+Anomaly Detection and Insights:
+
+Receive alerts on unusual patterns or anomalies.
+Get performance optimization recommendations.
+Utilize machine learning for predictive issue detection.
+Enhanced DAG and Task Management Views:
+
+Access detailed execution reports.
+Visualize tasks with timelines and Gantt charts.
+Compare different DAG runs to identify issues.
+Role-Based Access Control Monitoring:
+
+Audit user permissions and access levels.
+Maintain access logs for security compliance.
+Monitor user activity metrics.
+Benefits:
+
+Improved Troubleshooting: Quick issue resolution with comprehensive logs and metrics.
+Optimized Performance: Fine-tune workflows based on detailed performance data.
+Increased Reliability: Proactive alerts and anomaly detection enhance stability.
+Enhanced Security and Compliance: Robust monitoring supports strict security protocols.
+Scalable Operations: Efficiently manage growing data pipelines and teams
