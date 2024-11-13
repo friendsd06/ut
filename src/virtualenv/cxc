@@ -1,4 +1,4 @@
-# Windows-Specific Python Project Setup Script
+# Windows Python Project Setup Script with Error Handling
 param(
     [string]$projectName = "dag_generator",
     [string]$pythonVersion = "3.9"
@@ -7,6 +7,49 @@ param(
 function Write-Step {
     param([string]$message)
     Write-Host "`n=== $message ===" -ForegroundColor Cyan
+}
+
+function Test-CommandExists {
+    param([string]$command)
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'stop'
+    try {
+        if (Get-Command $command) { return $true }
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+}
+
+function Find-Python {
+    # Check common Python installation paths
+    $pythonPaths = @(
+        "C:\Python39\python.exe",
+        "C:\Python310\python.exe",
+        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python39\python.exe",
+        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python310\python.exe",
+        "${env:ProgramFiles}\Python39\python.exe",
+        "${env:ProgramFiles}\Python310\python.exe",
+        "${env:ProgramFiles(x86)}\Python39\python.exe",
+        "${env:ProgramFiles(x86)}\Python310\python.exe"
+    )
+
+    foreach ($path in $pythonPaths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+
+    # Check if Python is in PATH
+    if (Test-CommandExists "python") {
+        return "python"
+    }
+    if (Test-CommandExists "py") {
+        return "py"
+    }
+
+    return $null
 }
 
 function Create-PyFile {
@@ -21,6 +64,22 @@ function Create-PyFile {
         }
     }
 }
+
+# Check for Python installation
+Write-Step "Checking Python installation"
+$pythonCmd = Find-Python
+if ($null -eq $pythonCmd) {
+    Write-Host "Python not found! Please install Python 3.8 or later from python.org" -ForegroundColor Red
+    Write-Host "After installing Python:"
+    Write-Host "1. Make sure to check 'Add Python to PATH' during installation"
+    Write-Host "2. Restart PowerShell"
+    Write-Host "3. Run this script again"
+    exit 1
+}
+
+# Verify Python version
+$pythonVersion = & $pythonCmd --version 2>&1
+Write-Host "Found Python: $pythonVersion"
 
 # Project structure definition
 $structure = @(
@@ -51,8 +110,25 @@ $structure = @(
     "tests/integration/__init__.py"
 )
 
-# Configuration files content
-$setupPyContent = @"
+try {
+    # Create project directory
+    Write-Step "Creating project directory structure"
+    New-Item -ItemType Directory -Path $projectName -Force
+    Set-Location $projectName
+
+    # Create directories and files
+    foreach ($path in $structure) {
+        $fullPath = Join-Path $PWD $path
+        $directory = Split-Path -Parent $fullPath
+
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force
+        }
+        Create-PyFile -path $fullPath
+    }
+
+    # Create setup.py
+    $setupPyContent = @"
 from setuptools import setup, find_packages
 
 setup(
@@ -69,88 +145,10 @@ setup(
     python_requires='>=3.8',
 )
 "@
+    Create-PyFile -path "setup.py" -content $setupPyContent
 
-$readmeContent = @"
-# $projectName
-
-## Windows Setup Instructions
-
-1. Create virtual environment:
-   ```
-   python -m venv venv
-   ```
-
-2. Activate virtual environment:
-   ```
-   .\venv\Scripts\Activate
-   ```
-
-3. Install dependencies:
-   ```
-   pip install -e .
-   ```
-
-## Project Structure
-$projectName/
-├── application/          # Application layer
-├── core/                # Core business logic
-├── infrastructure/      # Infrastructure components
-├── templates/           # Template files
-├── tests/              # Test directory
-└── generated_dags/     # Generated DAG files
-
-## Testing
-Run tests using pytest:
-```
-pytest tests/
-```
-
-## Exit Virtual Environment
-To exit the virtual environment:
-```
-deactivate
-```
-"@
-
-$pyprojectTomlContent = @"
-[build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = "-v --cov=./ --cov-report=html"
-
-[tool.black]
-line-length = 88
-include = '\.pyi?$'
-"@
-
-# Main script execution
-Write-Step "Creating project directory structure"
-New-Item -ItemType Directory -Path $projectName -Force
-Set-Location $projectName
-
-# Create directory structure and files
-foreach ($path in $structure) {
-    $fullPath = Join-Path $PWD $path
-    $directory = Split-Path -Parent $fullPath
-
-    if (-not (Test-Path $directory)) {
-        New-Item -ItemType Directory -Path $directory -Force
-    }
-    Create-PyFile -path $fullPath
-}
-
-# Create configuration files
-Write-Step "Creating configuration files"
-Create-PyFile -path "setup.py" -content $setupPyContent
-Create-PyFile -path "README.md" -content $readmeContent
-Create-PyFile -path "pyproject.toml" -content $pyprojectTomlContent
-
-# Create requirements file
-Create-PyFile -path "requirements-dev.txt" -content @"
+    # Create requirements file
+    Create-PyFile -path "requirements-dev.txt" -content @"
 pytest>=7.0.0
 pytest-cov>=4.0.0
 black>=23.0.0
@@ -159,18 +157,35 @@ mypy>=1.0.0
 jinja2>=3.0.0
 "@
 
-Write-Step "Creating virtual environment"
-python -m venv venv
+    # Create virtual environment
+    Write-Step "Creating virtual environment"
+    & $pythonCmd -m venv venv
 
-Write-Step "Activating virtual environment and installing dependencies"
-& .\venv\Scripts\Activate
-python -m pip install --upgrade pip
-pip install -r requirements-dev.txt
-pip install -e .
-pip freeze > requirements.txt
+    # Activate virtual environment
+    Write-Step "Activating virtual environment"
+    $activateScript = ".\venv\Scripts\Activate.ps1"
+    if (Test-Path $activateScript) {
+        & $activateScript
+    } else {
+        Write-Host "Virtual environment activation script not found at: $activateScript" -ForegroundColor Red
+        exit 1
+    }
 
-# Add example code
-$generatorPyContent = @"
+    # Install dependencies
+    Write-Step "Installing dependencies"
+    $pipCmd = ".\venv\Scripts\pip.exe"
+    if (Test-Path $pipCmd) {
+        & $pipCmd install --upgrade pip
+        & $pipCmd install -r requirements-dev.txt
+        & $pipCmd install -e .
+        & $pipCmd freeze > requirements.txt
+    } else {
+        Write-Host "pip not found in virtual environment" -ForegroundColor Red
+        exit 1
+    }
+
+    # Add example code
+    $generatorPyContent = @"
 from typing import Dict, Any
 
 class DagGenerator:
@@ -184,36 +199,37 @@ class DagGenerator:
         # Add your DAG generation logic here
         pass
 "@
-Create-PyFile -path "application/services/generator.py" -content $generatorPyContent
+    Create-PyFile -path "application/services/generator.py" -content $generatorPyContent
 
-$modelsContent = @"
-from dataclasses import dataclass
-from typing import Optional, List
+    Write-Step "Project setup completed successfully!"
+    Write-Host @"
 
-@dataclass
-class DagTemplate:
-    name: str
-    content: str
-    parameters: Optional[List[str]] = None
-"@
-Create-PyFile -path "core/domain/models.py" -content $modelsContent
+Your project is ready! Here's what you need to know:
 
-Write-Step "Project setup completed successfully!"
-Write-Host @"
+1. Your virtual environment is activated
+   - You'll see '(venv)' in your prompt
+   - To deactivate, run: 'deactivate'
+   - To reactivate later, run: '.\venv\Scripts\Activate.ps1'
 
-Project setup is complete! Here's what you can do next:
+2. Start developing:
+   - Open the project in your IDE
+   - Run '.\venv\Scripts\pytest.exe tests/' for testing
 
-1. Your virtual environment is activated (you'll see '(venv)' in your prompt)
-
-2. To start developing:
-   - Open the project in your preferred IDE
-   - Run 'pytest tests/' to verify the testing setup
-
-3. To exit the virtual environment when you're done:
-   - Run 'deactivate' in the terminal
-
-4. To reactivate the environment later:
-   - Run '.\venv\Scripts\Activate'
+3. Common issues:
+   - If Python commands aren't recognized, restart PowerShell
+   - Make sure Python is added to your PATH
+   - Use '.\venv\Scripts\python.exe' for Python commands
+   - Use '.\venv\Scripts\pip.exe' for pip commands
 
 The project structure is ready for development!
 "@ -ForegroundColor Green
+
+} catch {
+    Write-Host "An error occurred during setup: $_" -ForegroundColor Red
+    Write-Host "Tips to resolve common issues:" -ForegroundColor Yellow
+    Write-Host "1. Make sure Python is installed and added to PATH"
+    Write-Host "2. Run PowerShell as Administrator"
+    Write-Host "3. Try running 'Set-ExecutionPolicy RemoteSigned' in PowerShell as Administrator"
+    Write-Host "4. Make sure you have write permissions in the current directory"
+    exit 1
+}
