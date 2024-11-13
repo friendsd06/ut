@@ -1,0 +1,229 @@
+# Optimized Python Project Setup Script
+param(
+    [string]$projectName = "dag_generator",
+    [string]$pythonVersion = "3.9"
+)
+
+function Write-Step {
+    param([string]$message)
+    Write-Host "`n=== $message ===" -ForegroundColor Cyan
+}
+
+function Create-PyFile {
+    param(
+        [string]$path,
+        [string]$content = ""
+    )
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType File -Path $path -Force
+        if ($content) {
+            Set-Content -Path $path -Value $content
+        }
+    }
+}
+
+# Project structure definition
+$structure = @(
+    "application/services/__init__.py",
+    "application/services/generator.py",
+    "application/__init__.py",
+    "core/domain/__init__.py",
+    "core/domain/exceptions.py",
+    "core/domain/models.py",
+    "core/ports/__init__.py",
+    "core/examples/sql/__init__.py",
+    "core/examples/sql/init_db.sql",
+    "core/examples/sql/sample_data.sql",
+    "core/examples/templates/dag.pyj2",
+    "core/examples/templates/python-operator.j2",
+    "generated_dags/__init__.py",
+    "infrastructure/persistence/__init__.py",
+    "infrastructure/persistence/sqlite_repository.py",
+    "infrastructure/storage/__init__.py",
+    "infrastructure/storage/local_storage.py",
+    "infrastructure/templating/__init__.py",
+    "infrastructure/templating/jinja_engine.py",
+    "infrastructure/__init__.py",
+    "templates/python_operator.j2",
+    "test-template/bashTest.py",
+    "tests/__init__.py",
+    "tests/unit/__init__.py",
+    "tests/integration/__init__.py"
+)
+
+# Additional configuration files
+$setupPyContent = @"
+from setuptools import setup, find_packages
+
+setup(
+    name='$projectName',
+    version='0.1.0',
+    packages=find_packages(),
+    install_requires=[
+        'pytest',
+        'black',
+        'flake8',
+        'mypy',
+        'jinja2'
+    ],
+    python_requires='>=3.8',
+    author='Your Name',
+    author_email='your.email@example.com',
+    description='DAG Generator Project',
+)
+"@
+
+$readmeContent = @"
+# $projectName
+
+## Setup and Installation
+
+1. Create virtual environment:
+   ```
+   python -m venv venv
+   ```
+
+2. Activate virtual environment:
+   - Windows: `.\venv\Scripts\Activate`
+   - Linux/Mac: `source venv/bin/activate`
+
+3. Install dependencies:
+   ```
+   pip install -e .
+   ```
+
+## Project Structure
+
+```
+$projectName/
+├── application/          # Application layer
+├── core/                # Core business logic
+├── infrastructure/      # Infrastructure components
+├── templates/           # Template files
+├── tests/              # Test directory
+└── generated_dags/     # Generated DAG files
+```
+
+## Usage
+[Add usage instructions here]
+
+## Testing
+Run tests using pytest:
+```bash
+pytest tests/
+```
+"@
+
+$pyprojectTomlContent = @"
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=./ --cov-report=html"
+
+[tool.black]
+line-length = 88
+include = '\.pyi?$'
+"@
+
+try {
+    Write-Step "Creating project directory structure"
+    # Create base project directory
+    New-Item -ItemType Directory -Path $projectName -Force
+    Set-Location $projectName
+
+    # Create directory structure and files
+    foreach ($path in $structure) {
+        $fullPath = Join-Path $PWD $path
+        $directory = Split-Path -Parent $fullPath
+
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force
+        }
+        Create-PyFile -path $fullPath
+    }
+
+    # Create configuration files
+    Write-Step "Creating configuration files"
+    Create-PyFile -path "setup.py" -content $setupPyContent
+    Create-PyFile -path "README.md" -content $readmeContent
+    Create-PyFile -path "pyproject.toml" -content $pyprojectTomlContent
+
+    # Create requirements files
+    Create-PyFile -path "requirements-dev.txt" -content @"
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+jinja2>=3.0.0
+"@
+
+    Write-Step "Creating virtual environment"
+    python -m venv venv
+
+    Write-Step "Activating virtual environment and installing dependencies"
+    & .\venv\Scripts\Activate
+    if ($?) {
+        Write-Step "Upgrading pip and installing dependencies"
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        pip freeze > requirements.txt
+
+        # Add example code to key files
+        $generatorPyContent = @"
+from typing import Dict, Any
+
+class DagGenerator:
+    def __init__(self):
+        self.template_path = None
+
+    def set_template(self, template_path: str) -> None:
+        self.template_path = template_path
+
+    def generate_dag(self, context: Dict[str, Any]) -> str:
+        # Add your DAG generation logic here
+        pass
+"@
+        Create-PyFile -path "application/services/generator.py" -content $generatorPyContent
+
+        $modelsContent = @"
+from dataclasses import dataclass
+from typing import Optional, List
+
+@dataclass
+class DagTemplate:
+    name: str
+    content: str
+    parameters: Optional[List[str]] = None
+"@
+        Create-PyFile -path "core/domain/models.py" -content $modelsContent
+
+        Write-Step "Project setup completed successfully!"
+        Write-Host @"
+
+Your project has been set up with:
+- Complete directory structure
+- Virtual environment
+- Development dependencies
+- Testing setup with pytest
+- Code formatting with black
+- Type checking with mypy
+- Basic example code in key files
+
+To get started:
+1. The virtual environment is already activated
+2. Run 'pytest tests/' to verify the testing setup
+3. Start developing in your preferred IDE
+
+Project structure is ready for development!
+"@ -ForegroundColor Green
+    }
+} catch {
+    Write-Host "An error occurred: $_" -ForegroundColor Red
+    exit 1
+}
