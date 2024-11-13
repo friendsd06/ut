@@ -1,67 +1,130 @@
-# Windows Python Project Setup Script with Code Implementation
-param(
-    [string]$projectName = "dag_generator",
-    [string]$pythonVersion = "3.9"
-)
-
-function Write-Step {
-    param([string]$message)
-    Write-Host "`n=== $message ===" -ForegroundColor Cyan
-}
-
-function Create-PyFile {
-    param(
-        [string]$path,
-        [string]$content = ""
-    )
-    if (-not (Test-Path $path)) {
-        New-Item -ItemType File -Path $path -Force
-        if ($content) {
-            Set-Content -Path $path -Value $content -Encoding UTF8
-        }
-    }
-}
-
-# Python file contents
-$applicationGeneratorContent = @"
+# Define all Python file contents first
+$pythonFiles = @{
+    # Config module
+    "infrastructure/config.py" = @"
+from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from core.domain.models import DagTemplate
-from infrastructure.templating.jinja_engine import JinjaTemplateEngine
+import os
+import yaml
 
-class DagGenerator:
-    def __init__(self):
-        self.template_engine = JinjaTemplateEngine()
-        self.template: Optional[DagTemplate] = None
+@dataclass
+class Config:
+    template_dir: str
+    output_dir: str
+    log_level: str
+    default_context: Dict[str, Any]
 
-    def set_template(self, template: DagTemplate) -> None:
-        self.template = template
+class ConfigManager:
+    def __init__(self, config_path: str = "config.yaml"):
+        self.config_path = config_path
+        self.config = self._load_config()
 
-    def generate_dag(self, context: Dict[str, Any]) -> str:
-        if not self.template:
-            raise ValueError("Template not set")
-        return self.template_engine.render(self.template, context)
+    def _load_config(self) -> Config:
+        if not os.path.exists(self.config_path):
+            self._create_default_config()
+
+        with open(self.config_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        return Config(
+            template_dir=data.get('template_dir', 'templates'),
+            output_dir=data.get('output_dir', 'generated_dags'),
+            log_level=data.get('log_level', 'INFO'),
+            default_context=data.get('default_context', {})
+        )
+
+    def _create_default_config(self) -> None:
+        default_config = {
+            'template_dir': 'templates',
+            'output_dir': 'generated_dags',
+            'log_level': 'INFO',
+            'default_context': {
+                'owner': 'airflow',
+                'retries': 1,
+                'retry_delay_minutes': 5
+            }
+        }
+        with open(self.config_path, 'w') as f:
+            yaml.dump(default_config, f, default_flow_style=False)
 "@
 
-$domainModelsContent = @"
+    # Logger module
+    "infrastructure/logger.py" = @"
+import logging
+import sys
+from typing import Optional
+
+class LoggerSetup:
+    @staticmethod
+    def setup(name: str, level: str = "INFO") -> logging.Logger:
+        logger = logging.getLogger(name)
+
+        if not logger.handlers:
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+
+            # Console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+
+            # File handler
+            file_handler = logging.FileHandler('app.log')
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+            logger.setLevel(level.upper())
+
+        return logger
+"@
+
+    # Core domain models
+    "core/domain/models.py" = @"
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 @dataclass
 class DagTemplate:
     name: str
     content: str
     parameters: Optional[List[str]] = None
+    description: Optional[str] = None
+    created_at: datetime = datetime.now()
 
     def validate(self) -> bool:
         """Validate template basic requirements"""
-        return bool(self.name and self.content)
+        if not self.name or not self.content:
+            return False
+        return True
 
     def get_parameter_defaults(self) -> Dict[str, Any]:
         """Get default parameters if any"""
         return {param: None for param in (self.parameters or [])}
+
+@dataclass
+class DagConfig:
+    dag_id: str
+    schedule_interval: str
+    owner: str
+    start_date: datetime
+    description: Optional[str] = None
+    tags: List[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'dag_id': self.dag_id,
+            'schedule_interval': self.schedule_interval,
+            'owner': self.owner,
+            'start_date': self.start_date,
+            'description': self.description,
+            'tags': self.tags or []
+        }
 "@
 
-$domainExceptionsContent = @"
+    # Core domain exceptions
+    "core/domain/exceptions.py" = @"
 class DagGeneratorError(Exception):
     """Base exception for DAG generator errors"""
     pass
@@ -73,26 +136,46 @@ class TemplateNotFoundError(DagGeneratorError):
 class ValidationError(DagGeneratorError):
     """Raised when validation fails"""
     pass
+
+class ConfigurationError(DagGeneratorError):
+    """Raised when configuration is invalid"""
+    pass
+
+class GenerationError(DagGeneratorError):
+    """Raised when DAG generation fails"""
+    pass
 "@
 
-$jinjaEngineContent = @"
+    # Template Engine
+    "infrastructure/templating/jinja_engine.py" = @"
 from typing import Dict, Any
-from jinja2 import Template
+from jinja2 import Environment, Template, StrictUndefined
 from core.domain.models import DagTemplate
-from core.domain.exceptions import ValidationError
+from core.domain.exceptions import ValidationError, GenerationError
 
 class JinjaTemplateEngine:
+    def __init__(self):
+        self.env = Environment(
+            undefined=StrictUndefined,
+            trim_blocks=True,
+            lstrip_blocks=True
+        )
+
     def render(self, template: DagTemplate, context: Dict[str, Any]) -> str:
         if not template.validate():
-            raise ValidationError("Invalid template")
+            raise ValidationError(f"Invalid template: {template.name}")
 
-        jinja_template = Template(template.content)
-        return jinja_template.render(**context)
+        try:
+            jinja_template = self.env.from_string(template.content)
+            return jinja_template.render(**context)
+        except Exception as e:
+            raise GenerationError(f"Failed to render template: {str(e)}")
 "@
 
-$localStorageContent = @"
+    # Storage
+    "infrastructure/storage/local_storage.py" = @"
 import os
-from typing import Optional
+from typing import Optional, List
 from core.domain.models import DagTemplate
 from core.domain.exceptions import TemplateNotFoundError
 
@@ -102,23 +185,174 @@ class LocalStorage:
         os.makedirs(base_path, exist_ok=True)
 
     def save_template(self, template: DagTemplate) -> None:
+        """Save a template to the local filesystem"""
         file_path = os.path.join(self.base_path, f"{template.name}.j2")
         with open(file_path, 'w') as f:
             f.write(template.content)
 
     def load_template(self, template_name: str) -> DagTemplate:
+        """Load a template from the local filesystem"""
         file_path = os.path.join(self.base_path, f"{template_name}.j2")
         if not os.path.exists(file_path):
-            raise TemplateNotFoundError(f"Template {template_name} not found")
+            raise TemplateNotFoundError(f"Template not found: {template_name}")
 
         with open(file_path, 'r') as f:
             content = f.read()
         return DagTemplate(name=template_name, content=content)
+
+    def list_templates(self) -> List[str]:
+        """List all available templates"""
+        templates = []
+        for file in os.listdir(self.base_path):
+            if file.endswith('.j2'):
+                templates.append(file[:-3])  # Remove .j2 extension
+        return templates
+
+    def delete_template(self, template_name: str) -> None:
+        """Delete a template from the local filesystem"""
+        file_path = os.path.join(self.base_path, f"{template_name}.j2")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        else:
+            raise TemplateNotFoundError(f"Template not found: {template_name}")
 "@
 
-$testModelsContent = @"
+    # Main DAG Generator
+    "application/services/generator.py" = @"
+from typing import Dict, Any
+from datetime import datetime
+from core.domain.models import DagTemplate, DagConfig
+from core.domain.exceptions import ValidationError
+from infrastructure.templating.jinja_engine import JinjaTemplateEngine
+from infrastructure.storage.local_storage import LocalStorage
+from infrastructure.config import ConfigManager
+from infrastructure.logger import LoggerSetup
+
+class DagGenerator:
+    def __init__(self):
+        self.config = ConfigManager().config
+        self.template_engine = JinjaTemplateEngine()
+        self.storage = LocalStorage(self.config.template_dir)
+        self.logger = LoggerSetup.setup(__name__, self.config.log_level)
+
+    def generate(self, template_name: str, dag_config: DagConfig) -> str:
+        """Generate a DAG from a template with the given configuration"""
+        self.logger.info(f"Generating DAG from template: {template_name}")
+
+        # Load template
+        template = self.storage.load_template(template_name)
+
+        # Prepare context
+        context = {**self.config.default_context, **dag_config.to_dict()}
+
+        # Generate DAG
+        dag_content = self.template_engine.render(template, context)
+
+        # Save generated DAG
+        output_path = f"{self.config.output_dir}/{dag_config.dag_id}.py"
+        os.makedirs(self.config.output_dir, exist_ok=True)
+
+        with open(output_path, 'w') as f:
+            f.write(dag_content)
+
+        self.logger.info(f"DAG generated successfully: {output_path}")
+        return output_path
+
+    def save_template(self, name: str, content: str) -> None:
+        """Save a new template"""
+        template = DagTemplate(name=name, content=content)
+        self.storage.save_template(template)
+        self.logger.info(f"Template saved: {name}")
+
+    def list_templates(self) -> List[str]:
+        """List all available templates"""
+        return self.storage.list_templates()
+"@
+
+    # Main execution script
+    "main.py" = @"
+from application.services.generator import DagGenerator
+from core.domain.models import DagConfig
+from datetime import datetime
+import os
+
+def main():
+    # Initialize generator
+    generator = DagGenerator()
+
+    # Example template
+    template_content = '''
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datetime import datetime, timedelta
+
+default_args = {
+    'owner': '{{ owner }}',
+    'depends_on_past': False,
+    'start_date': datetime({{ start_date.year }}, {{ start_date.month }}, {{ start_date.day }}),
+    'retries': {{ retries }},
+    'retry_delay': timedelta(minutes={{ retry_delay_minutes }}),
+}
+
+dag = DAG(
+    '{{ dag_id }}',
+    default_args=default_args,
+    description='{{ description }}',
+    schedule_interval='{{ schedule_interval }}',
+    tags={{ tags }},
+)
+
+def hello_world():
+    print("Hello from {{ dag_id }}!")
+
+task1 = PythonOperator(
+    task_id='hello_task',
+    python_callable=hello_world,
+    dag=dag,
+)
+'''
+
+    try:
+        # Save template
+        generator.save_template('basic_dag', template_content)
+        print("✓ Template saved successfully")
+
+        # Create DAG configuration
+        dag_config = DagConfig(
+            dag_id='example_dag_001',
+            schedule_interval='@daily',
+            owner='airflow',
+            start_date=datetime(2024, 1, 1),
+            description='Example DAG generated by DAG Generator',
+            tags=['example', 'generated']
+        )
+
+        # Generate DAG
+        output_path = generator.generate('basic_dag', dag_config)
+
+        print("\nDAG Generation Summary:")
+        print(f"✓ Template used: basic_dag")
+        print(f"✓ DAG ID: {dag_config.dag_id}")
+        print(f"✓ Output file: {output_path}")
+        print(f"✓ Schedule: {dag_config.schedule_interval}")
+        print(f"✓ Owner: {dag_config.owner}")
+        print("\nAvailable templates:")
+        for template in generator.list_templates():
+            print(f"  - {template}")
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        raise
+
+if __name__ == '__main__':
+    main()
+"@
+
+    # Tests
+    "tests/unit/test_models.py" = @"
 import pytest
-from core.domain.models import DagTemplate
+from core.domain.models import DagTemplate, DagConfig
+from datetime import datetime
 
 def test_dag_template_validation():
     # Valid template
@@ -137,183 +371,283 @@ def test_dag_template_validation():
     )
     assert invalid_template.validate() is False
 
-def test_template_parameter_defaults():
-    template = DagTemplate(
-        name="test_dag",
-        content="content",
-        parameters=["param1", "param2"]
-    )
-    defaults = template.get_parameter_defaults()
-    assert defaults == {"param1": None, "param2": None}
-"@
-
-$testJinjaEngineContent = @"
-import pytest
-from infrastructure.templating.jinja_engine import JinjaTemplateEngine
-from core.domain.models import DagTemplate
-from core.domain.exceptions import ValidationError
-
-def test_jinja_template_rendering():
-    engine = JinjaTemplateEngine()
-    template = DagTemplate(
-        name="test",
-        content="Hello {{ name }}!",
-        parameters=["name"]
+def test_dag_config():
+    config = DagConfig(
+        dag_id="test_dag",
+        schedule_interval="@daily",
+        owner="test",
+        start_date=datetime(2024, 1, 1),
+        tags=['test']
     )
 
-    result = engine.render(template, {"name": "World"})
-    assert result == "Hello World!"
-
-def test_invalid_template_rendering():
-    engine = JinjaTemplateEngine()
-    template = DagTemplate(name="", content="")
-
-    with pytest.raises(ValidationError):
-        engine.render(template, {})
+    config_dict = config.to_dict()
+    assert config_dict['dag_id'] == "test_dag"
+    assert config_dict['schedule_interval'] == "@daily"
+    assert isinstance(config_dict['tags'], list)
 "@
 
-$testIntegrationContent = @"
+    "tests/unit/test_generator.py" = @"
 import pytest
 from application.services.generator import DagGenerator
-from core.domain.models import DagTemplate
-
-def test_complete_dag_generation():
-    # Setup
-    generator = DagGenerator()
-    template = DagTemplate(
-        name="test_dag",
-        content='''
-        from airflow import DAG
-        from datetime import datetime
-
-        dag = DAG(
-            '{{ dag_id }}',
-            start_date=datetime({{ year }}, {{ month }}, {{ day }})
-        )
-        ''',
-        parameters=["dag_id", "year", "month", "day"]
-    )
-
-    # Test
-    generator.set_template(template)
-    context = {
-        "dag_id": "test_dag_1",
-        "year": 2024,
-        "month": 1,
-        "day": 1
-    }
-
-    result = generator.generate_dag(context)
-    assert "test_dag_1" in result
-    assert "datetime(2024, 1, 1)" in result
-"@
-
-$confTestContent = @"
-import pytest
+from core.domain.models import DagConfig
+from datetime import datetime
 import os
-import tempfile
 
 @pytest.fixture
-def temp_dir():
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        old_pwd = os.getcwd()
-        os.chdir(tmpdirname)
-        yield tmpdirname
-        os.chdir(old_pwd)
-"@
+def generator():
+    return DagGenerator()
 
-# Directory structure with content mapping
-$contentMapping = @{
-    "application/services/generator.py" = $applicationGeneratorContent
-    "application/services/__init__.py" = ""
-    "application/__init__.py" = ""
-    "core/domain/models.py" = $domainModelsContent
-    "core/domain/exceptions.py" = $domainExceptionsContent
-    "core/domain/__init__.py" = ""
-    "core/ports/__init__.py" = ""
-    "core/__init__.py" = ""
-    "infrastructure/templating/jinja_engine.py" = $jinjaEngineContent
-    "infrastructure/templating/__init__.py" = ""
-    "infrastructure/storage/local_storage.py" = $localStorageContent
-    "infrastructure/storage/__init__.py" = ""
-    "infrastructure/__init__.py" = ""
-    "tests/unit/test_models.py" = $testModelsContent
-    "tests/unit/test_jinja_engine.py" = $testJinjaEngineContent
-    "tests/unit/__init__.py" = ""
-    "tests/integration/test_dag_generation.py" = $testIntegrationContent
-    "tests/integration/__init__.py" = ""
-    "tests/conftest.py" = $confTestContent
-    "tests/__init__.py" = ""
+def test_dag_generation(generator):
+    # Create test template
+    template_content = "DAG ID: {{ dag_id }}"
+    generator.save_template('test_template', template_content)
+
+    # Create config
+    config = DagConfig(
+        dag_id="test_dag",
+        schedule_interval="@daily",
+        owner="test",
+        start_date=datetime(2024, 1, 1)
+    )
+
+    # Generate DAG
+    output_path = generator.generate('test_template', config)
+    assert os.path.exists(output_path)
+
+    # Verify content
+    with open(output_path, 'r') as f:
+        content = f.read()
+        assert "DAG ID: test_dag" in content
+"@
 }
 
+# Windows Python Project Setup and Run Script - Part 2
+
+# PowerShell setup functions
+function Write-Step {
+    param([string]$message)
+    Write-Host "`n=== $message ===" -ForegroundColor Cyan
+}
+
+function Test-CommandExists {
+    param([string]$command)
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'stop'
+    try {
+        if (Get-Command $command) { return $true }
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+}
+
+function Find-Python {
+    # Check common Python installation paths
+    $pythonPaths = @(
+        "C:\Python39\python.exe",
+        "C:\Python310\python.exe",
+        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python39\python.exe",
+        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python310\python.exe",
+        "${env:ProgramFiles}\Python39\python.exe",
+        "${env:ProgramFiles}\Python310\python.exe",
+        "${env:ProgramFiles(x86)}\Python39\python.exe",
+        "${env:ProgramFiles(x86)}\Python310\python.exe"
+    )
+
+    foreach ($path in $pythonPaths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+
+    if (Test-CommandExists "python") {
+        return "python"
+    }
+    if (Test-CommandExists "py") {
+        return "py"
+    }
+
+    return $null
+}
+
+function Create-PyFile {
+    param(
+        [string]$path,
+        [string]$content = ""
+    )
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType File -Path $path -Force
+        if ($content) {
+            Set-Content -Path $path -Value $content -Encoding UTF8
+        }
+    }
+}
+
+# Create default config.yaml content
+$configYamlContent = @"
+template_dir: templates
+output_dir: generated_dags
+log_level: INFO
+default_context:
+  owner: airflow
+  retries: 1
+  retry_delay_minutes: 5
+  tags: ['generated']
+"@
+
+# Create requirements.txt content
+$requirementsTxtContent = @"
+jinja2>=3.0.0
+pyyaml>=6.0.0
+pytest>=7.0.0
+pytest-cov>=4.0.0
+"@
+
+# Create setup.py content
+$setupPyContent = @"
+from setuptools import setup, find_packages
+
+setup(
+    name='dag_generator',
+    version='0.1.0',
+    packages=find_packages(),
+    install_requires=[
+        'jinja2>=3.0.0',
+        'pyyaml>=6.0.0'
+    ],
+    python_requires='>=3.8',
+)
+"@
+
+# Main script execution
 try {
-    # Create project directory
+    # Check Python installation
+    Write-Step "Checking Python installation"
+    $pythonCmd = Find-Python
+    if ($null -eq $pythonCmd) {
+        Write-Host "Python not found! Please install Python 3.8 or later from python.org" -ForegroundColor Red
+        Write-Host "After installing Python:"
+        Write-Host "1. Make sure to check 'Add Python to PATH' during installation"
+        Write-Host "2. Restart PowerShell"
+        Write-Host "3. Run this script again"
+        exit 1
+    }
+
+    # Verify Python version
+    $pythonVersion = & $pythonCmd --version 2>&1
+    Write-Host "Found Python: $pythonVersion"
+
+    # Create project directory structure
     Write-Step "Creating project directory structure"
     New-Item -ItemType Directory -Path $projectName -Force
     Set-Location $projectName
 
-    # Create files with content
-    foreach ($filePath in $contentMapping.Keys) {
-        $fullPath = Join-Path $PWD $filePath
-        $directory = Split-Path -Parent $fullPath
+    # Create base directory structure
+    $baseStructure = @(
+        "application/services",
+        "core/domain",
+        "infrastructure/templating",
+        "infrastructure/storage",
+        "templates",
+        "generated_dags",
+        "tests/unit",
+        "tests/integration"
+    )
 
-        if (-not (Test-Path $directory)) {
-            New-Item -ItemType Directory -Path $directory -Force
-        }
-        Create-PyFile -path $fullPath -content $contentMapping[$filePath]
+    foreach ($dir in $baseStructure) {
+        New-Item -ItemType Directory -Path $dir -Force
+        Create-PyFile -path "$dir/__init__.py"
     }
+
+    # Create all Python files
+    Write-Step "Creating Python files"
+    foreach ($file in $pythonFiles.Keys) {
+        Create-PyFile -path $file -content $pythonFiles[$file]
+    }
+
+    # Create configuration files
+    Write-Step "Creating configuration files"
+    Create-PyFile -path "config.yaml" -content $configYamlContent
+    Create-PyFile -path "requirements.txt" -content $requirementsTxtContent
+    Create-PyFile -path "setup.py" -content $setupPyContent
 
     # Create virtual environment
     Write-Step "Creating virtual environment"
-    python -m venv venv
+    & $pythonCmd -m venv venv
 
     # Activate virtual environment
     Write-Step "Activating virtual environment"
-    & .\venv\Scripts\Activate.ps1
-
-    # Create and update requirements.txt
-    $requirementsContent = @"
-pytest>=7.0.0
-pytest-cov>=4.0.0
-black>=23.0.0
-flake8>=6.0.0
-mypy>=1.0.0
-jinja2>=3.0.0
-"@
-    Create-PyFile -path "requirements.txt" -content $requirementsContent
+    $activateScript = ".\venv\Scripts\Activate.ps1"
+    if (Test-Path $activateScript) {
+        & $activateScript
+    } else {
+        Write-Host "Virtual environment activation script not found at: $activateScript" -ForegroundColor Red
+        exit 1
+    }
 
     # Install dependencies
     Write-Step "Installing dependencies"
-    & .\venv\Scripts\pip.exe install --upgrade pip
-    & .\venv\Scripts\pip.exe install -r requirements.txt
+    $pipCmd = ".\venv\Scripts\pip.exe"
+    if (Test-Path $pipCmd) {
+        & $pipCmd install --upgrade pip
+        & $pipCmd install -r requirements.txt
+        & $pipCmd install -e .
+    } else {
+        Write-Host "pip not found in virtual environment" -ForegroundColor Red
+        exit 1
+    }
 
-    Write-Step "Project setup completed successfully!"
+    # Run tests
+    Write-Step "Running tests"
+    & .\venv\Scripts\pytest.exe tests\ -v
+
+    # Run the project
+    Write-Step "Running DAG Generator"
+    Write-Host "Generating sample DAG..." -ForegroundColor Yellow
+    & .\venv\Scripts\python.exe main.py
+
+    Write-Step "Project setup and execution completed successfully!"
     Write-Host @"
 
-Your project is ready! Here's what you can do:
+Your DAG Generator project is ready!
 
-1. Run the tests:
+Project Structure:
+├── application/          # Application services
+├── core/                # Core domain logic
+├── infrastructure/      # External implementations
+├── templates/           # DAG templates
+├── generated_dags/      # Generated DAG files
+├── tests/              # Test suites
+├── config.yaml         # Configuration file
+└── main.py            # Main execution script
+
+Created Files:
+- Complete Python package structure
+- Configuration files
+- Test suites
+- Sample DAG template
+- Generated example DAG
+
+To run the project again:
+1. Activate the virtual environment:
+   .\venv\Scripts\Activate.ps1
+
+2. Generate new DAGs:
+   .\venv\Scripts\python.exe main.py
+
+3. Run tests:
    .\venv\Scripts\pytest.exe tests\
-
-2. Project structure created with:
-   - Application layer (DagGenerator)
-   - Core domain (models and exceptions)
-   - Infrastructure (templating and storage)
-   - Complete test suite
-
-3. Virtual environment is activated
-   - To deactivate: deactivate
-   - To reactivate later: .\venv\Scripts\Activate.ps1
-
-4. Dependencies installed:
-   - pytest for testing
-   - jinja2 for templating
-   - Development tools (black, flake8, mypy)
 
 The project is ready for development!
 "@ -ForegroundColor Green
 
 } catch {
-    Write-Host "An error occurred: $_" -ForegroundColor Red
+    Write-Host "An error occurred during setup: $_" -ForegroundColor Red
+    Write-Host "Tips to resolve common issues:" -ForegroundColor Yellow
+    Write-Host "1. Make sure Python is installed and added to PATH"
+    Write-Host "2. Run PowerShell as Administrator"
+    Write-Host "3. Try running 'Set-ExecutionPolicy RemoteSigned' in PowerShell as Administrator"
+    Write-Host "4. Make sure you have write permissions in the current directory"
     exit 1
 }
