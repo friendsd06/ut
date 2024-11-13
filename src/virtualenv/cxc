@@ -1,4 +1,87 @@
-# Define all Python file contents first
+# Windows Python Project Setup and Run Script
+param(
+    [string]$projectName = "dag_generator",
+    [string]$pythonVersion = "3.9"
+)
+
+# Create the project directory first
+$projectPath = Join-Path $PWD $projectName
+New-Item -ItemType Directory -Path $projectPath -Force | Out-Null
+
+# Change to the project directory
+Set-Location $projectPath
+
+function Write-Step {
+    param([string]$message)
+    Write-Host "`n=== $message ===" -ForegroundColor Cyan
+}
+
+function Test-CommandExists {
+    param([string]$command)
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'stop'
+    try {
+        if (Get-Command $command) { return $true }
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+}
+
+function Find-Python {
+    # Check common Python installation paths
+    $pythonPaths = @(
+        "C:\Python39\python.exe",
+        "C:\Python310\python.exe",
+        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python39\python.exe",
+        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python310\python.exe",
+        "${env:ProgramFiles}\Python39\python.exe",
+        "${env:ProgramFiles}\Python310\python.exe",
+        "${env:ProgramFiles(x86)}\Python39\python.exe",
+        "${env:ProgramFiles(x86)}\Python310\python.exe"
+    )
+
+    foreach ($path in $pythonPaths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+
+    if (Test-CommandExists "python") {
+        return "python"
+    }
+    if (Test-CommandExists "py") {
+        return "py"
+    }
+
+    return $null
+}
+
+function Create-PyFile {
+    param(
+        [string]$path,
+        [string]$content = ""
+    )
+    try {
+        # Ensure directory exists
+        $directory = Split-Path -Parent $path
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+
+        # Create file with content
+        New-Item -ItemType File -Path $path -Force | Out-Null
+        if ($content) {
+            Set-Content -Path $path -Value $content -Encoding UTF8
+        }
+    }
+    catch {
+        Write-Host "Error creating file $path : $_" -ForegroundColor Red
+    }
+}
+
+# Python file contents
 $pythonFiles = @{
     # Config module
     "infrastructure/config.py" = @"
@@ -123,7 +206,7 @@ class DagConfig:
         }
 "@
 
-    # Core domain exceptions
+# Core domain exceptions
     "core/domain/exceptions.py" = @"
 class DagGeneratorError(Exception):
     """Base exception for DAG generator errors"""
@@ -205,21 +288,14 @@ class LocalStorage:
         templates = []
         for file in os.listdir(self.base_path):
             if file.endswith('.j2'):
-                templates.append(file[:-3])  # Remove .j2 extension
+                templates.append(file[:-3])
         return templates
-
-    def delete_template(self, template_name: str) -> None:
-        """Delete a template from the local filesystem"""
-        file_path = os.path.join(self.base_path, f"{template_name}.j2")
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        else:
-            raise TemplateNotFoundError(f"Template not found: {template_name}")
 "@
 
     # Main DAG Generator
     "application/services/generator.py" = @"
-from typing import Dict, Any
+import os
+from typing import Dict, Any, List
 from datetime import datetime
 from core.domain.models import DagTemplate, DagConfig
 from core.domain.exceptions import ValidationError
@@ -421,70 +497,7 @@ def test_dag_generation(generator):
 "@
 }
 
-# Windows Python Project Setup and Run Script - Part 2
-
-# PowerShell setup functions
-function Write-Step {
-    param([string]$message)
-    Write-Host "`n=== $message ===" -ForegroundColor Cyan
-}
-
-function Test-CommandExists {
-    param([string]$command)
-    $oldPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'stop'
-    try {
-        if (Get-Command $command) { return $true }
-    } catch {
-        return $false
-    } finally {
-        $ErrorActionPreference = $oldPreference
-    }
-}
-
-function Find-Python {
-    # Check common Python installation paths
-    $pythonPaths = @(
-        "C:\Python39\python.exe",
-        "C:\Python310\python.exe",
-        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python39\python.exe",
-        "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python310\python.exe",
-        "${env:ProgramFiles}\Python39\python.exe",
-        "${env:ProgramFiles}\Python310\python.exe",
-        "${env:ProgramFiles(x86)}\Python39\python.exe",
-        "${env:ProgramFiles(x86)}\Python310\python.exe"
-    )
-
-    foreach ($path in $pythonPaths) {
-        if (Test-Path $path) {
-            return $path
-        }
-    }
-
-    if (Test-CommandExists "python") {
-        return "python"
-    }
-    if (Test-CommandExists "py") {
-        return "py"
-    }
-
-    return $null
-}
-
-function Create-PyFile {
-    param(
-        [string]$path,
-        [string]$content = ""
-    )
-    if (-not (Test-Path $path)) {
-        New-Item -ItemType File -Path $path -Force
-        if ($content) {
-            Set-Content -Path $path -Value $content -Encoding UTF8
-        }
-    }
-}
-
-# Create default config.yaml content
+# Create config.yaml content
 $configYamlContent = @"
 template_dir: templates
 output_dir: generated_dags
@@ -522,6 +535,25 @@ setup(
 
 # Main script execution
 try {
+    # Create base directory structure first
+    Write-Step "Creating base directory structure"
+    $baseDirectories = @(
+        "application/services",
+        "core/domain",
+        "infrastructure/templating",
+        "infrastructure/storage",
+        "templates",
+        "generated_dags",
+        "tests/unit",
+        "tests/integration"
+    )
+
+    foreach ($dir in $baseDirectories) {
+        $fullPath = Join-Path $projectPath $dir
+        New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+        Create-PyFile -path (Join-Path $fullPath "__init__.py")
+    }
+
     # Check Python installation
     Write-Step "Checking Python installation"
     $pythonCmd = Find-Python
@@ -534,51 +566,26 @@ try {
         exit 1
     }
 
-    # Verify Python version
-    $pythonVersion = & $pythonCmd --version 2>&1
-    Write-Host "Found Python: $pythonVersion"
-
-    # Create project directory structure
-    Write-Step "Creating project directory structure"
-    New-Item -ItemType Directory -Path $projectName -Force
-    Set-Location $projectName
-
-    # Create base directory structure
-    $baseStructure = @(
-        "application/services",
-        "core/domain",
-        "infrastructure/templating",
-        "infrastructure/storage",
-        "templates",
-        "generated_dags",
-        "tests/unit",
-        "tests/integration"
-    )
-
-    foreach ($dir in $baseStructure) {
-        New-Item -ItemType Directory -Path $dir -Force
-        Create-PyFile -path "$dir/__init__.py"
-    }
-
     # Create all Python files
     Write-Step "Creating Python files"
     foreach ($file in $pythonFiles.Keys) {
-        Create-PyFile -path $file -content $pythonFiles[$file]
+        $fullPath = Join-Path $projectPath $file
+        Create-PyFile -path $fullPath -content $pythonFiles[$file]
     }
 
     # Create configuration files
     Write-Step "Creating configuration files"
-    Create-PyFile -path "config.yaml" -content $configYamlContent
-    Create-PyFile -path "requirements.txt" -content $requirementsTxtContent
-    Create-PyFile -path "setup.py" -content $setupPyContent
+    Create-PyFile -path (Join-Path $projectPath "config.yaml") -content $configYamlContent
+    Create-PyFile -path (Join-Path $projectPath "requirements.txt") -content $requirementsTxtContent
+    Create-PyFile -path (Join-Path $projectPath "setup.py") -content $setupPyContent
 
     # Create virtual environment
     Write-Step "Creating virtual environment"
-    & $pythonCmd -m venv venv
+    & $pythonCmd -m venv (Join-Path $projectPath "venv")
 
     # Activate virtual environment
     Write-Step "Activating virtual environment"
-    $activateScript = ".\venv\Scripts\Activate.ps1"
+    $activateScript = Join-Path $projectPath "venv\Scripts\Activate.ps1"
     if (Test-Path $activateScript) {
         & $activateScript
     } else {
@@ -588,11 +595,11 @@ try {
 
     # Install dependencies
     Write-Step "Installing dependencies"
-    $pipCmd = ".\venv\Scripts\pip.exe"
+    $pipCmd = Join-Path $projectPath "venv\Scripts\pip.exe"
     if (Test-Path $pipCmd) {
         & $pipCmd install --upgrade pip
-        & $pipCmd install -r requirements.txt
-        & $pipCmd install -e .
+        & $pipCmd install -r (Join-Path $projectPath "requirements.txt")
+        & $pipCmd install -e $projectPath
     } else {
         Write-Host "pip not found in virtual environment" -ForegroundColor Red
         exit 1
@@ -600,12 +607,12 @@ try {
 
     # Run tests
     Write-Step "Running tests"
-    & .\venv\Scripts\pytest.exe tests\ -v
+    & (Join-Path $projectPath "venv\Scripts\pytest.exe") (Join-Path $projectPath "tests") -v
 
     # Run the project
     Write-Step "Running DAG Generator"
     Write-Host "Generating sample DAG..." -ForegroundColor Yellow
-    & .\venv\Scripts\python.exe main.py
+    & (Join-Path $projectPath "venv\Scripts\python.exe") (Join-Path $projectPath "main.py")
 
     Write-Step "Project setup and execution completed successfully!"
     Write-Host @"
@@ -622,13 +629,6 @@ Project Structure:
 ├── config.yaml         # Configuration file
 └── main.py            # Main execution script
 
-Created Files:
-- Complete Python package structure
-- Configuration files
-- Test suites
-- Sample DAG template
-- Generated example DAG
-
 To run the project again:
 1. Activate the virtual environment:
    .\venv\Scripts\Activate.ps1
@@ -643,7 +643,7 @@ The project is ready for development!
 "@ -ForegroundColor Green
 
 } catch {
-    Write-Host "An error occurred during setup: $_" -ForegroundColor Red
+    Write-Host "An error occurred: $_" -ForegroundColor Red
     Write-Host "Tips to resolve common issues:" -ForegroundColor Yellow
     Write-Host "1. Make sure Python is installed and added to PATH"
     Write-Host "2. Run PowerShell as Administrator"
