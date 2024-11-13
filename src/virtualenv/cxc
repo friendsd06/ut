@@ -1,4 +1,4 @@
-# Optimized Python Project Setup Script
+# Windows-Specific Python Project Setup Script
 param(
     [string]$projectName = "dag_generator",
     [string]$pythonVersion = "3.9"
@@ -17,7 +17,7 @@ function Create-PyFile {
     if (-not (Test-Path $path)) {
         New-Item -ItemType File -Path $path -Force
         if ($content) {
-            Set-Content -Path $path -Value $content
+            Set-Content -Path $path -Value $content -Encoding UTF8
         }
     }
 }
@@ -51,7 +51,7 @@ $structure = @(
     "tests/integration/__init__.py"
 )
 
-# Additional configuration files
+# Configuration files content
 $setupPyContent = @"
 from setuptools import setup, find_packages
 
@@ -67,16 +67,13 @@ setup(
         'jinja2'
     ],
     python_requires='>=3.8',
-    author='Your Name',
-    author_email='your.email@example.com',
-    description='DAG Generator Project',
 )
 "@
 
 $readmeContent = @"
 # $projectName
 
-## Setup and Installation
+## Windows Setup Instructions
 
 1. Create virtual environment:
    ```
@@ -84,8 +81,9 @@ $readmeContent = @"
    ```
 
 2. Activate virtual environment:
-   - Windows: `.\venv\Scripts\Activate`
-   - Linux/Mac: `source venv/bin/activate`
+   ```
+   .\venv\Scripts\Activate
+   ```
 
 3. Install dependencies:
    ```
@@ -93,8 +91,6 @@ $readmeContent = @"
    ```
 
 ## Project Structure
-
-```
 $projectName/
 ├── application/          # Application layer
 ├── core/                # Core business logic
@@ -102,15 +98,17 @@ $projectName/
 ├── templates/           # Template files
 ├── tests/              # Test directory
 └── generated_dags/     # Generated DAG files
-```
-
-## Usage
-[Add usage instructions here]
 
 ## Testing
 Run tests using pytest:
-```bash
+```
 pytest tests/
+```
+
+## Exit Virtual Environment
+To exit the virtual environment:
+```
+deactivate
 ```
 "@
 
@@ -129,31 +127,30 @@ line-length = 88
 include = '\.pyi?$'
 "@
 
-try {
-    Write-Step "Creating project directory structure"
-    # Create base project directory
-    New-Item -ItemType Directory -Path $projectName -Force
-    Set-Location $projectName
+# Main script execution
+Write-Step "Creating project directory structure"
+New-Item -ItemType Directory -Path $projectName -Force
+Set-Location $projectName
 
-    # Create directory structure and files
-    foreach ($path in $structure) {
-        $fullPath = Join-Path $PWD $path
-        $directory = Split-Path -Parent $fullPath
+# Create directory structure and files
+foreach ($path in $structure) {
+    $fullPath = Join-Path $PWD $path
+    $directory = Split-Path -Parent $fullPath
 
-        if (-not (Test-Path $directory)) {
-            New-Item -ItemType Directory -Path $directory -Force
-        }
-        Create-PyFile -path $fullPath
+    if (-not (Test-Path $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force
     }
+    Create-PyFile -path $fullPath
+}
 
-    # Create configuration files
-    Write-Step "Creating configuration files"
-    Create-PyFile -path "setup.py" -content $setupPyContent
-    Create-PyFile -path "README.md" -content $readmeContent
-    Create-PyFile -path "pyproject.toml" -content $pyprojectTomlContent
+# Create configuration files
+Write-Step "Creating configuration files"
+Create-PyFile -path "setup.py" -content $setupPyContent
+Create-PyFile -path "README.md" -content $readmeContent
+Create-PyFile -path "pyproject.toml" -content $pyprojectTomlContent
 
-    # Create requirements files
-    Create-PyFile -path "requirements-dev.txt" -content @"
+# Create requirements file
+Create-PyFile -path "requirements-dev.txt" -content @"
 pytest>=7.0.0
 pytest-cov>=4.0.0
 black>=23.0.0
@@ -162,20 +159,18 @@ mypy>=1.0.0
 jinja2>=3.0.0
 "@
 
-    Write-Step "Creating virtual environment"
-    python -m venv venv
+Write-Step "Creating virtual environment"
+python -m venv venv
 
-    Write-Step "Activating virtual environment and installing dependencies"
-    & .\venv\Scripts\Activate
-    if ($?) {
-        Write-Step "Upgrading pip and installing dependencies"
-        python -m pip install --upgrade pip
-        pip install -r requirements-dev.txt
-        pip install -e .
-        pip freeze > requirements.txt
+Write-Step "Activating virtual environment and installing dependencies"
+& .\venv\Scripts\Activate
+python -m pip install --upgrade pip
+pip install -r requirements-dev.txt
+pip install -e .
+pip freeze > requirements.txt
 
-        # Add example code to key files
-        $generatorPyContent = @"
+# Add example code
+$generatorPyContent = @"
 from typing import Dict, Any
 
 class DagGenerator:
@@ -189,9 +184,9 @@ class DagGenerator:
         # Add your DAG generation logic here
         pass
 "@
-        Create-PyFile -path "application/services/generator.py" -content $generatorPyContent
+Create-PyFile -path "application/services/generator.py" -content $generatorPyContent
 
-        $modelsContent = @"
+$modelsContent = @"
 from dataclasses import dataclass
 from typing import Optional, List
 
@@ -201,29 +196,24 @@ class DagTemplate:
     content: str
     parameters: Optional[List[str]] = None
 "@
-        Create-PyFile -path "core/domain/models.py" -content $modelsContent
+Create-PyFile -path "core/domain/models.py" -content $modelsContent
 
-        Write-Step "Project setup completed successfully!"
-        Write-Host @"
+Write-Step "Project setup completed successfully!"
+Write-Host @"
 
-Your project has been set up with:
-- Complete directory structure
-- Virtual environment
-- Development dependencies
-- Testing setup with pytest
-- Code formatting with black
-- Type checking with mypy
-- Basic example code in key files
+Project setup is complete! Here's what you can do next:
 
-To get started:
-1. The virtual environment is already activated
-2. Run 'pytest tests/' to verify the testing setup
-3. Start developing in your preferred IDE
+1. Your virtual environment is activated (you'll see '(venv)' in your prompt)
 
-Project structure is ready for development!
+2. To start developing:
+   - Open the project in your preferred IDE
+   - Run 'pytest tests/' to verify the testing setup
+
+3. To exit the virtual environment when you're done:
+   - Run 'deactivate' in the terminal
+
+4. To reactivate the environment later:
+   - Run '.\venv\Scripts\Activate'
+
+The project structure is ready for development!
 "@ -ForegroundColor Green
-    }
-} catch {
-    Write-Host "An error occurred: $_" -ForegroundColor Red
-    exit 1
-}
