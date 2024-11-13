@@ -41,3 +41,28 @@ Supports integration with platforms like Slack or PagerDuty for streamlined inci
 Benefits:
 
 By leveraging these features, Astronomer provides a more robust and user-friendly monitoring experience for multiple executions of the same DAG, enhancing observability and operational efficiency.
+
+
+
+Current Challenges:
+
+Monitoring multiple runs of the same DAG in Apache Airflow can be difficult, especially when trying to tell apart retries from separate executions.
+
+Proposed Solution with Astronomer:
+
+Enhanced Metrics and Analytics:
+
+Offers detailed metrics on DAG and task runs, including counts, statuses, and execution times.
+Helps distinguish between retries and different DAG runs.
+Displays execution time percentiles (like the 90th percentile) to spot unusual run durations.
+Comprehensive Logging:
+
+Provides access to logs for Airflow components like the scheduler and triggerer directly in the Astro UI.
+Allows you to view detailed logs for individual tasks to understand each run's behavior.
+Advanced Alerting and Notifications:
+
+Lets you set up notifications for task failures, retries, and SLA breaches.
+Supports integration with tools like Slack or PagerDuty for efficient incident management.
+Benefits:
+
+By using these features, Astronomer enhances the monitoring experience for multiple executions of the same DAG, making it easier to observe and operate workflows effectively.
