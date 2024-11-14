@@ -17,17 +17,16 @@ function Execute-SqlCommand {
 $tempFile = [IO.Path]::GetTempFileName()
 Set-Content -Path $tempFile -Value $SqlCommand
 
-# Build the psql command
+# Set the environment variable for PGPASSWORD
 $env:PGPASSWORD = $password
-$psqlCommand = "psql -h $host -p $port -U $username -d $database -f `"$tempFile`""
 
 # Execute the psql command
 Write-Host "Executing SQL command..."
-$result = & $psqlCommand
+$result = & 'psql' -h $host -p $port -U $username -d $database -f $tempFile
 
 # Clean up
 Remove-Item $tempFile
-Remove-Variable env:PGPASSWORD
+Remove-Variable -Name PGPASSWORD -Scope Global
 
 return $result
 }
@@ -35,11 +34,12 @@ return $result
 # Create the database if it doesn't exist
 Write-Host "Creating database '$database'..."
 $env:PGPASSWORD = $password
-$createDbCommand = "psql -h $host -p $port -U $username -c `"CREATE DATABASE $database;`""
-                                                                                        & $createDbCommand
-
+                   & 'psql' -h $host -p $port -U $username -tc "SELECT 1 FROM pg_database WHERE datname = '$database';" | Out-Null
+if ($LASTEXITCODE -ne 0) {
+& 'psql' -h $host -p $port -U $username -c "CREATE DATABASE $database;"
+}
 # Remove PGPASSWORD after use
-Remove-Variable env:PGPASSWORD
+Remove-Variable -Name PGPASSWORD -Scope Global
 
 # SQL commands to create tables and insert data
 $sqlCommands = @"
