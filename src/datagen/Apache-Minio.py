@@ -2,12 +2,21 @@ from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from airflow.hooks.S3_hook import S3Hook
 from datetime import datetime
+import os
 
 # Define default arguments for the DAG
 default_args = {
     'owner': 'airflow',
     'start_date': datetime(2023, 1, 1),
 }
+
+# Set your MinIO sandbox URL and credentials
+MINIO_ENDPOINT_URL = 'http://your-sandbox-url:9000'  # Replace with your MinIO endpoint URL
+MINIO_ACCESS_KEY = 'YOUR_ACCESS_KEY'  # Replace with your MinIO access key
+MINIO_SECRET_KEY = 'YOUR_SECRET_KEY'  # Replace with your MinIO secret key
+MINIO_BUCKET_NAME = 'your-bucket-name'  # Replace with your bucket name
+SOURCE_OBJECT_KEY = 'source-file.txt'  # Replace with your source object key
+DESTINATION_OBJECT_KEY = 'destination-file.txt'  # Replace with your destination object key
 
 # Initialize the DAG
 with DAG(
@@ -19,9 +28,15 @@ with DAG(
 
     def read_from_minio(**kwargs):
         """Read data from MinIO using S3Hook."""
-        s3_hook = S3Hook(aws_conn_id='minio_s3')
-        bucket_name = 'your-bucket-name'
-        key = 'source-file.txt'
+        s3_hook = S3Hook(
+            aws_conn_id=None,  # We won't use Airflow's connection
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            endpoint_url=MINIO_ENDPOINT_URL,
+            verify=False  # Set to False if using self-signed SSL certificates
+        )
+        bucket_name = MINIO_BUCKET_NAME
+        key = SOURCE_OBJECT_KEY
 
         # Get the file object
         file_obj = s3_hook.get_key(key=key, bucket_name=bucket_name)
@@ -52,9 +67,15 @@ with DAG(
         ti = kwargs['ti']
         transformed_data = ti.xcom_pull(task_ids='process_data_task')
 
-        s3_hook = S3Hook(aws_conn_id='minio_s3')
-        bucket_name = 'your-bucket-name'
-        key = 'destination-file.txt'
+        s3_hook = S3Hook(
+            aws_conn_id=None,
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            endpoint_url=MINIO_ENDPOINT_URL,
+            verify=False
+        )
+        bucket_name = MINIO_BUCKET_NAME
+        key = DESTINATION_OBJECT_KEY
 
         # Write the data
         s3_hook.load_string(
