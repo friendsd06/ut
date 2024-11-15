@@ -1,4 +1,5 @@
 from airflow.decorators import dag, task
+from airflow.operators.dummy import DummyOperator
 from airflow.operators.email import EmailOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sensors.filesystem import FileSensor
@@ -81,6 +82,13 @@ def advanced_data_pipeline_workflow():
         logger.info(f"File {file_name} moved successfully")
         return file_name
 
+    # File sanity validation checks with retries and failure callback
+    @task(retries=2, on_failure_callback=task_failure_alert)
+    def file_sanity_validation_checks():
+        logger.info("Performing file sanity validation checks...")
+        if random.choice([True, False]):
+            raise ValueError("File sanity check failed")
+
     # Check if the trigger is Most Automated
     @task.branch
     def check_trigger_most_automated():
@@ -122,14 +130,10 @@ def advanced_data_pipeline_workflow():
             return 'transformation_and_validation_group.run_transformation_derivation_validation'
         else:
             logger.info("Substitution not allowed.")
-            return 'move_files_to_processing'
+            return 'end_substitution'
 
-    # File sanity validation checks with retries and failure callback
-    @task(retries=2, on_failure_callback=task_failure_alert)
-    def file_sanity_validation_checks():
-        logger.info("Performing file sanity validation checks...")
-        if random.choice([True, False]):
-            raise ValueError("File sanity check failed")
+    # Dummy task to end substitution path without creating a cycle
+    end_substitution = DummyOperator(task_id='end_substitution')
 
     # Transformation and Validation Task Group
     with TaskGroup("transformation_and_validation_group") as transformation_group:
@@ -193,9 +197,7 @@ def advanced_data_pipeline_workflow():
 
     # Define possible paths after the decision
     substitute = substitute_task()
-    continue_processing = move_files_to_processing
-
-    # Branching logic
+    continue_processing = DummyOperator(task_id='continue_processing')
     decision >> substitute
     decision >> continue_processing
 
@@ -213,23 +215,22 @@ def advanced_data_pipeline_workflow():
     # Branching after allow_substitution
     allow_substitution >> [
         transformation_group,
-        continue_processing
+        end_substitution
     ]
 
     # Transformation and Validation Group dependencies
     run_transformation >> validation_decision
 
     # Branching after validation decision
-    validation_decision >> [
-        persist_to_delta_table(),
-        notify_event_hub_levet_final()
-    ]
+    validation_decision >> {
+        'persist_to_delta_table': persist_to_delta_table(),
+        'notify_event_hub_levet_final': notify_event_hub_levet_final(),
+    }
 
     # Final steps
     persist_to_delta_table() >> final_email_notification >> trigger_downstream
-    notify_event_hub_levet_final() >> final_email_notification
-
-    # Ensure all paths lead to final email and downstream trigger
+    notify_event_hub_levet_final() >> final_email_notification >> trigger_downstream
+    end_substitution >> final_email_notification >> trigger_downstream
     continue_processing >> final_email_notification >> trigger_downstream
 
 # Instantiate the DAG
