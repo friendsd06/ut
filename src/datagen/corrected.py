@@ -118,10 +118,11 @@ def advanced_data_pipeline_workflow():
     def allow_substitution_task(status: str):
         if status == "Allow":
             logger.info("Substitution allowed based on block status.")
-            return "transformation_and_validation_group.run_transformation_derivation_validation"
+            # Return the task ID of the task inside the TaskGroup
+            return 'transformation_and_validation_group.run_transformation_derivation_validation'
         else:
             logger.info("Substitution not allowed.")
-            return "move_files_to_processing"
+            return 'move_files_to_processing'
 
     # File sanity validation checks with retries and failure callback
     @task(retries=2, on_failure_callback=task_failure_alert)
@@ -136,11 +137,15 @@ def advanced_data_pipeline_workflow():
         def run_transformation_derivation_validation():
             logger.info("Running Transformation, Derivation & Validation on the data...")
 
+        run_transformation = run_transformation_derivation_validation()
+
         @task.branch
         def validate_breach_threshold():
             result = random.choice(["persist_to_delta_table", "notify_event_hub_levet_final"])
             logger.info(f"Validation Result: {result}")
             return result
+
+        validation_decision = validate_breach_threshold()
 
     # Persist to Delta Table
     @task
@@ -175,40 +180,45 @@ def advanced_data_pipeline_workflow():
     # Branching based on trigger check
     decision = check_trigger_most_automated()
     substitute = substitute_task()
-    substitute >> notify_event_hub() >> email_notification
-    substitute >> check_block_unblock_status() >> allow_substitution_task(check_block_unblock_status())
-    allow_substitution_task_output = allow_substitution_task(check_block_unblock_status())
+    notify_event = notify_event_hub()
+    check_block_status = check_block_unblock_status()
+    allow_substitution = allow_substitution_task(check_block_status)
 
     # File sanity validation
     file_sanity_checks = file_sanity_validation_checks()
-
-    # Transformation and Validation
-    run_transformation = transformation_group.run_transformation_derivation_validation()
-    validation_decision = transformation_group.validate_breach_threshold()
 
     # Branching based on validation result
     persist_data = persist_to_delta_table()
     final_notify = notify_event_hub_levet_final()
 
     # Set dependencies
-    start_task >> external_dependency >> wait_for_files >> file_list >> move_files_to_processing
-    move_files_to_processing >> file_sanity_checks >> decision
+    start_task >> external_dependency >> wait_for_files >> file_list >> move_files_to_processing >> file_sanity_checks
+
+    file_sanity_checks >> decision
+
     decision >> {
         'substitute_task': substitute,
         'move_files_to_processing': move_files_to_processing,
     }
-    move_files_to_processing >> final_notify >> final_email_notification >> trigger_downstream
 
-    allow_substitution_task_output >> {
-        'transformation_and_validation_group.run_transformation_derivation_validation': run_transformation,
+    substitute >> notify_event >> email_notification
+    substitute >> check_block_status >> allow_substitution
+
+    allow_substitution >> {
+        'transformation_and_validation_group.run_transformation_derivation_validation': transformation_group,
         'move_files_to_processing': move_files_to_processing,
     }
+
+    # Inside the TaskGroup
     run_transformation >> validation_decision
+
     validation_decision >> {
         'persist_to_delta_table': persist_data,
         'notify_event_hub_levet_final': final_notify,
     }
+
     persist_data >> final_email_notification >> trigger_downstream
+    final_notify >> final_email_notification >> trigger_downstream
 
 # Instantiate the DAG
 advanced_data_pipeline_workflow_dag = advanced_data_pipeline_workflow()
