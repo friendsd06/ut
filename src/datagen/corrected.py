@@ -198,8 +198,7 @@ def advanced_data_pipeline_workflow():
     # Define possible paths after the decision
     substitute = substitute_task()
     continue_processing = DummyOperator(task_id='continue_processing')
-    decision >> substitute
-    decision >> continue_processing
+    decision >> [substitute, continue_processing]
 
     # Substitute path
     notify_event = notify_event_hub()
@@ -222,14 +221,17 @@ def advanced_data_pipeline_workflow():
     run_transformation >> validation_decision
 
     # Branching after validation decision
-    validation_decision >> {
-        'persist_to_delta_table': persist_to_delta_table(),
-        'notify_event_hub_levet_final': notify_event_hub_levet_final(),
-    }
+    persist_data = persist_to_delta_table()
+    final_notify = notify_event_hub_levet_final()
+
+    validation_decision >> [
+        persist_data,
+        final_notify
+    ]
 
     # Final steps
-    persist_to_delta_table() >> final_email_notification >> trigger_downstream
-    notify_event_hub_levet_final() >> final_email_notification >> trigger_downstream
+    persist_data >> final_email_notification >> trigger_downstream
+    final_notify >> final_email_notification >> trigger_downstream
     end_substitution >> final_email_notification >> trigger_downstream
     continue_processing >> final_email_notification >> trigger_downstream
 
