@@ -1,6 +1,6 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, min, max, rand, round, lit, array, element_at
+from pyspark.sql.functions import col, min, max, rand, round, lit, expr, array, udf
 from pyspark.sql.types import *
 import random
 
@@ -31,6 +31,12 @@ input_schema = input_data.schema
 num_rows = 20
 base_df = spark.range(num_rows)
 
+# Function to generate synthetic data for string columns using UDF
+def create_string_generator(values_list):
+    def string_generator(idx):
+        return values_list[idx % len(values_list)]
+    return udf(string_generator, StringType())
+
 # Function to generate synthetic data for string columns
 def generate_string_column(df, col_name, input_df):
     # Get unique values for the column
@@ -38,14 +44,9 @@ def generate_string_column(df, col_name, input_df):
     values_list = [row[col_name] for row in unique_values]
     values_list.sort()
 
-    # Convert Python list to Spark array
-    values_array = array([lit(x) for x in values_list])
-
-    # Use modulo to cycle through values
-    return df.withColumn(
-        col_name,
-        element_at(values_array, (df.id % len(values_list)) + 1)
-    )
+    # Create and apply UDF
+    string_generator_udf = create_string_generator(values_list)
+    return df.withColumn(col_name, string_generator_udf(df.id))
 
 # Function to generate synthetic data for numeric columns
 def generate_numeric_column(df, col_name, input_df, data_type):
