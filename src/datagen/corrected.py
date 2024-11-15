@@ -84,7 +84,7 @@ def advanced_data_pipeline_workflow():
     # Check if the trigger is Most Automated
     @task.branch
     def check_trigger_most_automated():
-        decision = random.choice(["substitute_task", "move_files_to_processing"])
+        decision = random.choice(["substitute_task", "continue_processing"])
         logger.info(f"Decision: {decision}")
         return decision
 
@@ -118,7 +118,7 @@ def advanced_data_pipeline_workflow():
     def allow_substitution_task(status: str):
         if status == "Allow":
             logger.info("Substitution allowed based on block status.")
-            # Return the task ID of the task inside the TaskGroup
+            # Return the full task ID including the TaskGroup
             return 'transformation_and_validation_group.run_transformation_derivation_validation'
         else:
             logger.info("Substitution not allowed.")
@@ -137,14 +137,14 @@ def advanced_data_pipeline_workflow():
         def run_transformation_derivation_validation():
             logger.info("Running Transformation, Derivation & Validation on the data...")
 
-        run_transformation = run_transformation_derivation_validation()
-
         @task.branch
         def validate_breach_threshold():
             result = random.choice(["persist_to_delta_table", "notify_event_hub_levet_final"])
             logger.info(f"Validation Result: {result}")
             return result
 
+        # Instantiate tasks within the TaskGroup
+        run_transformation = run_transformation_derivation_validation()
         validation_decision = validate_breach_threshold()
 
     # Persist to Delta Table
@@ -173,52 +173,64 @@ def advanced_data_pipeline_workflow():
     )
 
     # Define the DAG flow
+    # Initial tasks
     start_task = start()
+    start_task >> external_dependency >> wait_for_files
     file_list = get_file_list()
-    move_files_to_processing = move_file_to_processing_directory.expand(file_name=file_list)
+    wait_for_files >> file_list
 
-    # Branching based on trigger check
-    decision = check_trigger_most_automated()
-    substitute = substitute_task()
-    notify_event = notify_event_hub()
-    check_block_status = check_block_unblock_status()
-    allow_substitution = allow_substitution_task(check_block_status)
+    # Dynamic task mapping for moving files
+    move_files_to_processing = move_file_to_processing_directory.expand(file_name=file_list)
+    file_list >> move_files_to_processing
 
     # File sanity validation
     file_sanity_checks = file_sanity_validation_checks()
+    move_files_to_processing >> file_sanity_checks
 
-    # Branching based on validation result
-    persist_data = persist_to_delta_table()
-    final_notify = notify_event_hub_levet_final()
-
-    # Set dependencies
-    start_task >> external_dependency >> wait_for_files >> file_list >> move_files_to_processing >> file_sanity_checks
-
+    # Check trigger and branch
+    decision = check_trigger_most_automated()
     file_sanity_checks >> decision
 
-    decision >> {
-        'substitute_task': substitute,
-        'move_files_to_processing': move_files_to_processing,
-    }
+    # Define possible paths after the decision
+    substitute = substitute_task()
+    continue_processing = move_files_to_processing
 
-    substitute >> notify_event >> email_notification
-    substitute >> check_block_status >> allow_substitution
+    # Branching logic
+    decision >> substitute
+    decision >> continue_processing
 
-    allow_substitution >> {
-        'transformation_and_validation_group.run_transformation_derivation_validation': transformation_group,
-        'move_files_to_processing': move_files_to_processing,
-    }
+    # Substitute path
+    notify_event = notify_event_hub()
+    substitute >> notify_event
+    notify_event >> email_notification
 
-    # Inside the TaskGroup
+    check_block_status = check_block_unblock_status()
+    substitute >> check_block_status
+
+    allow_substitution = allow_substitution_task(check_block_status)
+    check_block_status >> allow_substitution
+
+    # Branching after allow_substitution
+    allow_substitution >> [
+        transformation_group,
+        continue_processing
+    ]
+
+    # Transformation and Validation Group dependencies
     run_transformation >> validation_decision
 
-    validation_decision >> {
-        'persist_to_delta_table': persist_data,
-        'notify_event_hub_levet_final': final_notify,
-    }
+    # Branching after validation decision
+    validation_decision >> [
+        persist_to_delta_table(),
+        notify_event_hub_levet_final()
+    ]
 
-    persist_data >> final_email_notification >> trigger_downstream
-    final_notify >> final_email_notification >> trigger_downstream
+    # Final steps
+    persist_to_delta_table() >> final_email_notification >> trigger_downstream
+    notify_event_hub_levet_final() >> final_email_notification
+
+    # Ensure all paths lead to final email and downstream trigger
+    continue_processing >> final_email_notification >> trigger_downstream
 
 # Instantiate the DAG
 advanced_data_pipeline_workflow_dag = advanced_data_pipeline_workflow()
