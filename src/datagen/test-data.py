@@ -1,12 +1,12 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, min, max
-import dbldatagen as dg
-import sys
+from pyspark.sql.functions import col, min, max, rand, round, lit, array, element_at
+from pyspark.sql.types import *
+import random
 
 # Initialize Spark session
 spark = SparkSession.builder \
-    .appName("DBDataGenExample") \
+    .appName("DataGenWithColumn") \
     .getOrCreate()
 
 # For demonstration purposes, create a sample input dataframe
@@ -27,67 +27,67 @@ input_data.show()
 # Get the schema from the input data
 input_schema = input_data.schema
 
-# Identify columns (excluding 'id' if present)
-data_columns = [field.name for field in input_schema.fields if field.name != 'id']
+# Create base DataFrame with desired number of rows
+num_rows = 20
+base_df = spark.range(num_rows)
 
-# Separate columns by data type
-string_columns = [field.name for field in input_schema.fields if str(field.dataType) == 'StringType' and field.name != 'id']
-numeric_columns = [field.name for field in input_schema.fields if str(field.dataType) in ['IntegerType', 'LongType', 'DoubleType', 'FloatType'] and field.name != 'id']
-
-# Initialize the DataGenerator with an 'id' column
-data_generator = dg.DataGenerator(
-    sparkSession=spark,
-    name="synthetic_data",
-    rows=20,  # Adjust the number of rows as needed
-    schema=input_schema
-).withIdOutput()
-
-# For each string column, extract unique values and map them deterministically
-for col_name in string_columns:
+# Function to generate synthetic data for string columns
+def generate_string_column(df, col_name, input_df):
     # Get unique values for the column
-    unique_values = input_data.select(col_name).distinct().collect()
-    # Convert to a list of values
+    unique_values = input_df.select(col_name).distinct().collect()
     values_list = [row[col_name] for row in unique_values]
-    # Sort the values to maintain consistent ordering
     values_list.sort()
-    # Use 'values' parameter to specify the values, set random=False and cycle=True
-    data_generator = data_generator.withColumnSpec(
+
+    # Convert Python list to Spark array
+    values_array = array([lit(x) for x in values_list])
+
+    # Use modulo to cycle through values
+    return df.withColumn(
         col_name,
-        values=values_list,
-        random=False,
-        cycle=True
+        element_at(values_array, (df.id % len(values_list)) + 1)
     )
 
-# For numeric columns, generate values within the min and max range
-for col_name in numeric_columns:
-    # Get min and max values from the input data
-    min_value = input_data.agg(min(col(col_name))).collect()[0][0]
-    max_value = input_data.agg(max(col(col_name))).collect()[0][0]
-    # Check the data type
-    data_type = [field.dataType for field in input_schema.fields if field.name == col_name][0]
-    # Configure the data generator for numeric columns
-    if str(data_type) in ['IntegerType', 'LongType']:
-        data_generator = data_generator.withColumnSpec(
+# Function to generate synthetic data for numeric columns
+def generate_numeric_column(df, col_name, input_df, data_type):
+    # Get min and max values
+    min_value = input_df.agg(min(col(col_name))).collect()[0][0]
+    max_value = input_df.agg(max(col(col_name))).collect()[0][0]
+
+    if isinstance(data_type, (IntegerType, LongType)):
+        # For integer types
+        return df.withColumn(
             col_name,
-            minValue=min_value,
-            maxValue=max_value,
-            step=1,  # Increment by 1 for integers
-            random=True
+            (rand() * (max_value - min_value) + min_value).cast('integer')
         )
-    elif str(data_type) in ['DoubleType', 'FloatType']:
-        data_generator = data_generator.withColumnSpec(
+    else:
+        # For floating-point types
+        return df.withColumn(
             col_name,
-            minValue=min_value,
-            maxValue=max_value,
-            random=True
+            round(rand() * (max_value - min_value) + min_value, 2)
         )
 
-# Generate the synthetic data
-synthetic_data = data_generator.build()
+# Identify columns by data type
+string_columns = [field.name for field in input_schema.fields
+                  if isinstance(field.dataType, StringType) and field.name != 'id']
+numeric_columns = [field.name for field in input_schema.fields
+                   if isinstance(field.dataType, (IntegerType, LongType, DoubleType, FloatType))
+                   and field.name != 'id']
+
+# Generate synthetic data
+synthetic_df = base_df
+
+# Generate string columns
+for col_name in string_columns:
+    synthetic_df = generate_string_column(synthetic_df, col_name, input_data)
+
+# Generate numeric columns
+for col_name in numeric_columns:
+    data_type = [field.dataType for field in input_schema.fields if field.name == col_name][0]
+    synthetic_df = generate_numeric_column(synthetic_df, col_name, input_data, data_type)
 
 # Show synthetic data
-print("Synthetic data:")
-synthetic_data.show(truncate=False)
+print("\nSynthetic data:")
+synthetic_df.show(truncate=False)
 
 # Stop the Spark session
 spark.stop()
