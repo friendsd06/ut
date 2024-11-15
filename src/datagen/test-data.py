@@ -42,7 +42,7 @@ data_generator = dg.DataGenerator(
     schema=input_schema
 ).withIdOutput()
 
-# For string columns, extract unique values and map them deterministically
+# For each string column, extract unique values and map them deterministically
 for col_name in string_columns:
     # Get unique values for the column
     unique_values = input_data.select(col_name).distinct().collect()
@@ -50,14 +50,12 @@ for col_name in string_columns:
     values_list = [row[col_name] for row in unique_values]
     # Sort the values to maintain consistent ordering
     values_list.sort()
-    # Convert to a comma-separated string for use in expression
-    values_list_str = ', '.join([f"'{val}'" for val in values_list])
-    # Get the number of unique values
-    num_values = len(values_list)
-    # Use 'element_at' to map 'id' to values in the array deterministically
+    # Use 'values' parameter to specify the values, set random=False and cycle=True
     data_generator = data_generator.withColumnSpec(
         col_name,
-        expr=f"element_at(array({values_list_str}), ((id - 1) % {num_values}) + 1)"
+        values=values_list,
+        random=False,
+        cycle=True
     )
 
 # For numeric columns, generate values within the min and max range
