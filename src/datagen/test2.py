@@ -88,3 +88,8 @@ def create_synthetic_data(input_df):
 input_df = spark.createDataFrame(sample_data, schema)
 synthetic_df = create_synthetic_data(input_df)
 synthetic_df.show(truncate=False)
+
+synthetic_df.write \
+    .mode("overwrite") \
+    .format(format) \
+    .save(output_path)
