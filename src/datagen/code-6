@@ -6,6 +6,7 @@ from airflow.sensors.external_task_sensor import ExternalTaskSensor
 from airflow.utils.trigger_rule import TriggerRule
 import logging
 import json
+import os
 from pathlib import Path
 
 # Configure logging
@@ -69,7 +70,6 @@ def move_to_processing(**context):
         processing_dir = Path("processing_data/incoming")
         processing_dir.mkdir(parents=True, exist_ok=True)
 
-        # Simulate file move
         new_path = processing_dir / os.path.basename(file_path)
         logger.info(f"Moving file from {file_path} to {new_path}")
 
@@ -87,7 +87,7 @@ def validate_file(**context):
         validation_passed = True
 
         logger.info(f"File validation {'passed' if validation_passed else 'failed'}")
-        return 'junction_node' if validation_passed else 'block_file'
+        return 'register_level_id' if validation_passed else 'block_file'
     except Exception as e:
         logger.error(f"File validation failed: {str(e)}")
         return 'block_file'
@@ -153,7 +153,7 @@ def check_dmc_activation(**context):
         is_activated = True
 
         logger.info(f"DMC activation status for level {level_id}: {'activated' if is_activated else 'not activated'}")
-        return 'persist_data' if is_activated else 'block_processing'
+        return 'validation_join' if is_activated else 'block_processing'
     except Exception as e:
         logger.error(f"DMC activation check failed: {str(e)}")
         return 'block_processing'
@@ -231,11 +231,6 @@ validate_file_task = BranchPythonOperator(
     dag=dag
 )
 
-junction_node = DummyOperator(
-    task_id='junction_node',
-    dag=dag
-)
-
 register_id = PythonOperator(
     task_id='register_level_id',
     python_callable=register_level_id,
@@ -296,30 +291,46 @@ block_file = DummyOperator(
     dag=dag
 )
 
+# Join nodes
+processing_join = DummyOperator(
+    task_id='processing_join',
+    trigger_rule=TriggerRule.ONE_SUCCESS,
+    dag=dag
+)
+
+validation_join = DummyOperator(
+    task_id='validation_join',
+    trigger_rule=TriggerRule.ONE_SUCCESS,
+    dag=dag
+)
+
 # Define task dependencies
+# Initial flow
 secondary_feed >> check_feed_processing_task
 check_feed_processing_task >> [move_processing, block_processing]
 move_processing >> validate_file_task
-validate_file_task >> [junction_node, block_file]
+validate_file_task >> [register_id, block_file]
 
-# Junction node splits to register_id and processing
-junction_node >> [register_id, run_processing_task]
-register_id >> junction_node  # Feedback to junction
+# Registration and processing flow
+register_id >> run_processing_task
 
+# Main processing flow
 run_processing_task >> check_threshold
 check_threshold >> [persist_task, wait_for_dmc]
 
+# DMC approval path
 wait_for_dmc >> check_dmc_activation_task
-check_dmc_activation_task >> [persist_task, block_processing]
+check_dmc_activation_task >> [validation_join, block_processing]
 
-persist_task >> notify_hub
+# Join paths and continue
+persist_task >> processing_join
+validation_join >> processing_join
+processing_join >> notify_hub
 notify_hub >> confirm_status_task
-
-# Status confirmation can lead back to feed processing check
-confirm_status_task >> check_feed_processing_task
 
 # Set trigger rules
 persist_task.trigger_rule = TriggerRule.ONE_SUCCESS
+processing_join.trigger_rule = TriggerRule.ONE_SUCCESS
 notify_hub.trigger_rule = TriggerRule.ALL_SUCCESS
 
 # DAG Documentation
@@ -335,7 +346,7 @@ This DAG implements a secondary feed processing workflow with:
 4. Processing (transformation, derivation, validation)
 5. DMC activation handling
 6. Data persistence
-7. Status confirmation loop
+7. Status confirmation
 
 ## Usage:
 Trigger the DAG with:
