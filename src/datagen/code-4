@@ -1,0 +1,242 @@
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.dummy import DummyOperator
+from airflow.utils.trigger_rule import TriggerRule
+import logging
+import json
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Default arguments
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email': ['your-email@example.com'],
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+    'execution_timeout': timedelta(hours=2),
+    'sla': timedelta(hours=2),
+    'start_date': datetime(2024, 1, 1)
+}
+
+# Create DAG
+dag = DAG(
+    'sla_trigger_workflow',
+    default_args=default_args,
+    description='SLA Trigger and Substitution Workflow',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+    tags=['sla_processing']
+)
+
+# Helper Functions
+def save_processing_data(data, subdirectory, filename):
+    """Save processing data to JSON file"""
+    directory = Path(f"processing_data/{subdirectory}")
+    directory.mkdir(parents=True, exist_ok=True)
+
+    filepath = directory / f"{filename}.json"
+    with open(filepath, 'w') as f:
+        json.dump(data, f)
+    return str(filepath)
+
+# Task Functions
+def check_trigger_type(**context):
+    """
+    Check if the trigger is manual or automated
+    """
+    try:
+        trigger_type = context['dag_run'].conf.get('trigger_type', 'automated')
+        logger.info(f"Detected trigger type: {trigger_type}")
+
+        if trigger_type == 'manual':
+            return 'junction_node'
+        return 'check_substitution_needed'
+    except Exception as e:
+        logger.error(f"Error in trigger type check: {str(e)}")
+        raise
+
+def check_substitution_needed(**context):
+    """
+    Check if substitution is needed for automated process
+    """
+    try:
+        # Add your substitution check logic here
+        substitution_needed = True
+        logger.info(f"Substitution needed: {substitution_needed}")
+
+        if substitution_needed:
+            return 'check_allow_substitution'
+        return 'substitute'
+    except Exception as e:
+        logger.error(f"Error in substitution check: {str(e)}")
+        raise
+
+def perform_substitution(**context):
+    """
+    Handle the substitution process
+    """
+    try:
+        task_instance = context['task_instance']
+        dag_run = context['dag_run']
+
+        # Get file information
+        file_id = dag_run.conf.get('file_id', f"FILE_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+        # Perform substitution logic
+        substitution_data = {
+            'file_id': file_id,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'completed',
+            'source': task_instance.task_id
+        }
+
+        # Save substitution results
+        save_processing_data(substitution_data, 'substitutions', file_id)
+
+        # Push information for downstream tasks
+        task_instance.xcom_push(key='substitution_status', value='completed')
+        task_instance.xcom_push(key='file_id', value=file_id)
+
+        logger.info(f"Substitution completed for file {file_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Substitution failed: {str(e)}")
+        raise
+
+def check_allow_substitution(**context):
+    """
+    Check if substitution is allowed
+    """
+    try:
+        # Add your substitution allowance check logic here
+        allow_substitution = True
+        logger.info(f"Substitution allowed: {allow_substitution}")
+
+        if allow_substitution:
+            return 'unblock_substitution'
+        return 'block_substitution'
+    except Exception as e:
+        logger.error(f"Error in substitution allowance check: {str(e)}")
+        raise
+
+def notify_event_hub(**context):
+    """
+    Send notification to event hub with level ID
+    """
+    try:
+        task_instance = context['task_instance']
+        file_id = task_instance.xcom_pull(key='file_id')
+
+        # Create notification data
+        notification_data = {
+            'file_id': file_id,
+            'level_id': f"LEVEL_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            'status': 'completed',
+            'timestamp': datetime.now().isoformat()
+        }
+
+        # Save notification
+        save_processing_data(notification_data, 'notifications', file_id)
+        logger.info(f"Event hub notified for file {file_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Notification failed: {str(e)}")
+        raise
+
+# Task Definitions
+sla_trigger = DummyOperator(
+    task_id='sla_trigger',
+    dag=dag
+)
+
+check_trigger = BranchPythonOperator(
+    task_id='check_trigger_type',
+    python_callable=check_trigger_type,
+    dag=dag
+)
+
+junction_node = DummyOperator(
+    task_id='junction_node',
+    dag=dag
+)
+
+check_substitution = BranchPythonOperator(
+    task_id='check_substitution_needed',
+    python_callable=check_substitution_needed,
+    dag=dag
+)
+
+check_allow_sub = BranchPythonOperator(
+    task_id='check_allow_substitution',
+    python_callable=check_allow_substitution,
+    dag=dag
+)
+
+substitute = PythonOperator(
+    task_id='substitute',
+    python_callable=perform_substitution,
+    dag=dag
+)
+
+unblock_substitution = DummyOperator(
+    task_id='unblock_substitution',
+    dag=dag
+)
+
+block_substitution = DummyOperator(
+    task_id='block_substitution',
+    dag=dag
+)
+
+notify_hub = PythonOperator(
+    task_id='notify_event_hub',
+    python_callable=notify_event_hub,
+    trigger_rule=TriggerRule.ONE_SUCCESS,
+    dag=dag
+)
+
+# Define task dependencies
+sla_trigger >> check_trigger
+check_trigger >> [junction_node, check_substitution]
+junction_node >> substitute
+check_substitution >> [check_allow_sub, substitute]
+check_allow_sub >> [unblock_substitution, block_substitution]
+unblock_substitution >> substitute
+substitute >> notify_hub
+
+# DAG Documentation
+dag.doc_md = """
+# SLA Trigger and Substitution Workflow
+
+This DAG implements an SLA trigger workflow with the following features:
+
+## Main Components:
+1. SLA Trigger detection
+2. Manual/Automated path handling
+3. Substitution processing
+4. Event Hub notification with Level ID
+
+## Usage:
+Trigger the DAG with the following configuration:
+```python
+{
+    'trigger_type': 'manual' or 'automated',
+    'file_id': 'unique_file_identifier'
+}
+```
+
+## Error Handling:
+- Email notifications on failure
+- Automatic retries
+- Comprehensive logging
+"""
+
+if __name__ == "__main__":
+    dag.test()
