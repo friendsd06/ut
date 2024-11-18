@@ -1,0 +1,259 @@
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.bash import BashOperator
+from airflow.operators.dummy import DummyOperator
+from airflow.sensors.external_task_sensor import ExternalTaskSensor
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.utils.trigger_rule import TriggerRule
+from airflow.models import Variable
+import logging
+
+# Default arguments for the DAG
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+    'sla': timedelta(hours=2)
+}
+
+# Create the DAG
+dag = DAG(
+    'data_processing_pipeline',
+    default_args=default_args,
+    description='Data processing pipeline with validation and transformation',
+    schedule_interval=timedelta(days=1),
+    start_date=datetime(2024, 1, 1),
+    catchup=False,
+    tags=['data_processing']
+)
+
+# Python functions for different tasks
+def check_trigger_type(**context):
+    """Check if the trigger is manual or automated"""
+    trigger_type = context['dag_run'].conf.get('trigger_type', 'automated')
+    if trigger_type == 'manual':
+        return 'manual_substitution'
+    return 'automated_actions'
+
+def perform_substitution(**context):
+    """Handle substitution logic"""
+    logging.info("Performing substitution")
+    # Add your substitution logic here
+    return True
+
+def validate_file(**context):
+    """Validate incoming file"""
+    logging.info("Validating file")
+    # Add your file validation logic here
+    validation_passed = True
+    if validation_passed:
+        return 'check_allow_substitution'
+    return 'block_file'
+
+def check_substitution_allowed(**context):
+    """Check if substitution is allowed"""
+    # Add your substitution check logic here
+    substitution_allowed = True
+    if substitution_allowed:
+        return 'unblock_file'
+    return 'block_file'
+
+def transform_data(**context):
+    """Transform the data"""
+    logging.info("Transforming data")
+    # Add your transformation logic here
+
+def derive_data(**context):
+    """Derive new data"""
+    logging.info("Deriving data")
+    # Add your derivation logic here
+
+def validate_data(**context):
+    """Validate the processed data"""
+    logging.info("Validating processed data")
+    # Add your validation logic here
+    return True
+
+def check_validation_threshold(**context):
+    """Check if validation breached threshold"""
+    # Add your threshold check logic here
+    threshold_breached = False
+    if threshold_breached:
+        return 'wait_for_dmc'
+    return 'persist_data'
+
+def persist_data(**context):
+    """Persist data to database"""
+    logging.info("Persisting data")
+    # Add your database insertion logic here
+
+def notify_event_hub(**context):
+    """Notify event hub"""
+    logging.info("Notifying event hub")
+    # Add your notification logic here
+
+def check_feed_processing(**context):
+    """Check if feed processing should be allowed"""
+    # Add your processing check logic here
+    allow_processing = True
+    if allow_processing:
+        return 'unblock_status'
+    return 'block_processing'
+
+# Task definitions
+start = DummyOperator(
+    task_id='start',
+    dag=dag
+)
+
+check_trigger = BranchPythonOperator(
+    task_id='check_trigger_type',
+    python_callable=check_trigger_type,
+    dag=dag
+)
+
+manual_substitution = PythonOperator(
+    task_id='manual_substitution',
+    python_callable=perform_substitution,
+    dag=dag
+)
+
+automated_actions = PythonOperator(
+    task_id='automated_actions',
+    python_callable=perform_substitution,
+    dag=dag
+)
+
+validate_file_task = BranchPythonOperator(
+    task_id='validate_file',
+    python_callable=validate_file,
+    dag=dag
+)
+
+check_allow_substitution = BranchPythonOperator(
+    task_id='check_allow_substitution',
+    python_callable=check_substitution_allowed,
+    dag=dag
+)
+
+block_file = DummyOperator(
+    task_id='block_file',
+    dag=dag
+)
+
+unblock_file = DummyOperator(
+    task_id='unblock_file',
+    dag=dag
+)
+
+move_to_processing = BashOperator(
+    task_id='move_to_processing',
+    bash_command='mkdir -p /processing && mv {{ params.file_path }} /processing/',
+    params={'file_path': '/input/file.dat'},
+    dag=dag
+)
+
+register_level_id = PostgresOperator(
+    task_id='register_level_id',
+    postgres_conn_id='postgres_default',
+    sql="INSERT INTO processing_levels (file_id) VALUES ('{{ task_instance.xcom_pull(task_ids='move_to_processing') }}') RETURNING id;",
+    dag=dag
+)
+
+transform_task = PythonOperator(
+    task_id='transform_data',
+    python_callable=transform_data,
+    dag=dag
+)
+
+derive_task = PythonOperator(
+    task_id='derive_data',
+    python_callable=derive_data,
+    dag=dag
+)
+
+validate_task = PythonOperator(
+    task_id='validate_data',
+    python_callable=validate_data,
+    dag=dag
+)
+
+check_threshold = BranchPythonOperator(
+    task_id='check_validation_threshold',
+    python_callable=check_validation_threshold,
+    dag=dag
+)
+
+wait_for_dmc = ExternalTaskSensor(
+    task_id='wait_for_dmc',
+    external_dag_id='dmc_approval',
+    external_task_id='approve_processing',
+    timeout=3600,
+    dag=dag
+)
+
+check_processing = BranchPythonOperator(
+    task_id='check_feed_processing',
+    python_callable=check_feed_processing,
+    dag=dag
+)
+
+persist_task = PythonOperator(
+    task_id='persist_data',
+    python_callable=persist_data,
+    dag=dag
+)
+
+notify_task = PythonOperator(
+    task_id='notify_event_hub',
+    python_callable=notify_event_hub,
+    dag=dag
+)
+
+unblock_status = DummyOperator(
+    task_id='unblock_status',
+    dag=dag
+)
+
+block_processing = DummyOperator(
+    task_id='block_processing',
+    dag=dag
+)
+
+# Primary and Secondary feed starting points
+primary_feed = DummyOperator(
+    task_id='primary_feed',
+    dag=dag
+)
+
+secondary_feed = DummyOperator(
+    task_id='secondary_feed',
+    dag=dag
+)
+
+# Define task dependencies
+start >> check_trigger
+check_trigger >> [manual_substitution, automated_actions]
+[manual_substitution, automated_actions] >> validate_file_task
+validate_file_task >> [check_allow_substitution, block_file]
+check_allow_substitution >> [unblock_file, block_file]
+
+[primary_feed, secondary_feed] >> move_to_processing
+move_to_processing >> register_level_id
+
+unblock_file >> transform_task
+register_level_id >> transform_task
+transform_task >> derive_task
+derive_task >> validate_task
+validate_task >> check_threshold
+
+check_threshold >> [persist_task, wait_for_dmc]
+wait_for_dmc >> check_processing
+check_processing >> [unblock_status, block_processing]
+unblock_status >> transform_task
+
+persist_task >> notify_task
