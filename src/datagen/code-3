@@ -12,14 +12,30 @@ from pathlib import Path
 
 # [Previous imports and default_args remain the same]
 
+# Define default arguments for the DAG
+default_args = {
+    'owner': 'airflow',                        # Owner of the DAG
+    'depends_on_past': False,                  # Tasks don't depend on past runs
+    'email': ['your-email@example.com'],       # Email for notifications
+    'email_on_failure': True,                  # Send email on task failure
+    'email_on_retry': False,                   # Don't email on task retry
+    'retries': 1,                             # Number of retries if task fails
+    'retry_delay': timedelta(minutes=5),       # Delay between retries
+    'execution_timeout': timedelta(hours=2),   # Maximum task execution time
+    'sla': timedelta(hours=2),                # Service Level Agreement time
+    'start_date': datetime(2024, 1, 1),       # Start date for the DAG
+    'max_active_runs': 1,                     # Maximum number of concurrent runs
+    'catchup': False,                         # Don't backfill missing runs
+    'tags': ['data_processing']               # Tags for organizing DAGs
+}
+
+# Create the DAG
 dag = DAG(
     'data_processing_pipeline',
     default_args=default_args,
     description='Data processing pipeline with validation and transformation',
     schedule_interval=timedelta(days=1),
-    start_date=datetime(2024, 1, 1),
-    catchup=False,
-    tags=['data_processing']
+    catchup=False
 )
 
 # [Helper functions remain the same]
