@@ -61,3 +61,114 @@ Task Dependencies: Ensure tasks are properly chained and aligned with decision p
 Parallel Processing: Use Airflow’s SubDagOperator or parallel tasks for handling multiple feeds simultaneously.
 Error Handling: Include retry logic and failure notifications for tasks.
 This step-by-step breakdown can help translate this flowchart into an Airflow DAG with proper operators and tasks. Let me know if you need detailed examples for any specific step!
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.dummy import DummyOperator
+from airflow.sensors.external_task_sensor import ExternalTaskSensor
+from airflow.utils.dates import days_ago
+from airflow.operators.bash import BashOperator
+from airflow.models import Variable
+
+# Utility Functions
+def check_trigger_type(**kwargs):
+    trigger_type = Variable.get("trigger_type", default_var="manual")  # Example variable
+    return "manual_substitution" if trigger_type == "manual" else "automated_actions"
+
+def validate_file(**kwargs):
+    # Example validation logic
+    is_valid = kwargs.get("is_valid", True)
+    return "run_transform" if is_valid else "block_file"
+
+def check_validation_threshold(**kwargs):
+    # Example threshold check
+    threshold_breached = kwargs.get("threshold_breached", False)
+    return "persist_data" if not threshold_breached else "wait_for_dmc"
+
+def allow_feed_processing(**kwargs):
+    # Allow or block feed processing logic
+    allow_feed = kwargs.get("allow_feed", True)
+    return "unblock_feed" if allow_feed else "block_feed"
+
+# DAG Definition
+with DAG(
+    dag_id="file_processing_pipeline",
+    schedule_interval=None,
+    start_date=days_ago(1),
+    catchup=False,
+    default_args={"retries": 1},
+) as dag:
+    # Start Node
+    start = DummyOperator(task_id="start")
+
+    # SLA Trigger Detection
+    sla_trigger = DummyOperator(task_id="sla_trigger_detected")
+
+    # Is Trigger Manual or Automated?
+    decide_trigger = BranchPythonOperator(
+        task_id="decide_trigger",
+        python_callable=check_trigger_type,
+    )
+
+    manual_substitution = DummyOperator(task_id="manual_substitution")
+    automated_actions = DummyOperator(task_id="automated_actions")
+
+    # File Validation
+    validate = BranchPythonOperator(
+        task_id="validate_file",
+        python_callable=validate_file,
+    )
+
+    block_file = DummyOperator(task_id="block_file")
+    run_transform = DummyOperator(task_id="run_transform")
+
+    # Validation Threshold Check
+    validate_threshold = BranchPythonOperator(
+        task_id="validate_threshold",
+        python_callable=check_validation_threshold,
+    )
+
+    persist_data = BashOperator(
+        task_id="persist_data",
+        bash_command="echo 'Persisting data to database...'",
+    )
+
+    wait_for_dmc = ExternalTaskSensor(
+        task_id="wait_for_dmc",
+        external_dag_id="dmc_approval_dag",
+        external_task_id="approve",
+        mode="poke",
+    )
+
+    notify_event_hub = BashOperator(
+        task_id="notify_event_hub",
+        bash_command="echo 'Notifying event hub...'",
+    )
+
+    # Primary/Secondary Feed Processing
+    allow_processing = BranchPythonOperator(
+        task_id="allow_feed_processing",
+        python_callable=allow_feed_processing,
+    )
+
+    unblock_feed = BashOperator(
+        task_id="unblock_feed",
+        bash_command="echo 'Feed unblocked for further processing...'",
+    )
+
+    block_feed = BashOperator(
+        task_id="block_feed",
+        bash_command="echo 'Feed blocked...'",
+    )
+
+    # DAG Flow
+    start >> sla_trigger >> decide_trigger
+    decide_trigger >> manual_substitution >> validate
+    decide_trigger >> automated_actions >> validate
+    validate >> block_file
+    validate >> run_transform >> validate_threshold
+    validate_threshold >> persist_data >> notify_event_hub
+    validate_threshold >> wait_for_dmc >> notify_event_hub
+    persist_data >> allow_processing
+    allow_processing >> unblock_feed
+    allow_processing >> block_feed
