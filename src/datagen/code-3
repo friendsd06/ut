@@ -1,0 +1,249 @@
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.bash import BashOperator
+from airflow.operators.dummy import DummyOperator
+from airflow.sensors.external_task_sensor import ExternalTaskSensor
+from airflow.utils.trigger_rule import TriggerRule
+import logging
+import json
+import os
+from pathlib import Path
+
+# [Previous imports and default_args remain the same]
+
+dag = DAG(
+    'data_processing_pipeline',
+    default_args=default_args,
+    description='Data processing pipeline with validation and transformation',
+    schedule_interval=timedelta(days=1),
+    start_date=datetime(2024, 1, 1),
+    catchup=False,
+    tags=['data_processing']
+)
+
+# [Helper functions remain the same]
+
+# Modified task functions to prevent cycles
+def check_trigger_type(**context):
+    """Check if the trigger is manual or automated"""
+    trigger_type = context['dag_run'].conf.get('trigger_type', 'automated')
+    logging.info(f"Trigger type: {trigger_type}")
+    if trigger_type == 'manual':
+        return 'manual_substitution'
+    return 'automated_actions'
+
+def validate_file(**context):
+    """Validate incoming file"""
+    logging.info("Validating file")
+    validation_passed = True
+
+    try:
+        file_path = context['dag_run'].conf.get('file_path', '')
+        if os.path.exists(file_path):
+            validation_passed = True
+    except Exception as e:
+        logging.error(f"File validation failed: {str(e)}")
+        validation_passed = False
+
+    if validation_passed:
+        return 'check_allow_substitution'
+    return 'block_file'
+
+def check_validation_threshold(**context):
+    """Check if validation breached threshold"""
+    logging.info("Checking validation threshold")
+    threshold_breached = False
+
+    if threshold_breached:
+        return 'wait_for_dmc'
+    return 'persist_data'
+
+def check_dmc_approval(**context):
+    """Check DMC approval status"""
+    logging.info("Checking DMC approval")
+    approval_granted = context['task_instance'].xcom_pull(task_ids='wait_for_dmc', key='approval_status')
+
+    if approval_granted:
+        return 'retry_transformation'
+    return 'block_processing'
+
+# Task definitions
+start = DummyOperator(
+    task_id='start',
+    dag=dag
+)
+
+check_trigger = BranchPythonOperator(
+    task_id='check_trigger_type',
+    python_callable=check_trigger_type,
+    dag=dag
+)
+
+manual_substitution = PythonOperator(
+    task_id='manual_substitution',
+    python_callable=perform_substitution,
+    dag=dag
+)
+
+automated_actions = PythonOperator(
+    task_id='automated_actions',
+    python_callable=perform_substitution,
+    dag=dag
+)
+
+validate_file_task = BranchPythonOperator(
+    task_id='validate_file',
+    python_callable=validate_file,
+    dag=dag
+)
+
+check_allow_substitution = BranchPythonOperator(
+    task_id='check_allow_substitution',
+    python_callable=check_substitution_allowed,
+    dag=dag
+)
+
+block_file = DummyOperator(
+    task_id='block_file',
+    dag=dag
+)
+
+unblock_file = DummyOperator(
+    task_id='unblock_file',
+    dag=dag
+)
+
+move_to_processing = BashOperator(
+    task_id='move_to_processing',
+    bash_command='mkdir -p processing && mv {{ params.file_path }} processing/',
+    params={'file_path': '/input/file.dat'},
+    dag=dag
+)
+
+register_level_id_task = PythonOperator(
+    task_id='register_level_id',
+    python_callable=register_level_id,
+    dag=dag
+)
+
+# Initial transformation tasks
+transform_task = PythonOperator(
+    task_id='transform_data',
+    python_callable=transform_data,
+    dag=dag
+)
+
+derive_task = PythonOperator(
+    task_id='derive_data',
+    python_callable=derive_data,
+    dag=dag
+)
+
+validate_task = PythonOperator(
+    task_id='validate_data',
+    python_callable=validate_processed_data,
+    dag=dag
+)
+
+check_threshold = BranchPythonOperator(
+    task_id='check_validation_threshold',
+    python_callable=check_validation_threshold,
+    dag=dag
+)
+
+# DMC approval process
+wait_for_dmc = ExternalTaskSensor(
+    task_id='wait_for_dmc',
+    external_dag_id='dmc_approval',
+    external_task_id='approve_processing',
+    timeout=3600,
+    dag=dag
+)
+
+check_dmc_approval_task = BranchPythonOperator(
+    task_id='check_dmc_approval',
+    python_callable=check_dmc_approval,
+    dag=dag
+)
+
+# Retry transformation path (separate from initial transformation)
+retry_transformation = PythonOperator(
+    task_id='retry_transformation',
+    python_callable=transform_data,
+    dag=dag
+)
+
+retry_derivation = PythonOperator(
+    task_id='retry_derivation',
+    python_callable=derive_data,
+    dag=dag
+)
+
+retry_validation = PythonOperator(
+    task_id='retry_validation',
+    python_callable=validate_processed_data,
+    dag=dag
+)
+
+block_processing = DummyOperator(
+    task_id='block_processing',
+    dag=dag
+)
+
+persist_task = PythonOperator(
+    task_id='persist_data',
+    python_callable=persist_data,
+    dag=dag
+)
+
+notify_task = PythonOperator(
+    task_id='notify_event_hub',
+    python_callable=notify_event_hub,
+    dag=dag
+)
+
+# Feed entry points
+primary_feed = DummyOperator(
+    task_id='primary_feed',
+    dag=dag
+)
+
+secondary_feed = DummyOperator(
+    task_id='secondary_feed',
+    dag=dag
+)
+
+# Define task dependencies (modified to prevent cycles)
+# Initial flow
+start >> check_trigger
+check_trigger >> [manual_substitution, automated_actions]
+[manual_substitution, automated_actions] >> validate_file_task
+validate_file_task >> [check_allow_substitution, block_file]
+check_allow_substitution >> [unblock_file, block_file]
+
+# Feed processing
+[primary_feed, secondary_feed] >> move_to_processing
+move_to_processing >> register_level_id_task
+
+# Main transformation flow
+unblock_file >> transform_task
+register_level_id_task >> transform_task
+transform_task >> derive_task
+derive_task >> validate_task
+validate_task >> check_threshold
+
+# Branching based on validation
+check_threshold >> [persist_task, wait_for_dmc]
+
+# DMC approval flow (modified to prevent cycles)
+wait_for_dmc >> check_dmc_approval_task
+check_dmc_approval_task >> [retry_transformation, block_processing]
+
+# Retry transformation path
+retry_transformation >> retry_derivation
+retry_derivation >> retry_validation
+retry_validation >> persist_task
+
+# Final steps
+persist_task >> notify_task
