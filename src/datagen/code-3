@@ -10,23 +10,24 @@ import json
 import os
 from pathlib import Path
 
-# [Previous imports and default_args remain the same]
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Define default arguments for the DAG
 default_args = {
-    'owner': 'airflow',                        # Owner of the DAG
-    'depends_on_past': False,                  # Tasks don't depend on past runs
-    'email': ['your-email@example.com'],       # Email for notifications
-    'email_on_failure': True,                  # Send email on task failure
-    'email_on_retry': False,                   # Don't email on task retry
-    'retries': 1,                             # Number of retries if task fails
-    'retry_delay': timedelta(minutes=5),       # Delay between retries
-    'execution_timeout': timedelta(hours=2),   # Maximum task execution time
-    'sla': timedelta(hours=2),                # Service Level Agreement time
-    'start_date': datetime(2024, 1, 1),       # Start date for the DAG
-    'max_active_runs': 1,                     # Maximum number of concurrent runs
-    'catchup': False,                         # Don't backfill missing runs
-    'tags': ['data_processing']               # Tags for organizing DAGs
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email': ['your-email@example.com'],
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+    'execution_timeout': timedelta(hours=2),
+    'sla': timedelta(hours=2),
+    'start_date': datetime(2024, 1, 1),
+    'max_active_runs': 1,
+    'catchup': False
 }
 
 # Create the DAG
@@ -35,56 +36,273 @@ dag = DAG(
     default_args=default_args,
     description='Data processing pipeline with validation and transformation',
     schedule_interval=timedelta(days=1),
-    catchup=False
+    catchup=False,
+    tags=['data_processing']
 )
 
-# [Helper functions remain the same]
+# Helper Functions
+def create_processing_directories():
+    """Create necessary directories for data processing"""
+    directories = [
+        'processing_data',
+        'processing_data/transformed',
+        'processing_data/derived',
+        'processing_data/validated',
+        'processing_data/final',
+        'processing_data/notifications'
+    ]
+    for directory in directories:
+        Path(directory).mkdir(parents=True, exist_ok=True)
 
-# Modified task functions to prevent cycles
+def save_processing_data(data, subdirectory, filename):
+    """Save processing data to JSON file"""
+    create_processing_directories()
+    filepath = f"processing_data/{subdirectory}/{filename}.json"
+    with open(filepath, 'w') as f:
+        json.dump(data, f)
+    return filepath
+
+# Task Functions
+def perform_substitution(**context):
+    """
+    Handle substitution logic for both manual and automated processes
+    """
+    try:
+        task_instance = context['task_instance']
+        task_id = context['task'].task_id
+
+        # Get configuration from DAG run
+        dag_run_conf = context['dag_run'].conf
+        file_id = dag_run_conf.get('file_id', f"FILE_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+        # Perform substitution logic
+        substitution_data = {
+            'file_id': file_id,
+            'substitution_type': 'manual' if task_id == 'manual_substitution' else 'automated',
+            'timestamp': datetime.now().isoformat(),
+            'status': 'completed'
+        }
+
+        # Save substitution results
+        save_processing_data(substitution_data, 'substitution', file_id)
+
+        # Push result to XCom
+        task_instance.xcom_push(key='substitution_status', value='completed')
+        task_instance.xcom_push(key='file_id', value=file_id)
+
+        logger.info(f"Substitution completed for file {file_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Substitution failed: {str(e)}")
+        raise
+
 def check_trigger_type(**context):
-    """Check if the trigger is manual or automated"""
-    trigger_type = context['dag_run'].conf.get('trigger_type', 'automated')
-    logging.info(f"Trigger type: {trigger_type}")
-    if trigger_type == 'manual':
-        return 'manual_substitution'
-    return 'automated_actions'
+    """
+    Determine if the trigger is manual or automated
+    """
+    try:
+        trigger_type = context['dag_run'].conf.get('trigger_type', 'automated')
+        logger.info(f"Detected trigger type: {trigger_type}")
+        return 'manual_substitution' if trigger_type == 'manual' else 'automated_actions'
+    except Exception as e:
+        logger.error(f"Error in trigger type check: {str(e)}")
+        raise
 
 def validate_file(**context):
-    """Validate incoming file"""
-    logging.info("Validating file")
-    validation_passed = True
-
+    """
+    Validate the incoming file
+    """
     try:
         file_path = context['dag_run'].conf.get('file_path', '')
-        if os.path.exists(file_path):
-            validation_passed = True
-    except Exception as e:
-        logging.error(f"File validation failed: {str(e)}")
-        validation_passed = False
+        if not file_path:
+            logger.error("No file path provided")
+            return 'block_file'
 
-    if validation_passed:
-        return 'check_allow_substitution'
-    return 'block_file'
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            return 'block_file'
+
+        # Add your custom file validation logic here
+        validation_passed = True
+
+        return 'check_allow_substitution' if validation_passed else 'block_file'
+    except Exception as e:
+        logger.error(f"File validation failed: {str(e)}")
+        return 'block_file'
+
+def check_substitution_allowed(**context):
+    """
+    Check if substitution is allowed for the file
+    """
+    try:
+        # Add your substitution allowance check logic here
+        substitution_allowed = True
+        logger.info(f"Substitution allowed: {substitution_allowed}")
+        return 'unblock_file' if substitution_allowed else 'block_file'
+    except Exception as e:
+        logger.error(f"Substitution check failed: {str(e)}")
+        return 'block_file'
+
+def register_level_id(**context):
+    """
+    Register and generate a level ID for the processing
+    """
+    try:
+        file_id = context['task_instance'].xcom_pull(task_ids=['manual_substitution', 'automated_actions'])
+        if not file_id:
+            file_id = f"FILE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        level_id = f"LEVEL_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        level_data = {
+            'file_id': file_id,
+            'level_id': level_id,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        save_processing_data(level_data, 'levels', level_id)
+        context['task_instance'].xcom_push(key='level_id', value=level_id)
+
+        logger.info(f"Registered level ID: {level_id} for file {file_id}")
+        return level_id
+    except Exception as e:
+        logger.error(f"Level ID registration failed: {str(e)}")
+        raise
+
+def transform_data(**context):
+    """
+    Transform the input data
+    """
+    try:
+        level_id = context['task_instance'].xcom_pull(task_ids='register_level_id')
+
+        # Add your data transformation logic here
+        transformed_data = {
+            'level_id': level_id,
+            'status': 'transformed',
+            'timestamp': datetime.now().isoformat()
+        }
+
+        save_processing_data(transformed_data, 'transformed', level_id)
+        logger.info(f"Data transformation completed for level {level_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Data transformation failed: {str(e)}")
+        raise
+
+def derive_data(**context):
+    """
+    Derive new data from transformed data
+    """
+    try:
+        level_id = context['task_instance'].xcom_pull(task_ids='register_level_id')
+
+        # Add your data derivation logic here
+        derived_data = {
+            'level_id': level_id,
+            'status': 'derived',
+            'timestamp': datetime.now().isoformat()
+        }
+
+        save_processing_data(derived_data, 'derived', level_id)
+        logger.info(f"Data derivation completed for level {level_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Data derivation failed: {str(e)}")
+        raise
+
+def validate_processed_data(**context):
+    """
+    Validate the processed data
+    """
+    try:
+        level_id = context['task_instance'].xcom_pull(task_ids='register_level_id')
+
+        # Add your validation logic here
+        validation_data = {
+            'level_id': level_id,
+            'status': 'validated',
+            'timestamp': datetime.now().isoformat()
+        }
+
+        save_processing_data(validation_data, 'validated', level_id)
+        logger.info(f"Data validation completed for level {level_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Data validation failed: {str(e)}")
+        raise
 
 def check_validation_threshold(**context):
-    """Check if validation breached threshold"""
-    logging.info("Checking validation threshold")
-    threshold_breached = False
+    """
+    Check if validation results breached threshold
+    """
+    try:
+        level_id = context['task_instance'].xcom_pull(task_ids='register_level_id')
+        # Add your threshold check logic here
+        threshold_breached = False
 
-    if threshold_breached:
+        logger.info(f"Threshold check completed for level {level_id}")
+        return 'wait_for_dmc' if threshold_breached else 'persist_data'
+    except Exception as e:
+        logger.error(f"Threshold check failed: {str(e)}")
         return 'wait_for_dmc'
-    return 'persist_data'
+
+def persist_data(**context):
+    """
+    Persist the processed data
+    """
+    try:
+        level_id = context['task_instance'].xcom_pull(task_ids='register_level_id')
+
+        # Add your data persistence logic here
+        final_data = {
+            'level_id': level_id,
+            'status': 'persisted',
+            'timestamp': datetime.now().isoformat()
+        }
+
+        save_processing_data(final_data, 'final', level_id)
+        logger.info(f"Data persisted for level {level_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Data persistence failed: {str(e)}")
+        raise
+
+def notify_event_hub(**context):
+    """
+    Send notification to event hub
+    """
+    try:
+        level_id = context['task_instance'].xcom_pull(task_ids='register_level_id')
+
+        # Add your notification logic here
+        notification_data = {
+            'level_id': level_id,
+            'status': 'completed',
+            'timestamp': datetime.now().isoformat()
+        }
+
+        save_processing_data(notification_data, 'notifications', level_id)
+        logger.info(f"Notification sent for level {level_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Notification failed: {str(e)}")
+        raise
 
 def check_dmc_approval(**context):
-    """Check DMC approval status"""
-    logging.info("Checking DMC approval")
-    approval_granted = context['task_instance'].xcom_pull(task_ids='wait_for_dmc', key='approval_status')
+    """
+    Check DMC approval status
+    """
+    try:
+        approval_granted = context['task_instance'].xcom_pull(task_ids='wait_for_dmc', key='approval_status')
+        logger.info(f"DMC approval status: {approval_granted}")
+        return 'retry_transformation' if approval_granted else 'block_processing'
+    except Exception as e:
+        logger.error(f"DMC approval check failed: {str(e)}")
+        return 'block_processing'
 
-    if approval_granted:
-        return 'retry_transformation'
-    return 'block_processing'
-
-# Task definitions
+# Task Definitions
 start = DummyOperator(
     task_id='start',
     dag=dag
@@ -143,7 +361,6 @@ register_level_id_task = PythonOperator(
     dag=dag
 )
 
-# Initial transformation tasks
 transform_task = PythonOperator(
     task_id='transform_data',
     python_callable=transform_data,
@@ -168,7 +385,6 @@ check_threshold = BranchPythonOperator(
     dag=dag
 )
 
-# DMC approval process
 wait_for_dmc = ExternalTaskSensor(
     task_id='wait_for_dmc',
     external_dag_id='dmc_approval',
@@ -183,7 +399,6 @@ check_dmc_approval_task = BranchPythonOperator(
     dag=dag
 )
 
-# Retry transformation path (separate from initial transformation)
 retry_transformation = PythonOperator(
     task_id='retry_transformation',
     python_callable=transform_data,
@@ -202,11 +417,6 @@ retry_validation = PythonOperator(
     dag=dag
 )
 
-block_processing = DummyOperator(
-    task_id='block_processing',
-    dag=dag
-)
-
 persist_task = PythonOperator(
     task_id='persist_data',
     python_callable=persist_data,
@@ -219,7 +429,11 @@ notify_task = PythonOperator(
     dag=dag
 )
 
-# Feed entry points
+block_processing = DummyOperator(
+    task_id='block_processing',
+    dag=dag
+)
+
 primary_feed = DummyOperator(
     task_id='primary_feed',
     dag=dag
@@ -230,36 +444,34 @@ secondary_feed = DummyOperator(
     dag=dag
 )
 
-# Define task dependencies (modified to prevent cycles)
-# Initial flow
+# Define task dependencies
 start >> check_trigger
 check_trigger >> [manual_substitution, automated_actions]
 [manual_substitution, automated_actions] >> validate_file_task
 validate_file_task >> [check_allow_substitution, block_file]
 check_allow_substitution >> [unblock_file, block_file]
 
-# Feed processing
 [primary_feed, secondary_feed] >> move_to_processing
 move_to_processing >> register_level_id_task
 
-# Main transformation flow
 unblock_file >> transform_task
 register_level_id_task >> transform_task
 transform_task >> derive_task
 derive_task >> validate_task
 validate_task >> check_threshold
 
-# Branching based on validation
 check_threshold >> [persist_task, wait_for_dmc]
-
-# DMC approval flow (modified to prevent cycles)
 wait_for_dmc >> check_dmc_approval_task
 check_dmc_approval_task >> [retry_transformation, block_processing]
 
-# Retry transformation path
+# Retry transformation path (after DMC approval)
 retry_transformation >> retry_derivation
 retry_derivation >> retry_validation
 retry_validation >> persist_task
 
 # Final steps
 persist_task >> notify_task
+
+# Set upstream for tasks that can receive multiple inputs
+persist_task.trigger_rule = TriggerRule.ONE_SUCCESS
+notify_task.trigger_rule = TriggerRule.ALL_SUCCESS
