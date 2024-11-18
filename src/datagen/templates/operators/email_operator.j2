@@ -1,0 +1,25 @@
+{# templates/operators/email_operator.j2 #}
+{% macro render_email_operator(task) %}
+EmailOperator(
+    task_id="{{ task.task_id }}",
+    to={{ task.task_params.to | tojson }},
+    subject={{ task.task_params.subject | tojson }},
+    html_content={{ task.task_params.html_content | tojson }},
+    {% if task.task_params.get('files') %}
+    files={{ task.task_params.files | tojson }},
+    {% endif %}
+    {% if task.task_params.get('cc') %}
+    cc={{ task.task_params.cc | tojson }},
+    {% endif %}
+    {% if task.task_params.get('bcc') %}
+    bcc={{ task.task_params.bcc | tojson }},
+    {% endif %}
+    {% if task.task_params.get('mime_subtype') %}
+    mime_subtype={{ task.task_params.mime_subtype | tojson }},
+    {% endif %}
+    {% if task.task_params.get('mime_charset') %}
+    mime_charset={{ task.task_params.mime_charset | tojson }},
+    {% endif %}
+    {% include 'operators/common_args.j2' %}
+)
+{% endmacro %}
