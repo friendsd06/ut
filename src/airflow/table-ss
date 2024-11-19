@@ -281,3 +281,79 @@ CREATE TABLE Tasks (
         ON DELETE NO ACTION
 );
 
+CREATE TABLE IF NOT EXISTS public.slice
+(
+    sliceid character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    productlineid character varying(50) COLLATE pg_catalog."default",
+    slicename character varying(255) COLLATE pg_catalog."default",
+    CONSTRAINT slice_pkey PRIMARY KEY (sliceid),
+    CONSTRAINT slice_productlineid_fkey FOREIGN KEY (productlineid)
+        REFERENCES public.dataproductline (productlineid) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+)
+
+========================
+INSERT INTO public.slice (sliceid, productlineid, slicename)
+VALUES
+    ('SL1', 'PRLN1', 'AGXP'),
+    ('SL2', 'PRLN1', 'REG1'),
+    ('SL3', 'PRLN1', 'REG2');
+===========================
+INSERT INTO public.pipeline (
+    pipelineid, pipelinename, pipelinegroup, pipelinepriority, sliceid, templateid,
+    dag_id, owner, description, schedule_interval, start_date, end_date, catchup,
+    tags, max_active_runs, default_args, concurrency, is_active, is_paused,
+    depends_on_past, wait_for_downstream, email_on_failure, email_on_retry, retries,
+    retry_delay, sla, on_success_callback, on_failure_callback, created_at, updated_at
+)
+VALUES
+    ('PL1', 'Pipeline_AGXP', 'REG', 1, 'SL1', NULL, 'DAG1', 'owner1', 'Description 1', '0 12 * * *', '2024-01-01 12:00:00', NULL, false, '[]', 1, '{}', 5, true, false, false, false, true, false, 3, '00:05:00', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('PL2', 'Pipeline_REG1', 'REG', 2, 'SL2', NULL, 'DAG2', 'owner2', 'Description 2', '0 14 * * *', '2024-01-01 14:00:00', NULL, false, '[]', 1, '{}', 5, true, false, false, false, true, false, 3, '00:05:00', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('PL3', 'Pipeline_REG2', 'REG', 3, 'SL3', NULL, 'DAG3', 'owner3', 'Description 3', '0 16 * * *', '2024-01-01 16:00:00', NULL, false, '[]', 1, '{}', 5, true, false, false, false, true, false, 3, '00:05:00', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+    ========================
+
+    INSERT INTO public.tasks (
+        task_id, pipelineid, operator_type, task_params, python_callable, bash_command, sql_query,
+        trigger_rule, retries, retry_delay, priority_weight, queue, pool, execution_timeout,
+        depends_on_past, wait_for_downstream, email_on_failure, email_on_retry, on_success_callback,
+        on_failure_callback, on_retry_callback, sla, group_id, doc, doc_md, doc_rst, doc_json, doc_yaml
+    )
+    VALUES
+        ('T1', 'PL1', 'python', '{}', 'callable1', NULL, NULL, 'all_success', 3, '00:05:00', 1, 'queue1', 'default_pool', NULL, false, false, true, false, NULL, NULL, NULL, NULL, 1, 'Documentation 1', NULL, NULL, NULL, NULL),
+        ('T2', 'PL2', 'bash', '{}', NULL, 'echo "Hello World"', NULL, 'all_failed', 3, '00:05:00', 1, 'queue2', 'default_pool', NULL, false, false, true, false, NULL, NULL, NULL, NULL, 2, 'Documentation 2', NULL, NULL, NULL, NULL),
+        ('T3', 'PL3', 'sql', '{}', NULL, NULL, 'SELECT * FROM table', 'one_success', 3, '00:05:00', 1, 'queue3', 'default_pool', NULL, false, false, true, false, NULL, NULL, NULL, NULL, 3, 'Documentation 3', NULL, NULL, NULL, NULL);
+
+=============================================
+INSERT INTO public.pipelinedatasets (
+    pipelineid, datasetid, datasetentrytype, upstream_task_id, downstream_task_id, dependency_type, is_active, created_at
+)
+VALUES
+    ('PL1', 'DS1', 'IN', NULL, 'T1', 'direct', true, CURRENT_TIMESTAMP),
+    ('PL2', 'DS2', 'OUT', 'T1', 'T2', 'direct', true, CURRENT_TIMESTAMP),
+    ('PL3', 'DS3', 'IN', 'T2', 'T3', 'indirect', true, CURRENT_TIMESTAMP);
+
+
+===========================
+INSERT INTO public.dataproduct (productid, productname)
+VALUES
+    ('PR1', 'Derivatives'),
+    ('PR2', 'Equities'),
+    ('PR3', 'Fixed Income');
+==================
+INSERT INTO public.dataproductline (productlineid, productid, productlinename)
+VALUES
+    ('PRLN1', 'PR1', 'Derivatives Line 1'),
+    ('PRLN2', 'PR2', 'Equities Line 1'),
+    ('PRLN3', 'PR3', 'Fixed Income Line 1');
+
+
+    ========================
+
+    INSERT INTO public.datasets (datasetid, productlineid, datasetname)
+    VALUES
+        ('DS1', 'PRLN1', 'AGXP_YYYYMMDD.txt'),
+        ('DS2', 'PRLN2', 'REG1_YYYYMMDD.txt'),
+        ('DS3', 'PRLN3', 'REG2_YYYYMMDD.txt');
+
