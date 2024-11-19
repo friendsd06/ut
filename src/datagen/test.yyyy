@@ -1,0 +1,47 @@
+# 1. Schema Definition
+schema_dict = {
+    'numeric': {},
+    'string': {},
+    'date_type': {}
+}
+
+# 2. Data Analysis
+# For Numeric Columns
+numeric_summary = dg.DataAnalyzer(spark, df).summarizeTopF()
+numeric_df = numeric_summary.where("measure in ('count', 'null_probability', 'distinct_count', 'min', 'max')")
+numeric_stats_dict = numeric_df.toPandas().to_dict()
+
+# For String Columns
+string_summary = dg.DataAnalyzer(spark, df).summarizeTopF()
+string_df = string_summary.where("dtype == 'string'")
+string_stats_dict = string_df.toPandas().to_dict()
+
+# 3. Data Generation Setup
+datagen_fileDataSpec = dg.DataGenerator(
+    sparkSession=spark,
+    name='trndws_card_acct_file_synthetic_data',
+    rows=800000
+)
+
+# 4. Generate String Columns
+for column, dtype in schema_dict['string'].items():
+    unique_values = df.select(column).distinct().collect()
+    datagen_fileDataSpec = datagen_fileDataSpec.withColumn(
+        column,
+        dtype,
+        values=unique_values,
+        random=True
+    )
+
+# 5. Generate Numeric Columns
+for column, dtype in schema_dict['numeric'].items():
+    datagen_fileDataSpec = datagen_fileDataSpec.withColumn(
+        column,
+        dtype,
+        minValue=float(numeric_stats_dict[column][3]),  # min value
+        maxValue=float(numeric_stats_dict[column][4]),  # max value
+        random=True
+    )
+
+# 6. Generate Final Dataset
+synthetic_data = datagen_fileDataSpec.generate()
