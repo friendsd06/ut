@@ -1,0 +1,68 @@
+DAG Generator System Components
+🎯 Core Component: DagGenerator
+pythonCopyclass DagGenerator:
+    """Orchestrates the entire DAG generation process."""
+
+    def generate_single_dag(self, dag_id: str) -> None:
+        # 1. Fetch DAG metadata
+        metadata = self.data_fetcher.get_dag_metadata(dag_id)
+
+        # 2. Generate DAG code from template
+        dag_code = self.template_engine.render_template(metadata)
+
+        # 3. Format the generated code
+        formatted_code = self.code_formatter.format_code(dag_code)
+
+        # 4. Write to file system
+        self.file_writer.write_dag_file(dag_id, formatted_code)
+Key Responsibilities:
+ResponsibilityDescription🔄 OrchestrationCoordinates all components and workflow📊 ManagementHandles single and bulk DAG generation🚨 Error HandlingComprehensive error management and logging🔗 IntegrationEnsures smooth component interaction
+📥 Data Layer: DatabaseDagFetcher
+pythonCopydef get_dag_metadata(self, dag_id: str) -> Dict:
+    """Retrieves complete DAG metadata from database."""
+    with DBClient(self.db_config) as db:
+        return db.get_dag_metadata(dag_id)
+Key Responsibilities:
+ResponsibilityDescription🔍 Data RetrievalFetches DAG metadata and configurations📋 DAG ManagementMaintains list of active DAGs🔌 ConnectionHandles database connectivity✅ ValidationEnsures DAG existence and validity
+🎨 Template Layer: JinjaTemplateEngine
+pythonCopydef render_template(self, template_name: str, data: Dict) -> str:
+    """Renders DAG code using Jinja templates."""
+    template = self.env.get_template(template_name)
+    return template.render(**data)
+Key Responsibilities:
+ResponsibilityDescription📝 Template LoadingManages Jinja template files🔨 Code GenerationRenders templates with metadata🛠️ Custom FiltersProvides specialized formatting functions✔️ ValidationEnsures template existence and validity
+✨ Formatting Layer: CodeFormatter
+pythonCopydef format_code(self, code: str) -> str:
+    """Formats Python code using Black."""
+    return black.format_str(
+        code,
+        mode=black.FileMode()
+    )
+Key Responsibilities:
+ResponsibilityDescription🎯 Code FormattingApplies consistent Python formatting📋 Style EnforcementEnsures code style standards🔍 Syntax CheckValidates Python code syntax⚠️ Error ManagementHandles formatting issues
+📂 Output Layer: DagFileWriter
+pythonCopydef write_dag_file(self, dag_id: str, content: str) -> None:
+    """Writes formatted DAG code to file system."""
+    output_path = self.output_dir / f"{dag_id}.py"
+    output_path.write_text(content)
+Key Responsibilities:
+ResponsibilityDescription📁 Directory ManagementHandles output directory structure✍️ File WritingCreates and updates DAG files🔧 File OperationsManages file system interactions📝 Naming ConventionEnsures consistent file naming
+🚀 Entry Point: Main Script
+pythonCopy# Initialize components
+data_fetcher = DatabaseDagFetcher(db_config)
+template_engine = JinjaTemplateEngine(template_dir)
+code_formatter = BlackCodeFormatter()
+file_writer = DagFileWriter(output_dir)
+
+# Create DAG generator
+generator = DagGenerator(
+    data_fetcher=data_fetcher,
+    template_engine=template_engine,
+    code_formatter=code_formatter,
+    file_writer=file_writer
+)
+
+# Generate DAGs
+generator.generate_all_dags()
+Key Responsibilities:
+ResponsibilityDescription🔧 InitializationSets up all system components📝 LoggingConfigures system-wide logging📂 Directory SetupPrepares necessary directories⚠️ Error HandlingManages top-level exceptions
