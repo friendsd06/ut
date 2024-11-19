@@ -174,3 +174,110 @@ CREATE TABLE Tasks (
         ON UPDATE NO ACTION
         ON DELETE NO ACTION
 );
+
+======================================
+
+-- Updated PipelineDatasets table
+CREATE TABLE PipelineDatasets (
+    id SERIAL PRIMARY KEY, -- Unique identifier for each row
+    PipelineID VARCHAR(50),
+    DatasetID VARCHAR(50),
+    DatasetEntryType VARCHAR(50), -- IN or OUT
+    upstream_task_id VARCHAR, -- Task ID for the upstream task
+    downstream_task_id VARCHAR, -- Task ID for the downstream task
+    dependency_type VARCHAR DEFAULT 'direct', -- Type of dependency (default is 'direct')
+    is_active BOOLEAN DEFAULT true, -- Indicates if the dependency is active
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Timestamp for record creation
+    CONSTRAINT pipeline_datasets_pipelineid_fkey FOREIGN KEY (PipelineID)
+        REFERENCES Pipeline(PipelineID) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT pipeline_datasets_datasetid_fkey FOREIGN KEY (DatasetID)
+        REFERENCES Datasets(DatasetID) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT task_dependencies_dag_id_downstream_task_id_fkey FOREIGN KEY (PipelineID, downstream_task_id)
+        REFERENCES public.Tasks (PipelineID, task_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT task_dependencies_dag_id_upstream_task_id_fkey FOREIGN KEY (PipelineID, upstream_task_id)
+        REFERENCES public.Tasks (PipelineID, task_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+=====================
+
+corrected
+
+CREATE TABLE Pipeline (
+    PipelineID VARCHAR(50) PRIMARY KEY,
+    PipelineName VARCHAR(255),
+    PipelineGroup VARCHAR(50),
+    PipelinePriority INT,
+    SliceID VARCHAR(50),
+    TemplateID VARCHAR(50),
+    dag_id VARCHAR NOT NULL,
+    owner VARCHAR NOT NULL,
+    description TEXT,
+    schedule_interval VARCHAR NOT NULL,
+    start_date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    end_date TIMESTAMP WITHOUT TIME ZONE,
+    catchup BOOLEAN DEFAULT false,
+    tags JSONB DEFAULT '[]'::jsonb,
+    max_active_runs INTEGER DEFAULT 1,
+    default_args JSONB DEFAULT '{}'::jsonb,
+    concurrency INTEGER,
+    is_active BOOLEAN DEFAULT true,
+    is_paused BOOLEAN DEFAULT false,
+    depends_on_past BOOLEAN DEFAULT false,
+    wait_for_downstream BOOLEAN DEFAULT false,
+    email_on_failure BOOLEAN DEFAULT true,
+    email_on_retry BOOLEAN DEFAULT false,
+    retries INTEGER DEFAULT 3,
+    retry_delay INTERVAL DEFAULT '00:05:00'::interval,
+    sla INTERVAL,
+    on_success_callback TEXT,
+    on_failure_callback TEXT,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (SliceID) REFERENCES Slice(SliceID)
+);
+
+
+CREATE TABLE Tasks (
+    task_id VARCHAR NOT NULL,
+    PipelineID VARCHAR NOT NULL,
+    operator_type VARCHAR NOT NULL, -- Custom enum for operator types
+    task_params JSONB DEFAULT '{}'::jsonb,
+    python_callable TEXT,
+    bash_command TEXT,
+    sql_query TEXT,
+    trigger_rule VARCHAR NOT NULL, -- Custom enum for trigger rules
+    retries INTEGER DEFAULT 3,
+    retry_delay INTERVAL DEFAULT '00:05:00'::interval,
+    priority_weight INTEGER DEFAULT 1,
+    queue VARCHAR,
+    pool VARCHAR DEFAULT 'default_pool',
+    execution_timeout INTERVAL,
+    depends_on_past BOOLEAN DEFAULT false,
+    wait_for_downstream BOOLEAN DEFAULT false,
+    email_on_failure BOOLEAN DEFAULT true,
+    email_on_retry BOOLEAN DEFAULT false,
+    on_success_callback TEXT,
+    on_failure_callback TEXT,
+    on_retry_callback TEXT,
+    sla INTERVAL,
+    group_id INTEGER,
+    doc TEXT,
+    doc_md TEXT,
+    doc_rst TEXT,
+    doc_json TEXT,
+    doc_yaml TEXT,
+    CONSTRAINT task_configs_pkey PRIMARY KEY (task_id, PipelineID),
+    CONSTRAINT task_configs_pipeline_fkey FOREIGN KEY (PipelineID)
+        REFERENCES public.Pipeline (PipelineID) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
