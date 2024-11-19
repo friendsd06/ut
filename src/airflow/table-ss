@@ -1,0 +1,176 @@
+-- Create DataProduct table
+CREATE TABLE DataProduct (
+    ProductID VARCHAR(50) PRIMARY KEY,
+    ProductName VARCHAR(255)
+);
+
+-- Create DataProductLine table
+CREATE TABLE DataProductLine (
+    ProductLineID VARCHAR(50) PRIMARY KEY,
+    ProductID VARCHAR(50),
+    ProductLineName VARCHAR(255),
+    FOREIGN KEY (ProductID) REFERENCES DataProduct(ProductID)
+);
+
+-- Create Datasets table
+CREATE TABLE Datasets (
+    DatasetID VARCHAR(50) PRIMARY KEY,
+    ProductLineID VARCHAR(50),
+    DatasetName VARCHAR(255),
+    FOREIGN KEY (ProductLineID) REFERENCES DataProductLine(ProductLineID)
+);
+
+-- Create Slice table
+CREATE TABLE Slice (
+    SliceID VARCHAR(50) PRIMARY KEY,
+    ProductLineID VARCHAR(50),
+    SliceName VARCHAR(255),
+    FOREIGN KEY (ProductLineID) REFERENCES DataProductLine(ProductLineID)
+);
+
+-- Create FeedFile table
+CREATE TABLE FeedFile (
+    DatasetID VARCHAR(50),
+    SliceID VARCHAR(50),
+    SourceSystemID VARCHAR(50),
+    FeedGroup VARCHAR(50),
+    FileName VARCHAR(255),
+    PRIMARY KEY (DatasetID, SliceID),
+    FOREIGN KEY (DatasetID) REFERENCES Datasets(DatasetID),
+    FOREIGN KEY (SliceID) REFERENCES Slice(SliceID)
+);
+
+-- Create SourceSystem table
+CREATE TABLE SourceSystem (
+    SourceSystemID VARCHAR(50) PRIMARY KEY,
+    SourceSystemName VARCHAR(255)
+);
+
+-- Create TableDataset table
+CREATE TABLE TableDataset (
+    DatasetID VARCHAR(50),
+    TableName VARCHAR(255),
+    PRIMARY KEY (DatasetID),
+    FOREIGN KEY (DatasetID) REFERENCES Datasets(DatasetID)
+);
+===============================================================================
+-- Create TableDataset table (if not already created)
+CREATE TABLE TableDataset (
+    DatasetID VARCHAR(50) PRIMARY KEY,
+    TableName VARCHAR(255)
+);
+
+-- Create Pipeline table
+CREATE TABLE Pipeline (
+    PipelineID VARCHAR(50) PRIMARY KEY,
+    PipelineName VARCHAR(255),
+    PipelineGroup VARCHAR(50),
+    PipelinePriority INT,
+    SliceID VARCHAR(50),
+    TemplateID VARCHAR(50),
+    FOREIGN KEY (SliceID) REFERENCES Slice(SliceID),
+    FOREIGN KEY (TemplateID) REFERENCES Template(TemplateID)
+);
+
+-- Create Template table
+CREATE TABLE Template (
+    TemplateID VARCHAR(50) PRIMARY KEY,
+    TemplateName VARCHAR(255)
+);
+
+-- Create Tasks table
+CREATE TABLE Tasks (
+    TemplateID VARCHAR(50),
+    TaskID VARCHAR(50),
+    TaskName VARCHAR(255),
+    PRIMARY KEY (TemplateID, TaskID),
+    FOREIGN KEY (TemplateID) REFERENCES Template(TemplateID)
+);
+
+-- Create PipelineDatasets table
+CREATE TABLE PipelineDatasets (
+    PipelineID VARCHAR(50),
+    DatasetID VARCHAR(50),
+    DatasetEntryType VARCHAR(50), -- IN or OUT
+    PRIMARY KEY (PipelineID, DatasetID),
+    FOREIGN KEY (PipelineID) REFERENCES Pipeline(PipelineID),
+    FOREIGN KEY (DatasetID) REFERENCES Datasets(DatasetID)
+);
+
+================================================================
+
+-- Update the Pipeline table
+CREATE TABLE Pipeline (
+    PipelineID VARCHAR(50) PRIMARY KEY,
+    PipelineName VARCHAR(255),
+    PipelineGroup VARCHAR(50),
+    PipelinePriority INT,
+    SliceID VARCHAR(50),
+    TemplateID VARCHAR(50),
+    dag_id VARCHAR NOT NULL,
+    owner VARCHAR NOT NULL,
+    description TEXT,
+    schedule_interval VARCHAR NOT NULL,
+    start_date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    end_date TIMESTAMP WITHOUT TIME ZONE,
+    catchup BOOLEAN DEFAULT false,
+    tags JSONB DEFAULT '[]'::jsonb,
+    max_active_runs INTEGER DEFAULT 1,
+    default_args JSONB DEFAULT '{}'::jsonb,
+    concurrency INTEGER,
+    is_active BOOLEAN DEFAULT true,
+    is_paused BOOLEAN DEFAULT false,
+    environment env_type DEFAULT 'dev'::env_type,
+    depends_on_past BOOLEAN DEFAULT false,
+    wait_for_downstream BOOLEAN DEFAULT false,
+    email_on_failure BOOLEAN DEFAULT true,
+    email_on_retry BOOLEAN DEFAULT false,
+    retries INTEGER DEFAULT 3,
+    retry_delay INTERVAL DEFAULT '00:05:00'::interval,
+    sla INTERVAL,
+    on_success_callback TEXT,
+    on_failure_callback TEXT,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (SliceID) REFERENCES Slice(SliceID),
+    FOREIGN KEY (TemplateID) REFERENCES Template(TemplateID)
+);
+
+
+
+-- Update the Tasks table
+CREATE TABLE Tasks (
+    task_id VARCHAR NOT NULL,
+    PipelineID VARCHAR NOT NULL,
+    operator_type operator_type NOT NULL, -- Custom enum for operator types
+    task_params JSONB DEFAULT '{}'::jsonb,
+    python_callable TEXT,
+    bash_command TEXT,
+    sql_query TEXT,
+    trigger_rule trigger_rule_type DEFAULT 'all_success'::trigger_rule_type, -- Custom enum for trigger rules
+    retries INTEGER DEFAULT 3,
+    retry_delay INTERVAL DEFAULT '00:05:00'::interval,
+    priority_weight INTEGER DEFAULT 1,
+    queue VARCHAR,
+    pool VARCHAR DEFAULT 'default_pool',
+    execution_timeout INTERVAL,
+    depends_on_past BOOLEAN DEFAULT false,
+    wait_for_downstream BOOLEAN DEFAULT false,
+    email_on_failure BOOLEAN DEFAULT true,
+    email_on_retry BOOLEAN DEFAULT false,
+    on_success_callback TEXT,
+    on_failure_callback TEXT,
+    on_retry_callback TEXT,
+    sla INTERVAL,
+    group_id INTEGER,
+    doc TEXT,
+    doc_md TEXT,
+    doc_rst TEXT,
+    doc_json TEXT,
+    doc_yaml TEXT,
+    CONSTRAINT task_configs_pkey PRIMARY KEY (task_id, PipelineID),
+    CONSTRAINT task_configs_pipeline_fkey FOREIGN KEY (PipelineID)
+        REFERENCES public.Pipeline (PipelineID) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
