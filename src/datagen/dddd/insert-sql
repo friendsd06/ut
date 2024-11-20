@@ -92,7 +92,6 @@ INSERT INTO Tasks (
  NULL,
  NULL);
 
--- Pipeline Dataset Dependencies Insert with STR prefixes
 INSERT INTO PipelineDatasetDependencies (
     pipeline_id, source_dataset_id, target_dataset_id,
     processing_order, task_id, template_id
@@ -100,6 +99,6 @@ INSERT INTO PipelineDatasetDependencies (
 ('STR_PL1', 'STR01', 'STR02', 1, 'STRT1', 'STR_TPL'),
 ('STR_PL1', 'STR02', 'STR03', 2, 'STRT2', 'STR_TPL'),
 ('STR_PL1', 'STR03', 'STR04', 3, 'STRT3', 'STR_TPL'),
-('STR_PL1', 'STR03', 'STR04', 4, 'STRT4', 'STR_TPL'),
-('STR_PL1', 'STR04', 'STR05', 5, 'STRT5', 'STR_TPL'),
-('STR_PL1', 'STR05', 'STR05', 6, 'STRT6', 'STR_TPL');
+('STR_PL1', 'STR04', 'STR05', 4, 'STRT4', 'STR_TPL'),  -- Changed source from STR03 to STR04
+('STR_PL1', 'STR05', 'STR04', 5, 'STRT5', 'STR_TPL'),  -- Changed combination
+('STR_PL1', 'STR04', 'STR05', 6, 'STRT6', 'STR_TPL');  -- Final output to STR05
