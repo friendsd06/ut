@@ -1,0 +1,288 @@
+-- First, create ENUM types
+CREATE TYPE operator_type AS ENUM (
+    'PythonOperator',
+    'PostgresOperator',
+    'BashOperator',
+    'ExternalTaskSensor',
+    'HttpOperator',
+    'EmailOperator',
+    'EmptyOperator'
+    'BranchPythonOperator'
+);
+CREATE TYPE trigger_rule_type AS ENUM ('all_success', 'all_failed', 'all_done', 'one_success', 'none_failed');
+
+-- Core tables remain same
+CREATE TABLE DataProduct (
+    ProductID VARCHAR(10) PRIMARY KEY,
+    ProductName VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE DataProductLine (
+    ProductLineID VARCHAR(10) PRIMARY KEY,
+    ProductID VARCHAR(10) NOT NULL,
+    ProductLineName VARCHAR(100) NOT NULL,
+    FOREIGN KEY (ProductID) REFERENCES DataProduct(ProductID)
+);
+
+CREATE TABLE Datasets (
+    DatasetID VARCHAR(10) PRIMARY KEY,
+    ProductLineID VARCHAR(10) NOT NULL,
+    DatasetName VARCHAR(100) NOT NULL,
+    FOREIGN KEY (ProductLineID) REFERENCES DataProductLine(ProductLineID)
+);
+
+CREATE TABLE Slice (
+    SliceID VARCHAR(10) PRIMARY KEY,
+    ProductLineID VARCHAR(10) NOT NULL,
+    SliceName VARCHAR(100) NOT NULL,
+    FOREIGN KEY (ProductLineID) REFERENCES DataProductLine(ProductLineID)
+);
+
+CREATE TABLE SourceSystem (
+    SourceSystemID VARCHAR(10) PRIMARY KEY,
+    SourceSystemName VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE FeedFile (
+    DatasetID VARCHAR(10),
+    SliceID VARCHAR(10),
+    SourceSystemID VARCHAR(10) NOT NULL,
+    FeedGroup VARCHAR(50),
+    FileName VARCHAR(100) NOT NULL,
+    PRIMARY KEY (DatasetID, SliceID),
+    FOREIGN KEY (DatasetID) REFERENCES Datasets(DatasetID),
+    FOREIGN KEY (SliceID) REFERENCES Slice(SliceID),
+    FOREIGN KEY (SourceSystemID) REFERENCES SourceSystem(SourceSystemID)
+);
+
+CREATE TABLE TableDataset (
+    DatasetID VARCHAR(10) PRIMARY KEY,
+    TableName VARCHAR(100) NOT NULL,
+    FOREIGN KEY (DatasetID) REFERENCES Datasets(DatasetID)
+);
+
+CREATE TABLE Template (
+    TemplateID VARCHAR(10) PRIMARY KEY,
+    TemplateName VARCHAR(100) NOT NULL
+);
+
+-- Enhanced Pipeline table
+CREATE TABLE Pipeline (
+    PipelineID VARCHAR(10) PRIMARY KEY,
+    PipelineName VARCHAR(100) NOT NULL,
+    PipelineGroup VARCHAR(50),
+    PipelinePriority INTEGER,
+    Slice VARCHAR(10),
+    Template VARCHAR(10),
+    schedule_interval VARCHAR(50),
+    start_date TIMESTAMP,
+    catchup BOOLEAN DEFAULT false,
+    max_active_runs INTEGER DEFAULT 1,
+    concurrency INTEGER DEFAULT 1,
+    retries INTEGER DEFAULT 0,
+    retry_delay_minutes INTEGER DEFAULT 5,
+    dag_timeout_minutes INTEGER DEFAULT 60,
+    owner VARCHAR(100),
+    email_on_failure BOOLEAN DEFAULT true,
+    email_on_retry BOOLEAN DEFAULT false,
+    notification_emails VARCHAR[],
+    env_vars JSONB,
+    dag_tags VARCHAR[],
+    default_args JSONB,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (Slice) REFERENCES Slice(SliceID),
+    FOREIGN KEY (Template) REFERENCES Template(TemplateID)
+);
+
+-- Create Task Groups table
+CREATE TABLE TaskGroups (
+    group_id SERIAL PRIMARY KEY,
+    pipeline_id VARCHAR(10),
+    group_name VARCHAR(100) NOT NULL,
+    parent_group_id INTEGER,
+    tooltip TEXT,
+    prefix_group_id BOOLEAN DEFAULT true,
+    tag VARCHAR(100),
+    owner VARCHAR(100),
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pipeline_id) REFERENCES Pipeline(PipelineID),
+    FOREIGN KEY (parent_group_id) REFERENCES TaskGroups(group_id)
+);
+
+-- Enhanced Tasks table
+CREATE TABLE Tasks (
+    TaskID VARCHAR(10),
+    TemplateID VARCHAR(10),
+    group_id INTEGER,
+    TaskName VARCHAR(100) NOT NULL,
+    operator_type operator_type NOT NULL,
+    python_callable TEXT,
+    bash_command TEXT,
+    sql_query TEXT,
+    trigger_rule trigger_rule_type DEFAULT 'all_success',
+    task_timeout_minutes INTEGER DEFAULT 30,
+    task_retries INTEGER DEFAULT 3,
+    retry_delay INTERVAL DEFAULT '5 minutes',
+    task_priority_weight INTEGER DEFAULT 1,
+    task_params JSONB DEFAULT '{}'::jsonb,
+    task_queue VARCHAR(50),
+    pool VARCHAR(50) DEFAULT 'default_pool',
+    execution_timeout INTERVAL,
+    depends_on_past BOOLEAN DEFAULT false,
+    wait_for_downstream BOOLEAN DEFAULT false,
+    email_on_failure BOOLEAN DEFAULT true,
+    email_on_retry BOOLEAN DEFAULT false,
+    on_success_callback TEXT,
+    on_failure_callback TEXT,
+    on_retry_callback TEXT,
+    sla INTERVAL,
+    doc TEXT,
+    doc_md TEXT,
+    doc_rst TEXT,
+    doc_json TEXT,
+    doc_yaml TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (TaskID, TemplateID),
+    FOREIGN KEY (TemplateID) REFERENCES Template(TemplateID),
+    FOREIGN KEY (group_id) REFERENCES TaskGroups(group_id)
+);
+
+-- Enhanced PipelineDatasetDependencies table
+CREATE TABLE PipelineDatasetDependencies (
+    pipeline_id VARCHAR(10),
+    source_dataset_id VARCHAR(10),
+    target_dataset_id VARCHAR(10),
+    processing_order INTEGER,
+    task_id VARCHAR(10),
+    template_id VARCHAR(10),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (pipeline_id, source_dataset_id, target_dataset_id),
+    FOREIGN KEY (pipeline_id) REFERENCES Pipeline(PipelineID),
+    FOREIGN KEY (source_dataset_id) REFERENCES Datasets(DatasetID),
+    FOREIGN KEY (target_dataset_id) REFERENCES Datasets(DatasetID),
+    FOREIGN KEY (task_id, template_id) REFERENCES Tasks(TaskID, TemplateID)
+);
+
+-- Indexes for better performance
+CREATE INDEX idx_pipeline_active ON Pipeline(is_active);
+CREATE INDEX idx_pipeline_group ON Pipeline(PipelineGroup);
+CREATE INDEX idx_task_groups_pipeline ON TaskGroups(pipeline_id);
+CREATE INDEX idx_tasks_group ON Tasks(group_id);
+CREATE INDEX idx_dependencies_pipeline ON PipelineDatasetDependencies(pipeline_id);
+CREATE INDEX idx_dependencies_active ON PipelineDatasetDependencies(is_active);
+====================================================================================
+
+-- DataProduct data
+INSERT INTO DataProduct (ProductID, ProductName) VALUES
+('PR1', 'Derivatives'),
+('PR2', 'Equity');
+
+-- DataProductLine data
+INSERT INTO DataProductLine (ProductLineID, ProductID, ProductLineName) VALUES
+('PRLN1', 'PR1', 'REG_OTC_CONTRACT'),
+('PRLN2', 'PR2', 'EQUITY_TRADE');
+
+-- Datasets data
+INSERT INTO Datasets (DatasetID, ProductLineID, DatasetName) VALUES
+('DS1', 'PRLN1', 'AGXP_YYYYDDMM.txt'),
+('DS2', 'PRLN1', 'REG1_YYYYDDMM.txt'),
+('DS3', 'PRLN1', 'REG2_YYYYDDMM.txt'),
+('DS4', 'PRLN1', 'REG3_YYYYDDMM.txt'),
+('DS5', 'PRLN1', 'REG_OTC_CONTRACT'),
+('DS6', 'PRLN1', 'REG_OTC_REPORTING');
+
+-- Slice data
+INSERT INTO Slice (SliceID, ProductLineID, SliceName) VALUES
+('SL1', 'PRLN1', 'AGXP'),
+('SL2', 'PRLN1', 'REG1'),
+('SL3', 'PRLN1', 'REG2'),
+('SL4', 'PRLN1', 'REG3');
+
+-- SourceSystem data
+INSERT INTO SourceSystem (SourceSystemID, SourceSystemName) VALUES
+('SR1', 'AGXP'),
+('SR2', 'REG1'),
+('SR3', 'REG2'),
+('SR4', 'REG3');
+
+-- FeedFile data
+INSERT INTO FeedFile (DatasetID, SliceID, SourceSystemID, FeedGroup, FileName) VALUES
+('DS1', 'SL1', 'SR1', 'REG', 'AGXP_YYYYDDMM.txt'),
+('DS2', 'SL2', 'SR2', 'REG', 'REG1_YYYYDDMM.txt'),
+('DS3', 'SL3', 'SR3', 'REG', 'REG2_YYYYDDMM.txt'),
+('DS4', 'SL4', 'SR4', 'REG', 'REG3_YYYYDDMM.txt');
+
+-- TableDataset data
+INSERT INTO TableDataset (DatasetID, TableName) VALUES
+('DS5', 'REG_OTC_CONTRACT'),
+('DS6', 'REG_OTC_REPORTING');
+
+-- Template data
+INSERT INTO Template (TemplateID, TemplateName) VALUES
+('TL1', 'REG_INGESTION');
+
+-- Pipeline data with enhanced attributes
+INSERT INTO Pipeline (
+    PipelineID, PipelineName, PipelineGroup, PipelinePriority,
+    Slice, Template, schedule_interval, start_date,
+    owner, notification_emails, env_vars, dag_tags
+) VALUES
+('PL1', 'REG_INGESTION_AGXP', 'REG', 1, 'SL1', 'TL1',
+ '0 0 * * *', '2024-01-01 00:00:00',
+ 'data_team', ARRAY['team@company.com'],
+ '{"ENV": "prod", "REGION": "us-east-1"}'::jsonb,
+ ARRAY['reg', 'critical']),
+('PL2', 'REG_INGESTION_REG1', 'REG', 2, 'SL2', 'TL1',
+ '0 1 * * *', '2024-01-01 00:00:00',
+ 'data_team', ARRAY['team@company.com'],
+ '{"ENV": "prod", "REGION": "us-east-1"}'::jsonb,
+ ARRAY['reg']);
+
+-- TaskGroups data
+INSERT INTO TaskGroups (
+    pipeline_id, group_name, tooltip, tag, owner, description
+) VALUES
+('PL1', 'Validation_Group', 'Data validation tasks', 'validation', 'data_team', 'Group for validation tasks'),
+('PL1', 'Transform_Group', 'Data transformation tasks', 'transform', 'data_team', 'Group for transformation tasks');
+
+-- Tasks data with enhanced attributes
+INSERT INTO Tasks (
+    TaskID, TemplateID, group_id, TaskName, operator_type,
+    python_callable, task_params, task_queue, pool,
+    execution_timeout, doc
+) VALUES
+('TSK1', 'TL1', 1, 'CheckSum', 'python',
+ 'def validate_checksum(**context):\n    print("Validating checksum")\n    return True',
+ '{"validation_type": "checksum", "threshold": 0.99}'::jsonb,
+ 'validation_queue', 'validation_pool',
+ INTERVAL '30 minutes',
+ 'Task to validate data checksums'),
+
+('TSK2', 'TL1', 1, 'DDRLookup', 'python',
+ 'def lookup_ddr(**context):\n    print("Looking up DDR")\n    return True',
+ '{"lookup_type": "ddr", "cache": true}'::jsonb,
+ 'lookup_queue', 'lookup_pool',
+ INTERVAL '45 minutes',
+ 'Task to perform DDR lookups'),
+
+('TSK3', 'TL1', 2, 'Transform', 'python',
+ 'def transform_data(**context):\n    print("Transforming data")\n    return True',
+ '{"transform_type": "standard"}'::jsonb,
+ 'transform_queue', 'transform_pool',
+ INTERVAL '60 minutes',
+ 'Task to transform data');
+
+-- PipelineDatasetDependencies data with enhanced attributes
+INSERT INTO PipelineDatasetDependencies (
+    pipeline_id, source_dataset_id, target_dataset_id,
+    processing_order, task_id, template_id, is_active
+) VALUES
+('PL1', 'DS1', 'DS5', 1, 'TSK1', 'TL1', true),
+('PL1', 'DS1', 'DS6', 2, 'TSK2', 'TL1', true),
+('PL1', 'DS5', 'DS6', 3, 'TSK3', 'TL1', true),
+('PL2', 'DS2', 'DS5', 1, 'TSK1', 'TL1', true),
+('PL2', 'DS2', 'DS6', 2, 'TSK2', 'TL1', true),
+('PL2', 'DS5', 'DS6', 3, 'TSK3', 'TL1', true);
