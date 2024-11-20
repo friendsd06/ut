@@ -96,9 +96,20 @@ INSERT INTO PipelineDatasetDependencies (
     pipeline_id, source_dataset_id, target_dataset_id,
     processing_order, task_id, template_id
 ) VALUES
-('STR_PL1', 'STR01', 'STR02', 1, 'STRT1', 'STR_TPL'),
-('STR_PL1', 'STR02', 'STR03', 2, 'STRT2', 'STR_TPL'),
-('STR_PL1', 'STR03', 'STR04', 3, 'STRT3', 'STR_TPL'),
-('STR_PL1', 'STR04', 'STR05', 4, 'STRT4', 'STR_TPL'),  -- Changed source from STR03 to STR04
-('STR_PL1', 'STR05', 'STR04', 5, 'STRT5', 'STR_TPL'),  -- Changed combination
-('STR_PL1', 'STR04', 'STR05', 6, 'STRT6', 'STR_TPL');  -- Final output to STR05
+-- STRT1: Initial data processing
+('STR_PL1', 'STR01', 'STR02', 1, 'STRT1', 'STR_TPL'),  -- Raw to Validated
+
+-- STRT2: Database operation
+('STR_PL1', 'STR02', 'STR03', 2, 'STRT2', 'STR_TPL'),  -- Validated to Processed
+
+-- STRT3: Run script operation
+('STR_PL1', 'STR03', 'STR04', 3, 'STRT3', 'STR_TPL'),  -- Processed to HTTP
+
+-- STRT4: External task sensor
+('STR_PL1', 'STR02', 'STR04', 4, 'STRT4', 'STR_TPL'),  -- Different path: Validated to HTTP
+
+-- STRT5: HTTP operation
+('STR_PL1', 'STR03', 'STR05', 5, 'STRT5', 'STR_TPL'),  -- Processed to Final
+
+-- STRT6: Email alert
+('STR_PL1', 'STR04', 'STR05', 6, 'STRT6', 'STR_TPL');  -- HTTP to Final
