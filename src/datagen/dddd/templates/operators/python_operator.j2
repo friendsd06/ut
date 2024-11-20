@@ -1,0 +1,11 @@
+{# templates/operators/python_operator.j2 #}
+{% macro render_python_operator(task) %}
+PythonOperator(
+    task_id="{{ task.task_id }}",
+    python_callable={{ task.python_callable }},
+    {% if task.task_params.get('op_kwargs') %}
+    op_kwargs={{ task.task_params.op_kwargs }},
+    {% endif %}
+    {% include 'operators/common_args.j2' %}
+)
+{% endmacro %}

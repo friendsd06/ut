@@ -1,0 +1,8 @@
+{# templates/operators/bash_operator.j2 #}
+{% macro render_bash_operator(task) %}
+BashOperator(
+    task_id="{{ task.task_id }}",
+    bash_command={{ task.bash_command | tojson }},
+    {% include 'operators/common_args.j2' %}
+)
+{% endmacro %}
