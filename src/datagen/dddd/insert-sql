@@ -1,0 +1,91 @@
+-- Now proceed with all inserts
+-- Datasets Insert
+INSERT INTO Datasets (DatasetID, ProductLineID, DatasetName) VALUES
+('YU01', 'PRLN1', 'YU_RAW_DATA'),
+('YU02', 'PRLN1', 'YU_VALIDATED_DATA'),
+('YU03', 'PRLN1', 'YU_PROCESSED_DATA'),
+('YU04', 'PRLN1', 'YU_HTTP_DATA'),
+('YU05', 'PRLN1', 'YU_FINAL_DATA');
+
+-- Pipeline Insert
+INSERT INTO Pipeline (
+    PipelineID, PipelineName, PipelineGroup, PipelinePriority,
+    schedule_interval, start_date, owner, retry_delay_minutes,
+    default_args
+) VALUES (
+    'BR_PL1',
+    'BR_MULTI_OP_PIPELINE',
+    'BR_PROCESSING',
+    1,
+    '0 0 * * *',
+    '2024-01-01 00:00:00',
+    'data_team',
+    5,
+    '{
+        "owner": "data_team",
+        "retries": 3,
+        "retry_delay": "5 minutes",
+        "email": ["team@example.com"]
+    }'::jsonb
+);
+
+-- Template Insert
+INSERT INTO Template (TemplateID, TemplateName) VALUES
+('BR_TPL', 'BR_PROCESSING');
+
+-- Tasks Insert with operator_type
+INSERT INTO Tasks (
+    TaskID, TemplateID, TaskName, operator_type,
+    task_priority_weight, task_params, python_callable, bash_command
+) VALUES
+('BRT1', 'BR_TPL', 'Process_Data', 'PythonOperator'::operator_type, 1,
+ '{"op_kwargs": {"param": "value1"}}'::jsonb,
+ 'def process_data(): return True',
+ NULL),
+
+('BRT2', 'BR_TPL', 'DB_Operation', 'PostgresOperator'::operator_type, 2,
+ '{"sql": "SELECT * FROM table"}'::jsonb,
+ NULL,
+ NULL),
+
+('BRT3', 'BR_TPL', 'Run_Script', 'BashOperator'::operator_type, 3,
+ '{}'::jsonb,
+ NULL,
+ 'echo "Task 1 in DAG"'),
+
+('BRT4', 'BR_TPL', 'Wait_For_Task', 'ExternalTaskSensor'::operator_type, 4,
+ '{
+    "external_dag_id": "other_dag",
+    "external_task_id": "other_task"
+ }'::jsonb,
+ NULL,
+ NULL),
+
+('BRT5', 'BR_TPL', 'API_Call', 'HttpOperator'::operator_type, 5,
+ '{
+    "endpoint": "/api/data",
+    "method": "GET"
+ }'::jsonb,
+ NULL,
+ NULL),
+
+('BRT6', 'BR_TPL', 'Send_Alert', 'EmailOperator'::operator_type, 6,
+ '{
+    "to": ["team@example.com"],
+    "subject": "DAG Update",
+    "html_content": "<p>Pipeline completed</p>"
+ }'::jsonb,
+ NULL,
+ NULL);
+
+-- Pipeline Dataset Dependencies Insert
+INSERT INTO PipelineDatasetDependencies (
+    pipeline_id, source_dataset_id, target_dataset_id,
+    processing_order, task_id, template_id
+) VALUES
+('BR_PL1', 'YU01', 'YU02', 1, 'BRT1', 'BR_TPL'),
+('BR_PL1', 'YU02', 'YU03', 2, 'BRT2', 'BR_TPL'),
+('BR_PL1', 'YU03', 'YU04', 3, 'BRT3', 'BR_TPL'),
+('BR_PL1', 'YU03', 'YU04', 4, 'BRT4', 'BR_TPL'),
+('BR_PL1', 'YU04', 'YU05', 5, 'BRT5', 'BR_TPL'),
+('BR_PL1', 'YU05', 'YU05', 6, 'BRT6', 'BR_TPL');
