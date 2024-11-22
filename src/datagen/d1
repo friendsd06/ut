@@ -1,0 +1,71 @@
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from datetime import datetime
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2024, 1, 1),
+}
+
+# Upstream DAG 1
+with DAG(
+    dag_id='upstream_dag_1',
+    default_args=default_args,
+    schedule_interval=None,
+    catchup=False,
+) as dag1:
+    task_1 = DummyOperator(task_id='task_1')
+
+# Upstream DAG 2
+with DAG(
+    dag_id='upstream_dag_2',
+    default_args=default_args,
+    schedule_interval=None,
+    catchup=False,
+) as dag2:
+    task_2 = DummyOperator(task_id='task_2')
+
+---------------------------------------------------------------------------------------
+
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from airflow.sensors.external_task import ExternalTaskSensor
+from datetime import datetime
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2024, 1, 1),
+}
+
+# Dependent DAG
+with DAG(
+    dag_id='dependent_dag',
+    default_args=default_args,
+    schedule_interval=None,
+    catchup=False,
+) as dependent_dag:
+    # Sensor for upstream DAG 1
+    wait_for_dag_1 = ExternalTaskSensor(
+        task_id='wait_for_upstream_dag_1',
+        external_dag_id='upstream_dag_1',  # DAG ID of the upstream DAG
+        external_task_id=None,  # Set to None to wait for the entire DAG to complete
+        timeout=600,  # Timeout in seconds
+        poke_interval=30,  # Time between checks
+        mode='reschedule',  # Reschedule mode to release worker slots
+    )
+
+    # Sensor for upstream DAG 2
+    wait_for_dag_2 = ExternalTaskSensor(
+        task_id='wait_for_upstream_dag_2',
+        external_dag_id='upstream_dag_2',  # DAG ID of the upstream DAG
+        external_task_id=None,  # Set to None to wait for the entire DAG to complete
+        timeout=600,
+        poke_interval=30,
+        mode='reschedule',
+    )
+
+    # Dependent task
+    dependent_task = DummyOperator(task_id='dependent_task')
+
+    # Set dependencies
+    [wait_for_dag_1, wait_for_dag_2] >> dependent_task
