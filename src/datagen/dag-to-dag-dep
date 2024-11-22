@@ -1,7 +1,0 @@
-There are several ways to establish DAG-to-DAG dependencies in Airflow:
-
-TriggerDagRunOperator: Use this operator within a DAG to trigger another DAG programmatically.
-ExternalTaskSensor: Wait for a task in an external DAG to reach a specific state before proceeding.
-Deferrable Operators: Utilize deferrable versions of sensors to improve resource utilization.
-Event-Based Triggers: Use external systems or scripts to trigger DAGs via the REST API or CLI.
-Data Pipelines with Data Aware Scheduling: Coordinate DAGs based on data availability or events.
