@@ -1,0 +1,37 @@
+import requests
+from requests.auth import HTTPBasicAuth
+
+# Airflow API endpoint
+airflow_url = 'http://localhost:8080/api/v1/dags/{dag_id}/dagRuns'
+
+# Replace with your Airflow username and password
+username = 'admin'
+password = 'yourpassword'
+
+# List of ingestion DAG IDs
+ingestion_dag_ids = [
+    'ingestion_loan_data_dag',
+    'ingestion_customer_data_dag',
+    'ingestion_transactions_data_dag'
+]
+
+# Function to trigger a DAG run
+def trigger_dag(dag_id):
+    url = airflow_url.format(dag_id=dag_id)
+    data = {
+        "conf": {},  # Optional: Pass configuration parameters here
+    }
+    response = requests.post(
+        url,
+        json=data,
+        auth=HTTPBasicAuth(username, password)
+    )
+    if response.status_code == 200:
+        print(f"Successfully triggered DAG: {dag_id}")
+    else:
+        print(f"Failed to trigger DAG: {dag_id}")
+        print(f"Response: {response.text}")
+
+# Trigger all ingestion DAGs
+for dag_id in ingestion_dag_ids:
+    trigger_dag(dag_id)
