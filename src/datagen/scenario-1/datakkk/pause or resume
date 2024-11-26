@@ -11,6 +11,9 @@ import re
 # Initialize Logger
 logger = logging.getLogger(__name__)
 
+# Configure logging level (optional: set to DEBUG for more verbosity)
+logging.basicConfig(level=logging.INFO)
+
 # Default arguments for the Control DAG
 default_args = {
     'owner': 'airflow',
@@ -28,14 +31,22 @@ def control_dags():
     """
     dagbag = DagBag()
     today = datetime.now().date()
+    logger.info(f"Control DAG started at {datetime.now()}")
 
     # Regex pattern to extract asset_type and cob_date from DAG ID
     pattern = r'^(loan|deposit)_processing_(\d{4}-\d{2}-\d{2})_\d+$'
+
+    # Counter for actions
+    paused_count = 0
+    resumed_count = 0
+    no_action_count = 0
+    skipped_count = 0
 
     for dag_id, dag in dagbag.dags.items():
         match = re.match(pattern, dag_id)
         if not match:
             logger.debug(f"DAG '{dag_id}' does not match the pattern. Skipping.")
+            skipped_count += 1
             continue
 
         asset_type, cob_date_str = match.groups()
@@ -44,6 +55,7 @@ def control_dags():
             cob_date = datetime.strptime(cob_date_str, '%Y-%m-%d').date()
         except ValueError:
             logger.error(f"DAG '{dag_id}' has an invalid cob_date format: '{cob_date_str}'. Skipping.")
+            skipped_count += 1
             continue
 
         # Determine whether to pause or resume
@@ -60,11 +72,22 @@ def control_dags():
         if should_pause and not current_state:
             dag.set_is_paused(True)
             logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
+            paused_count += 1
         elif not should_pause and current_state:
             dag.set_is_paused(False)
             logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
+            resumed_count += 1
         else:
             logger.info(f"No action needed for DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
+            no_action_count += 1
+
+    # Summary
+    logger.info("Control DAG Execution Summary:")
+    logger.info(f"Total DAGs Processed: {paused_count + resumed_count + no_action_count + skipped_count}")
+    logger.info(f"Paused DAGs: {paused_count}")
+    logger.info(f"Resumed DAGs: {resumed_count}")
+    logger.info(f"No Action Needed DAGs: {no_action_count}")
+    logger.info(f"Skipped DAGs: {skipped_count}")
 
 with DAG(
     'control_loan_deposit_dags',
