@@ -1,0 +1,63 @@
+# loan_deposit_dags.py
+
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from airflow.utils.dates import days_ago
+from datetime import datetime, timedelta
+
+# Default arguments for all DAGs
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email': ['alerts@yourdomain.com'],
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+# Function to create a simple DAG
+def create_simple_dag(dag_id, asset_type, cobdate):
+    with DAG(
+        dag_id=dag_id,
+        default_args=default_args,
+        description=f'{asset_type.capitalize()} Processing DAG',
+        schedule_interval='@daily',
+        start_date=days_ago(1),
+        catchup=False,
+        tags=[asset_type],
+    ) as dag:
+
+        start = DummyOperator(
+            task_id='start'
+        )
+
+        end = DummyOperator(
+            task_id='end'
+        )
+
+        start >> end
+
+        # Assign metadata to DAG
+        dag.asset_type = asset_type
+        dag.cobdate = cobdate
+
+    return dag
+
+# Define 5 Loan DAGs
+loan_dags = []
+for i in range(1, 6):
+    dag_id = f'loan_processing_dag_{i}'
+    asset_type = 'loan'
+    cobdate = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')  # Example cobdate
+    dag = create_simple_dag(dag_id, asset_type, cobdate)
+    loan_dags.append(dag)
+
+# Define 5 Deposit DAGs
+deposit_dags = []
+for i in range(1, 6):
+    dag_id = f'deposit_processing_dag_{i}'
+    asset_type = 'deposit'
+    cobdate = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')  # Example cobdate
+    dag = create_simple_dag(dag_id, asset_type, cobdate)
+    deposit_dags.append(dag)

@@ -1,0 +1,106 @@
+# control_dags.py
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.models import DagBag
+from airflow.utils.dates import days_ago
+from airflow.utils.state import State
+from datetime import datetime, timedelta
+import logging
+
+# Initialize Logger
+logger = logging.getLogger(__name__)
+
+# Default arguments for the Control DAG
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email': ['alerts@yourdomain.com'],
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+# Control logic thresholds
+PAUSE_THRESHOLD = {
+    'loan': 3,      # Days after which Loan DAGs should be paused
+    'deposit': 2    # Days after which Deposit DAGs should be paused
+}
+
+# List of all DAGs to control
+# In a dynamic environment, you might retrieve this from metadata or use patterns
+TARGET_DAGS = [
+    'loan_processing_dag_1',
+    'loan_processing_dag_2',
+    'loan_processing_dag_3',
+    'loan_processing_dag_4',
+    'loan_processing_dag_5',
+    'deposit_processing_dag_1',
+    'deposit_processing_dag_2',
+    'deposit_processing_dag_3',
+    'deposit_processing_dag_4',
+    'deposit_processing_dag_5',
+]
+
+def control_dags():
+    """
+    Control DAGs by pausing or resuming based on asset type and cobdate.
+    """
+    dagbag = DagBag()
+    today = datetime.now().date()
+
+    for dag_id in TARGET_DAGS:
+        dag = dagbag.get_dag(dag_id)
+        if not dag:
+            logger.warning(f"DAG '{dag_id}' not found. Skipping.")
+            continue
+
+        asset_type = getattr(dag, 'asset_type', None)
+        cobdate_str = getattr(dag, 'cobdate', None)
+
+        if not asset_type or not cobdate_str:
+            logger.warning(f"DAG '{dag_id}' is missing 'asset_type' or 'cobdate'. Skipping.")
+            continue
+
+        try:
+            cobdate = datetime.strptime(cobdate_str, '%Y-%m-%d').date()
+        except ValueError:
+            logger.error(f"DAG '{dag_id}' has an invalid 'cobdate' format: {cobdate_str}. Skipping.")
+            continue
+
+        days_diff = (today - cobdate).days
+        threshold = PAUSE_THRESHOLD.get(asset_type.lower(), None)
+
+        if threshold is None:
+            logger.warning(f"No pause threshold defined for asset type '{asset_type}' in DAG '{dag_id}'. Skipping.")
+            continue
+
+        should_pause = days_diff > threshold
+        current_state = dag.is_paused
+
+        if should_pause and not current_state:
+            dag.set_is_paused(True)
+            logger.info(f"Paused DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cobdate_str}, Days Diff: {days_diff})")
+        elif not should_pause and current_state:
+            dag.set_is_paused(False)
+            logger.info(f"Resumed DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cobdate_str}, Days Diff: {days_diff})")
+        else:
+            logger.info(f"No action needed for DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cobdate_str}, Days Diff: {days_diff})")
+
+with DAG(
+    'control_loan_deposit_dags',
+    default_args=default_args,
+    description='Control Loan and Deposit DAGs Based on Asset Type and COB Date',
+    schedule_interval='@daily',  # Adjust as needed
+    start_date=days_ago(1),
+    catchup=False,
+    tags=['control', 'loan', 'deposit'],
+) as dag:
+
+    control_task = PythonOperator(
+        task_id='control_dags_task',
+        python_callable=control_dags,
+    )
+
+    control_task
