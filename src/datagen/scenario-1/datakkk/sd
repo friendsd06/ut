@@ -1,0 +1,56 @@
+from airflow import DAG
+from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
+from airflow.operators.python import PythonOperator
+from datetime import datetime, timedelta
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configuration
+S3_BUCKET = 'your-bucket-name'
+S3_PREFIX = 'input/'
+AWS_CONN_ID = 'aws_default'
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2024, 1, 1),
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5)
+}
+
+def process_detected_file(**context):
+    """Simple function to process detected file"""
+    # Get the detected file key from XCom
+    s3_key = context['task_instance'].xcom_pull(task_ids='wait_for_file')
+    logger.info(f"Detected new file: {s3_key}")
+    return s3_key
+
+with DAG(
+    'simple_s3_sensor',
+    default_args=default_args,
+    schedule_interval='*/5 * * * *',  # Run every 5 minutes
+    catchup=False
+) as dag:
+
+    # S3 Sensor to detect new files
+    s3_sensor = S3KeySensor(
+        task_id='wait_for_file',
+        bucket_key=f"{S3_PREFIX}*.csv",    # Looking for CSV files
+        wildcard_match=True,               # Enable wildcard matching
+        bucket_name=S3_BUCKET,
+        aws_conn_id=AWS_CONN_ID,
+        timeout=60 * 5,                    # 5 minute timeout
+        poke_interval=30,                  # Check every 30 seconds
+        mode='poke'
+    )
+
+    # Process the detected file
+    process_file = PythonOperator(
+        task_id='process_file',
+        python_callable=process_detected_file
+    )
+
+    # Set task dependencies
+    s3_sensor >> process_file
