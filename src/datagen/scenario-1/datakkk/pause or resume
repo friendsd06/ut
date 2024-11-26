@@ -2,8 +2,9 @@
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.models import DagBag
+from airflow.models import DagBag, DagModel
 from airflow.utils.dates import days_ago
+from airflow.utils.db import provide_session
 from datetime import datetime, timedelta
 import logging
 import re
@@ -16,7 +17,8 @@ logger.setLevel(logging.INFO)  # Set to DEBUG for more verbosity
 handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
-logger.addHandler(handler)
+if not logger.handlers:
+    logger.addHandler(handler)
 
 # Default arguments for the Control DAG
 default_args = {
@@ -29,7 +31,8 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-def resume_all_dags():
+@provide_session
+def resume_all_dags(session=None):
     """
     Resume all Loan and Deposit DAGs by ensuring they are not paused.
     """
@@ -44,9 +47,14 @@ def resume_all_dags():
     for dag_id, dag in dagbag.dags.items():
         if re.match(pattern, dag_id):
             if dag.is_paused:
-                dag.set_is_paused(False)
-                resumed_count += 1
-                logger.info(f"Resumed DAG '{dag_id}'.")
+                dag_model = session.query(DagModel).filter(DagModel.dag_id == dag_id).first()
+                if dag_model:
+                    dag_model.is_paused = False  # Set to active
+                    session.commit()
+                    resumed_count += 1
+                    logger.info(f"Resumed DAG '{dag_id}'.")
+                else:
+                    logger.error(f"DAG Model for '{dag_id}' not found.")
             else:
                 already_active_count += 1
                 logger.info(f"DAG '{dag_id}' is already active.")
@@ -54,6 +62,7 @@ def resume_all_dags():
             skipped_count += 1
             logger.debug(f"DAG '{dag_id}' does not match the target pattern. Skipping.")
 
+    # Summary Logging
     logger.info("Resume All DAGs Execution Summary:")
     logger.info(f"Total Target DAGs: {resumed_count + already_active_count}")
     logger.info(f"Resumed DAGs: {resumed_count}")
