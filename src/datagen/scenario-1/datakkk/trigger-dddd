@@ -1,0 +1,72 @@
+import requests
+import json
+from datetime import datetime
+
+# Airflow API Configuration
+AIRFLOW_HOST = "localhost"
+AIRFLOW_PORT = "8080"
+USERNAME = "airflow"
+PASSWORD = "airflow"
+DAG_ID = "complete_validation_pipeline"
+
+# Base URL for Airflow API
+BASE_URL = f"http://{AIRFLOW_HOST}:{AIRFLOW_PORT}/api/v1"
+
+# Authentication
+auth = (USERNAME, PASSWORD)
+
+def trigger_dag_with_config(config: dict):
+    """Trigger DAG with configuration using REST API"""
+
+    endpoint = f"{BASE_URL}/dags/{DAG_ID}/dagRuns"
+
+    # Prepare payload
+    payload = {
+        "conf": config,
+        "logical_date": datetime.now().isoformat(),
+        "note": "Triggered via REST API"
+    }
+
+    try:
+        response = requests.post(
+            endpoint,
+            json=payload,
+            auth=auth
+        )
+
+        if response.status_code == 200:
+            print(f"DAG triggered successfully: {response.json()}")
+            return response.json()
+        else:
+            print(f"Error triggering DAG: {response.status_code}")
+            print(response.text)
+            return None
+
+    except Exception as e:
+        print(f"Exception: {str(e)}")
+        return None
+
+# Test different scenarios
+scenarios = [
+    # Scenario 1: Valid Checksum, First Instance with Substitution
+    {
+        "valid_checksum": True,
+        "is_first_instance": True,
+        "needs_substitution": True
+    },
+    # Scenario 2: Valid Checksum, Second Instance with Substitution
+    {
+        "valid_checksum": True,
+        "is_first_instance": False,
+        "needs_substitution": True
+    },
+    # Scenario 3: Invalid Checksum
+    {
+        "valid_checksum": False
+    }
+]
+
+# Trigger each scenario
+for scenario in scenarios:
+    print(f"\nTriggering scenario: {scenario}")
+    trigger_dag_with_config(scenario)
