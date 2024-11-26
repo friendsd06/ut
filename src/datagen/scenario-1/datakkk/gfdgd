@@ -1,0 +1,129 @@
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.dummy import DummyOperator
+from datetime import datetime, timedelta
+import pandas as pd
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2024, 1, 1),
+    'retries': 1
+}
+
+def check_checksum(**context) -> str:
+    """Decide if checksum has failed"""
+    logger.info("Checking checksum...")
+    time.sleep(10)
+
+    # Simulate checksum validation
+    checksum_failed = False  # Replace with actual logic
+
+    if checksum_failed:
+        return 'stop_processing'
+    return 'TSK2_dsr_lookup'
+
+def dsr_lookup(**context):
+    """DSR Lookup task"""
+    logger.info("Performing DSR lookup...")
+    time.sleep(10)
+
+def check_activation(**context) -> str:
+    """Decide if it's first instance of file"""
+    logger.info("Checking activation...")
+    time.sleep(10)
+
+    is_first_instance = True  # Replace with actual logic
+
+    if is_first_instance:
+        return 'TSK4A_first_instance'
+    return 'TSK4B_second_instance'
+
+def first_instance_load(**context):
+    """Handle first instance load"""
+    logger.info("Processing first instance...")
+    time.sleep(10)
+
+def second_instance_load(**context):
+    """Handle second instance load"""
+    logger.info("Processing second instance...")
+    time.sleep(10)
+
+def check_substitution(**context) -> str:
+    """Decide if substitution in progress"""
+    logger.info("Checking substitution status...")
+    time.sleep(10)
+
+    substitution_in_progress = True  # Replace with actual logic
+
+    if substitution_in_progress:
+        return 'TSK5A_stop'
+    return 'TSK6_dump_s3'
+
+def stop_substitution(**context):
+    """Stop at substitution step"""
+    logger.info("Stopping at substitution...")
+    time.sleep(5)
+
+# Create DAG
+with DAG('validation_pipeline', default_args=default_args, schedule_interval='@daily', catchup=False) as dag:
+
+    start = DummyOperator(task_id='start')
+
+    checksum_check = BranchPythonOperator(
+        task_id='TSK1_checksum',
+        python_callable=check_checksum
+    )
+
+    stop_processing = DummyOperator(task_id='stop_processing')
+
+    dsr_lookup = PythonOperator(
+        task_id='TSK2_dsr_lookup',
+        python_callable=dsr_lookup
+    )
+
+    lev_generate = DummyOperator(task_id='TSK3_lev_generate')
+
+    activation_check = BranchPythonOperator(
+        task_id='TSK4_activation_check',
+        python_callable=check_activation
+    )
+
+    first_instance = PythonOperator(
+        task_id='TSK4A_first_instance',
+        python_callable=first_instance_load
+    )
+
+    second_instance = PythonOperator(
+        task_id='TSK4B_second_instance',
+        python_callable=second_instance_load
+    )
+
+    substitution_check = BranchPythonOperator(
+        task_id='TSK5_substitution_check',
+        python_callable=check_substitution
+    )
+
+    stop_at_substitution = PythonOperator(
+        task_id='TSK5A_stop',
+        python_callable=stop_substitution
+    )
+
+    dump_s3 = DummyOperator(task_id='TSK6_dump_s3')
+
+    trigger_ingestion = DummyOperator(task_id='TSK7_trigger_ingestion')
+
+    end = DummyOperator(task_id='end', trigger_rule='none_failed')
+
+    # Set dependencies
+    start >> checksum_check >> [stop_processing, dsr_lookup]
+    dsr_lookup >> lev_generate >> activation_check
+    activation_check >> [first_instance, second_instance]
+    [first_instance, second_instance] >> substitution_check
+    substitution_check >> [stop_at_substitution, dump_s3]
+    dump_s3 >> trigger_ingestion >> end
+    [stop_processing, stop_at_substitution] >> end
