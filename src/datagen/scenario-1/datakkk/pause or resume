@@ -7,6 +7,7 @@ from airflow.utils.dates import days_ago
 from airflow.utils.state import State
 from datetime import datetime, timedelta
 import logging
+import re
 
 # Initialize Logger
 logger = logging.getLogger(__name__)
@@ -15,84 +16,62 @@ logger = logging.getLogger(__name__)
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'email': ['alerts@yourdomain.com'],
+    'email': ['alerts@yourdomain.com'],  # Replace with your email
     'email_on_failure': True,
     'email_on_retry': False,
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
 
-# Control logic thresholds
-PAUSE_THRESHOLD = {
-    'loan': 3,      # Days after which Loan DAGs should be paused
-    'deposit': 2    # Days after which Deposit DAGs should be paused
-}
-
-# List of all DAGs to control
-# In a dynamic environment, you might retrieve this from metadata or use patterns
-TARGET_DAGS = [
-    'loan_processing_dag_1',
-    'loan_processing_dag_2',
-    'loan_processing_dag_3',
-    'loan_processing_dag_4',
-    'loan_processing_dag_5',
-    'deposit_processing_dag_1',
-    'deposit_processing_dag_2',
-    'deposit_processing_dag_3',
-    'deposit_processing_dag_4',
-    'deposit_processing_dag_5',
-]
-
 def control_dags():
     """
-    Control DAGs by pausing or resuming based on asset type and cobdate.
+    Control DAGs by pausing or resuming based on asset_type and cob_date.
     """
     dagbag = DagBag()
     today = datetime.now().date()
 
-    for dag_id in TARGET_DAGS:
-        dag = dagbag.get_dag(dag_id)
-        if not dag:
-            logger.warning(f"DAG '{dag_id}' not found. Skipping.")
+    # Regex pattern to extract asset_type and cob_date from DAG ID
+    pattern = r'^(loan|deposit)_processing_(\d{4}-\d{2}-\d{2})_\d+$'
+
+    for dag_id, dag in dagbag.dags.items():
+        match = re.match(pattern, dag_id)
+        if not match:
+            logger.debug(f"DAG '{dag_id}' does not match the pattern. Skipping.")
             continue
 
-        asset_type = getattr(dag, 'asset_type', None)
-        cobdate_str = getattr(dag, 'cobdate', None)
-
-        if not asset_type or not cobdate_str:
-            logger.warning(f"DAG '{dag_id}' is missing 'asset_type' or 'cobdate'. Skipping.")
-            continue
+        asset_type, cob_date_str = match.groups()
 
         try:
-            cobdate = datetime.strptime(cobdate_str, '%Y-%m-%d').date()
+            cob_date = datetime.strptime(cob_date_str, '%Y-%m-%d').date()
         except ValueError:
-            logger.error(f"DAG '{dag_id}' has an invalid 'cobdate' format: {cobdate_str}. Skipping.")
+            logger.error(f"DAG '{dag_id}' has an invalid cob_date format: '{cob_date_str}'. Skipping.")
             continue
 
-        days_diff = (today - cobdate).days
-        threshold = PAUSE_THRESHOLD.get(asset_type.lower(), None)
+        # Determine whether to pause or resume
+        if cob_date < today:
+            desired_state = State.PAUSED
+            action = 'Pausing'
+        else:
+            desired_state = State.NONE  # Unpaused
+            action = 'Resuming'
 
-        if threshold is None:
-            logger.warning(f"No pause threshold defined for asset type '{asset_type}' in DAG '{dag_id}'. Skipping.")
-            continue
-
-        should_pause = days_diff > threshold
+        # Check current state
         current_state = dag.is_paused
 
-        if should_pause and not current_state:
+        if desired_state == State.PAUSED and not current_state:
             dag.set_is_paused(True)
-            logger.info(f"Paused DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cobdate_str}, Days Diff: {days_diff})")
-        elif not should_pause and current_state:
+            logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
+        elif desired_state == State.NONE and current_state:
             dag.set_is_paused(False)
-            logger.info(f"Resumed DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cobdate_str}, Days Diff: {days_diff})")
+            logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
         else:
-            logger.info(f"No action needed for DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cobdate_str}, Days Diff: {days_diff})")
+            logger.info(f"No action needed for DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
 
 with DAG(
     'control_loan_deposit_dags',
     default_args=default_args,
-    description='Control Loan and Deposit DAGs Based on Asset Type and COB Date',
-    schedule_interval='@daily',  # Adjust as needed
+    description='Control Loan and Deposit DAGs Based on COB Date',
+    schedule_interval='@daily',  # Adjust schedule as needed
     start_date=days_ago(1),
     catchup=False,
     tags=['control', 'loan', 'deposit'],

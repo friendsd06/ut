@@ -9,20 +9,30 @@ from datetime import datetime, timedelta
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'email': ['alerts@yourdomain.com'],
+    'email': ['alerts@yourdomain.com'],  # Replace with your email
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
 
-# Function to create a simple DAG
-def create_simple_dag(dag_id, asset_type, cobdate):
+def create_processing_dag(asset_type, index, days_offset):
+    """
+    Helper function to create a processing DAG with cob-date in the DAG ID.
+
+    :param asset_type: 'loan' or 'deposit'
+    :param index: Unique index for the DAG
+    :param days_offset: Number of days to subtract from today for cob-date
+    :return: Airflow DAG object
+    """
+    cob_date = (datetime.now() - timedelta(days=days_offset)).strftime('%Y-%m-%d')
+    dag_id = f"{asset_type}_processing_{cob_date}_{index}"
+
     with DAG(
         dag_id=dag_id,
         default_args=default_args,
-        description=f'{asset_type.capitalize()} Processing DAG',
-        schedule_interval='@daily',
+        description=f"{asset_type.capitalize()} Processing DAG for COB Date {cob_date}",
+        schedule_interval='@daily',  # Adjust as needed
         start_date=days_ago(1),
         catchup=False,
         tags=[asset_type],
@@ -38,26 +48,18 @@ def create_simple_dag(dag_id, asset_type, cobdate):
 
         start >> end
 
-        # Assign metadata to DAG
+        # Assign metadata attributes
         dag.asset_type = asset_type
-        dag.cobdate = cobdate
+        dag.cob_date = cob_date
 
     return dag
 
-# Define 5 Loan DAGs
-loan_dags = []
+# Create 5 Loan DAGs
 for i in range(1, 6):
-    dag_id = f'loan_processing_dag_{i}'
-    asset_type = 'loan'
-    cobdate = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')  # Example cobdate
-    dag = create_simple_dag(dag_id, asset_type, cobdate)
-    loan_dags.append(dag)
+    # For demonstration, set different cob-dates by offsetting days
+    create_processing_dag(asset_type='loan', index=i, days_offset=i)
 
-# Define 5 Deposit DAGs
-deposit_dags = []
+# Create 5 Deposit DAGs
 for i in range(1, 6):
-    dag_id = f'deposit_processing_dag_{i}'
-    asset_type = 'deposit'
-    cobdate = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')  # Example cobdate
-    dag = create_simple_dag(dag_id, asset_type, cobdate)
-    deposit_dags.append(dag)
+    # For demonstration, set different cob-dates by offsetting days
+    create_processing_dag(asset_type='deposit', index=i, days_offset=i)
