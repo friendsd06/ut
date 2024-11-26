@@ -15,59 +15,125 @@ default_args = {
     'retries': 1
 }
 
+def handle_exception(func_name: str, exception: Exception, context: dict) -> str:
+    """Centralized exception handling"""
+    error_parts = {
+        'Part1': str(exception),
+        'Part2': exception.__class__.__name__,
+        'Part3': func_name,
+        'Part4': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'Part5': context.get('task_instance').task_id
+    }
+    
+    # Log the error parts
+    logger.error("Exception Details:")
+    for part, value in error_parts.items():
+        logger.error(f"{part}: {value}")
+    
+    # Store in XCom for tracking
+    context['task_instance'].xcom_push(
+        key='error_details',
+        value=error_parts
+    )
+    
+    return 'stop_processing'
+
 def check_checksum(**context) -> str:
     """Decide if checksum has failed"""
-    logger.info("Checking checksum...")
-    time.sleep(10)
+    try:
+        logger.info("Checking checksum...")
+        time.sleep(10)
 
-    # Simulate checksum validation
-    checksum_failed = False  # Replace with actual logic
+        # Simulate checksum validation
+        checksum_failed = False  # Replace with actual logic
 
-    if checksum_failed:
-        return 'stop_processing'
-    return 'TSK2_dsr_lookup'
+        if checksum_failed:
+            return 'stop_processing'
+        return 'TSK2_dsr_lookup'
+        
+    except Exception as e:
+        return handle_exception('check_checksum', e, context)
 
 def dsr_lookup(**context):
     """DSR Lookup task"""
-    logger.info("Performing DSR lookup...")
-    time.sleep(10)
+    try:
+        logger.info("Performing DSR lookup...")
+        time.sleep(10)
+        
+    except Exception as e:
+        return handle_exception('dsr_lookup', e, context)
 
 def check_activation(**context) -> str:
     """Decide if it's first instance of file"""
-    logger.info("Checking activation...")
-    time.sleep(10)
+    try:
+        logger.info("Checking activation...")
+        time.sleep(10)
 
-    is_first_instance = True  # Replace with actual logic
+        is_first_instance = True  # Replace with actual logic
 
-    if is_first_instance:
-        return 'TSK4A_first_instance'
-    return 'TSK4B_second_instance'
+        if is_first_instance:
+            return 'TSK4A_first_instance'
+        return 'TSK4B_second_instance'
+        
+    except Exception as e:
+        return handle_exception('check_activation', e, context)
 
 def first_instance_load(**context):
     """Handle first instance load"""
-    logger.info("Processing first instance...")
-    time.sleep(10)
+    try:
+        logger.info("Processing first instance...")
+        time.sleep(10)
+        
+    except Exception as e:
+        return handle_exception('first_instance_load', e, context)
 
 def second_instance_load(**context):
     """Handle second instance load"""
-    logger.info("Processing second instance...")
-    time.sleep(10)
+    try:
+        logger.info("Processing second instance...")
+        time.sleep(10)
+        
+    except Exception as e:
+        return handle_exception('second_instance_load', e, context)
 
 def check_substitution(**context) -> str:
     """Decide if substitution in progress"""
-    logger.info("Checking substitution status...")
-    time.sleep(10)
+    try:
+        logger.info("Checking substitution status...")
+        time.sleep(10)
 
-    substitution_in_progress = True  # Replace with actual logic
+        substitution_in_progress = True  # Replace with actual logic
 
-    if substitution_in_progress:
-        return 'TSK5A_stop'
-    return 'TSK6_dump_s3'
+        if substitution_in_progress:
+            return 'TSK5A_stop'
+        return 'TSK6_dump_s3'
+        
+    except Exception as e:
+        return handle_exception('check_substitution', e, context)
 
 def stop_substitution(**context):
     """Stop at substitution step"""
-    logger.info("Stopping at substitution...")
-    time.sleep(5)
+    try:
+        logger.info("Stopping at substitution...")
+        time.sleep(5)
+        
+    except Exception as e:
+        return handle_exception('stop_substitution', e, context)
+
+def process_error(**context):
+    """Process and log error details"""
+    try:
+        error_details = context['task_instance'].xcom_pull(key='error_details')
+        if error_details:
+            logger.error("Error Processing Details:")
+            logger.error(f"Error Message: {error_details['Part1']}")
+            logger.error(f"Error Type: {error_details['Part2']}")
+            logger.error(f"Function Name: {error_details['Part3']}")
+            logger.error(f"Timestamp: {error_details['Part4']}")
+            logger.error(f"Task ID: {error_details['Part5']}")
+            
+    except Exception as e:
+        logger.error(f"Error in error processing: {str(e)}")
 
 # Create DAG
 with DAG('validation_pipeline', default_args=default_args, schedule_interval='@daily', catchup=False) as dag:
@@ -79,7 +145,10 @@ with DAG('validation_pipeline', default_args=default_args, schedule_interval='@d
         python_callable=check_checksum
     )
 
-    stop_processing = DummyOperator(task_id='stop_processing')
+    stop_processing = PythonOperator(
+        task_id='stop_processing',
+        python_callable=process_error
+    )
 
     dsr_lookup = PythonOperator(
         task_id='TSK2_dsr_lookup',
