@@ -1,82 +1,90 @@
+```python
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.operators.dummy import DummyOperator
 from datetime import datetime, timedelta
 import time
 import logging
-import hashlib
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Sample data for demonstration
-SAMPLE_DATA = {
-    'valid_scenario': {
-        'data': 'valid data content',
-        'expected_checksum': '1234567890'
-    },
-    'invalid_scenario': {
-        'data': 'invalid data content',
-        'expected_checksum': 'abcdefghijk'
-    }
-}
-
 def validate_checksum(**context) -> str:
-    """
-    Validate checksum and decide path
-    Returns: 'dsr_lookup' for valid checksum, 'stop_processing' for invalid
-    """
+    """Validate checksum and branch"""
     time.sleep(1)
-
-    # Get scenario type from DAG run configuration
     dag_run = context['dag_run']
-    scenario = dag_run.conf.get('scenario', 'valid_scenario')
-
-    # Get data and expected checksum
-    data = SAMPLE_DATA[scenario]['data']
-    expected_checksum = SAMPLE_DATA[scenario]['expected_checksum']
-
-    # Calculate actual checksum
-    actual_checksum = hashlib.md5(data.encode()).hexdigest()
-
-    # Store checksums in XCom for reference
-    context['task_instance'].xcom_push(
-        key='checksum_details',
-        value={
-            'scenario': scenario,
-            'expected_checksum': expected_checksum,
-            'actual_checksum': actual_checksum
-        }
-    )
-
-    # Decide path based on checksum validation
-    if scenario == 'valid_scenario':
+    is_valid = dag_run.conf.get('valid_checksum', True)
+    
+    if is_valid:
         return 'dsr_lookup'
     return 'stop_processing'
 
-def stop_processing(**context):
-    """Handle invalid checksum case"""
+def perform_dsr_lookup(**context):
+    """DSR lookup task"""
     time.sleep(1)
-    checksum_details = context['task_instance'].xcom_pull(
-        key='checksum_details',
-        task_ids='validate_file_checksum'
-    )
-    logger.info(f"Processing stopped due to invalid checksum: {checksum_details}")
+
+def generate_lev(**context):
+    """Generate LEV IDs"""
+    time.sleep(1)
 
 def check_activation(**context) -> str:
-    """Activation check"""
+    """Check if first or second instance"""
     time.sleep(1)
-    return 'first_instance'
+    dag_run = context['dag_run']
+    is_first = dag_run.conf.get('is_first_instance', True)
+    
+    # Store instance type in XCom for substitution check
+    context['task_instance'].xcom_push(
+        key='instance_type',
+        value='first' if is_first else 'second'
+    )
+    
+    return 'first_instance' if is_first else 'second_instance'
 
 def process_first_instance(**context):
     """Process first instance"""
     time.sleep(1)
+    # Always proceed to substitution check
+    return 'substitution_check'
+
+def process_second_instance(**context):
+    """Process second instance"""
+    time.sleep(1)
+    # Always proceed to substitution check
     return 'substitution_check'
 
 def check_substitution(**context) -> str:
-    """Check substitution"""
+    """
+    Check substitution based on instance type
+    Different substitution logic for first/second instance
+    """
     time.sleep(1)
+    
+    # Get instance type from XCom
+    instance_type = context['task_instance'].xcom_pull(
+        key='instance_type',
+        task_ids='activation_check'
+    )
+    
+    # Get substitution flag from DAG run config
+    dag_run = context['dag_run']
+    needs_substitution = dag_run.conf.get('needs_substitution', True)
+    
+    if needs_substitution:
+        if instance_type == 'first':
+            logger.info("First instance needs substitution")
+        else:
+            logger.info("Second instance needs substitution")
+        return 'stop_for_substitution'
     return 'dump_to_s3'
+
+def stop_processing(**context):
+    """Handle invalid checksum"""
+    time.sleep(1)
+
+def stop_for_substitution(**context):
+    """Handle substitution stop"""
+    time.sleep(1)
 
 def dump_to_s3(**context):
     """Dump to S3"""
@@ -87,34 +95,37 @@ def trigger_ingestion(**context):
     time.sleep(1)
 
 with DAG(
-    'checksum_validation_scenarios',
+    'complete_validation_pipeline',
     default_args={
         'owner': 'airflow',
         'start_date': datetime(2024, 1, 1),
         'retries': 1
     },
-    schedule_interval=None,  # Manual trigger for testing scenarios
+    schedule_interval=None,
     catchup=False
 ) as dag:
 
     start = DummyOperator(task_id='start')
 
-    # Checksum validation with branching
     validate = BranchPythonOperator(
         task_id='validate_file_checksum',
         python_callable=validate_checksum
     )
 
-    # Stop processing for invalid checksum
     stop = PythonOperator(
         task_id='stop_processing',
         python_callable=stop_processing
     )
 
-    # Normal processing tasks
-    dsr_lookup = DummyOperator(task_id='dsr_lookup')
+    dsr_lookup = PythonOperator(
+        task_id='dsr_lookup',
+        python_callable=perform_dsr_lookup
+    )
 
-    lev_generate = DummyOperator(task_id='lev_generate')
+    lev_generate = PythonOperator(
+        task_id='lev_generate',
+        python_callable=generate_lev
+    )
 
     activation_check = BranchPythonOperator(
         task_id='activation_check',
@@ -126,9 +137,20 @@ with DAG(
         python_callable=process_first_instance
     )
 
+    second_instance = PythonOperator(
+        task_id='second_instance',
+        python_callable=process_second_instance
+    )
+
     substitution_check = BranchPythonOperator(
         task_id='substitution_check',
-        python_callable=check_substitution
+        python_callable=check_substitution,
+        trigger_rule='none_failed'
+    )
+
+    stop_substitution = PythonOperator(
+        task_id='stop_for_substitution',
+        python_callable=stop_for_substitution
     )
 
     dump_s3 = PythonOperator(
@@ -148,11 +170,21 @@ with DAG(
 
     # Set dependencies
     start >> validate
-
+    
     # Invalid checksum path
     validate >> stop >> end
-
+    
     # Valid checksum path
     validate >> dsr_lookup >> lev_generate >> activation_check
-    activation_check >> first_instance >> substitution_check
-    substitution_check >> dump_s3 >> trigger >> end
+    
+    # Instance paths
+    activation_check >> [first_instance, second_instance]
+    first_instance >> substitution_check
+    second_instance >> substitution_check
+    
+    # Substitution paths
+    substitution_check >> [stop_substitution, dump_s3]
+    dump_s3 >> trigger >> end
+    stop_substitution >> end
+
+```
