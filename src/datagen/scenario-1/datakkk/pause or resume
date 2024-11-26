@@ -10,9 +10,13 @@ import re
 
 # Initialize Logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Set to DEBUG for more verbosity
 
-# Configure logging level (optional: set to DEBUG for more verbosity)
-logging.basicConfig(level=logging.INFO)
+# Configure logging format (optional)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 # Default arguments for the Control DAG
 default_args = {
@@ -25,83 +29,50 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-def control_dags():
+def resume_all_dags():
     """
-    Control DAGs by pausing or resuming based on asset_type and cob_date.
+    Resume all Loan and Deposit DAGs by ensuring they are not paused.
     """
     dagbag = DagBag()
-    today = datetime.now().date()
-    logger.info(f"Control DAG started at {datetime.now()}")
-
-    # Regex pattern to extract asset_type and cob_date from DAG ID
-    pattern = r'^(loan|deposit)_processing_(\d{4}-\d{2}-\d{2})_\d+$'
-
-    # Counter for actions
-    paused_count = 0
+    pattern = r'^(loan|deposit)_processing_\d{4}-\d{2}-\d{2}_\d+$'
     resumed_count = 0
-    no_action_count = 0
+    already_active_count = 0
     skipped_count = 0
 
+    logger.info("Starting to resume all Loan and Deposit DAGs.")
+
     for dag_id, dag in dagbag.dags.items():
-        match = re.match(pattern, dag_id)
-        if not match:
-            logger.debug(f"DAG '{dag_id}' does not match the pattern. Skipping.")
-            skipped_count += 1
-            continue
-
-        asset_type, cob_date_str = match.groups()
-
-        try:
-            cob_date = datetime.strptime(cob_date_str, '%Y-%m-%d').date()
-        except ValueError:
-            logger.error(f"DAG '{dag_id}' has an invalid cob_date format: '{cob_date_str}'. Skipping.")
-            skipped_count += 1
-            continue
-
-        # Determine whether to pause or resume
-        if cob_date < today:
-            should_pause = True
-            action = 'Pausing'
+        if re.match(pattern, dag_id):
+            if dag.is_paused:
+                dag.set_is_paused(False)
+                resumed_count += 1
+                logger.info(f"Resumed DAG '{dag_id}'.")
+            else:
+                already_active_count += 1
+                logger.info(f"DAG '{dag_id}' is already active.")
         else:
-            should_pause = False
-            action = 'Resuming'
+            skipped_count += 1
+            logger.debug(f"DAG '{dag_id}' does not match the target pattern. Skipping.")
 
-        # Check current state
-        current_state = dag.is_paused
-
-        if should_pause and not current_state:
-            dag.set_is_paused(True)
-            logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
-            paused_count += 1
-        elif not should_pause and current_state:
-            dag.set_is_paused(False)
-            logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
-            resumed_count += 1
-        else:
-            logger.info(f"No action needed for DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
-            no_action_count += 1
-
-    # Summary
-    logger.info("Control DAG Execution Summary:")
-    logger.info(f"Total DAGs Processed: {paused_count + resumed_count + no_action_count + skipped_count}")
-    logger.info(f"Paused DAGs: {paused_count}")
+    logger.info("Resume All DAGs Execution Summary:")
+    logger.info(f"Total Target DAGs: {resumed_count + already_active_count}")
     logger.info(f"Resumed DAGs: {resumed_count}")
-    logger.info(f"No Action Needed DAGs: {no_action_count}")
-    logger.info(f"Skipped DAGs: {skipped_count}")
+    logger.info(f"Already Active DAGs: {already_active_count}")
+    logger.info(f"Skipped DAGs (Non-target DAGs): {skipped_count}")
 
 with DAG(
-    'control_loan_deposit_dags',
+    'control_resume_all_loan_deposit_dags',
     default_args=default_args,
-    description='Control Loan and Deposit DAGs Based on COB Date',
+    description='Control DAG to Resume All Loan and Deposit DAGs',
     schedule_interval='@daily',  # Adjust schedule as needed
     start_date=days_ago(1),
     catchup=False,
     tags=['control', 'loan', 'deposit'],
 ) as dag:
 
-    control_task = PythonOperator(
-        task_id='control_dags_task',
-        python_callable=control_dags,
+    resume_task = PythonOperator(
+        task_id='resume_all_dags_task',
+        python_callable=resume_all_dags,
     )
 
-    control_task
+    resume_task
