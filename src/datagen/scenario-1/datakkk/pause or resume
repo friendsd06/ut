@@ -4,7 +4,6 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import DagBag
 from airflow.utils.dates import days_ago
-from airflow.utils.state import State
 from datetime import datetime, timedelta
 import logging
 import re
@@ -49,19 +48,19 @@ def control_dags():
 
         # Determine whether to pause or resume
         if cob_date < today:
-            desired_state = State.PAUSED
+            should_pause = True
             action = 'Pausing'
         else:
-            desired_state = State.NONE  # Unpaused
+            should_pause = False
             action = 'Resuming'
 
         # Check current state
         current_state = dag.is_paused
 
-        if desired_state == State.PAUSED and not current_state:
+        if should_pause and not current_state:
             dag.set_is_paused(True)
             logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
-        elif desired_state == State.NONE and current_state:
+        elif not should_pause and current_state:
             dag.set_is_paused(False)
             logger.info(f"{action} DAG '{dag_id}' (Asset: {asset_type}, COB Date: {cob_date_str})")
         else:

@@ -18,11 +18,11 @@ default_args = {
 
 def create_processing_dag(asset_type, index, days_offset):
     """
-    Helper function to create a processing DAG with cob-date in the DAG ID.
+    Helper function to create a processing DAG with cob_date in the DAG ID.
 
     :param asset_type: 'loan' or 'deposit'
     :param index: Unique index for the DAG
-    :param days_offset: Number of days to subtract from today for cob-date
+    :param days_offset: Number of days to subtract from today for cob_date
     :return: Airflow DAG object
     """
     cob_date = (datetime.now() - timedelta(days=days_offset)).strftime('%Y-%m-%d')
@@ -56,10 +56,10 @@ def create_processing_dag(asset_type, index, days_offset):
 
 # Create 5 Loan DAGs
 for i in range(1, 6):
-    # For demonstration, set different cob-dates by offsetting days
+    # For demonstration, set different cob_dates by offsetting days
     create_processing_dag(asset_type='loan', index=i, days_offset=i)
 
 # Create 5 Deposit DAGs
 for i in range(1, 6):
-    # For demonstration, set different cob-dates by offsetting days
+    # For demonstration, set different cob_dates by offsetting days
     create_processing_dag(asset_type='deposit', index=i, days_offset=i)
