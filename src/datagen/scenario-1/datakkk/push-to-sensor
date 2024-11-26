@@ -1,0 +1,14 @@
+   # Updated S3KeySensor
+    minio_sensor = S3KeySensor(
+        task_id='wait_for_file',
+        bucket_key=f"{S3_PREFIX}*.csv",
+        wildcard_match=True,
+        bucket_name=S3_BUCKET,
+        aws_conn_id=MINIO_CONFIG['conn_id'],
+        verify=False,
+        timeout=60 * 5,
+        poke_interval=30,
+        mode='poke',
+        soft_fail=True,  # Don't fail the task if timeout is reached
+        xcom_push=True   # Ensure the key is pushed to XCom
+    )
