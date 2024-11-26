@@ -1,0 +1,23 @@
+# Valid checksum, first instance
+curl -X POST \
+  "http://localhost:8080/api/v1/dags/external_trigger_pipeline/dagRuns" \
+  -H "Content-Type: application/json" \
+  -u "airflow:airflow" \
+  -d '{
+    "conf": {
+      "valid_checksum": true,
+      "is_first_instance": true,
+      "needs_substitution": true
+    }
+  }'
+
+# Invalid checksum
+curl -X POST \
+  "http://localhost:8080/api/v1/dags/external_trigger_pipeline/dagRuns" \
+  -H "Content-Type: application/json" \
+  -u "airflow:airflow" \
+  -d '{
+    "conf": {
+      "valid_checksum": false
+    }
+  }'
