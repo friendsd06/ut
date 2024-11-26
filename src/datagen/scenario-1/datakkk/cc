@@ -1,0 +1,156 @@
+from airflow import DAG
+from airflow.sensors.base import BaseSensorOperator
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.operators.python import PythonOperator
+from typing import Optional
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class MinioFileSensor(BaseSensorOperator):
+    """
+    Custom sensor to detect files in MinIO bucket with specific key path
+    """
+
+    template_fields = ('bucket_name', 'prefix', 'file_pattern')
+
+    def __init__(
+        self,
+        bucket_name: str,
+        prefix: str,
+        file_pattern: str = '*.csv',  # Add file pattern parameter
+        aws_conn_id: str = 'minio_conn',
+        verify: bool = False,
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.bucket_name = bucket_name
+        self.prefix = prefix
+        self.file_pattern = file_pattern
+        self.aws_conn_id = aws_conn_id
+        self.verify = verify
+
+    def get_file_path(self, key: str) -> str:
+        """Construct complete file path"""
+        return f"{self.prefix.rstrip('/')}/{key}"
+
+    def poke(self, context) -> bool:
+        """Check for file existence"""
+        try:
+            logger.info(f'Checking path: {self.prefix}{self.file_pattern}')
+
+            s3_hook = S3Hook(aws_conn_id=self.aws_conn_id)
+
+            # List files matching pattern
+            keys = s3_hook.list_keys(
+                bucket_name=self.bucket_name,
+                prefix=self.prefix,
+                delimiter=self.file_pattern.lstrip('*')
+            )
+
+            if not keys:
+                logger.info(f"No files found matching pattern: {self.file_pattern}")
+                return False
+
+            # Get the first matching file
+            detected_file = keys[0]
+            logger.info(f"Found file: {detected_file}")
+
+            # Store both key and full path
+            context['task_instance'].xcom_push(
+                key='file_info',
+                value={
+                    'key': detected_file,
+                    'full_path': f"s3://{self.bucket_name}/{detected_file}",
+                    'bucket': self.bucket_name,
+                    'detection_time': context['logical_date'].isoformat()
+                }
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error in MinioFileSensor: {e}")
+            return False
+
+def process_detected_file(**context):
+    """Process the detected file with explicit path handling"""
+    try:
+        # Get file info from XCom
+        file_info = context['task_instance'].xcom_pull(
+            key='file_info',
+            task_ids='wait_for_file'
+        )
+
+        if not file_info:
+            raise ValueError("No file information received from sensor")
+
+        logger.info(f"Processing file: {file_info['full_path']}")
+
+        s3_hook = S3Hook(aws_conn_id='minio_conn')
+
+        # Read file using key
+        file_content = s3_hook.read_key(
+            key=file_info['key'],
+            bucket_name=file_info['bucket']
+        )
+
+        logger.info(f"File content length: {len(file_content)}")
+
+        # Generate processed path
+        processed_key = file_info['key'].replace('input/', 'processed/')
+
+        # Move to processed folder
+        s3_hook.copy_object(
+            source_bucket_key=file_info['key'],
+            dest_bucket_key=processed_key,
+            source_bucket_name=file_info['bucket'],
+            dest_bucket_name=file_info['bucket']
+        )
+
+        # Delete original
+        s3_hook.delete_objects(
+            bucket=file_info['bucket'],
+            keys=[file_info['key']]
+        )
+
+        logger.info(f"File processed and moved to: processed/{processed_key}")
+        return processed_key
+
+    except Exception as e:
+        logger.error(f"Processing error: {e}")
+        raise
+
+# Create DAG
+with DAG(
+    'minio_sensor_with_path',
+    default_args={
+        'owner': 'airflow',
+        'start_date': datetime(2024, 1, 1),
+        'retries': 3,
+        'retry_delay': timedelta(minutes=1)
+    },
+    schedule_interval='*/5 * * * *',
+    catchup=False
+) as dag:
+
+    # MinIO File Sensor with explicit path
+    wait_for_file = MinioFileSensor(
+        task_id='wait_for_file',
+        bucket_name='your-bucket',
+        prefix='input/',
+        file_pattern='*.csv',
+        poke_interval=30,
+        timeout=300,
+        mode='poke'
+    )
+
+    # Process detected file
+    process_file = PythonOperator(
+        task_id='process_file',
+        python_callable=process_detected_file
+    )
+
+    wait_for_file >> process_file
