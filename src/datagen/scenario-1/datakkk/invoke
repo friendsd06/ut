@@ -21,3 +21,27 @@ curl -X POST \
       "valid_checksum": false
     }
   }'
+
+
+  {
+      "conf": {
+          "valid_checksum": true,
+          "is_first_instance": false,
+          "needs_substitution": true
+      },
+      "dag_run_id": "manual_run_{{$timestamp}}",
+      "logical_date": "{{$isoTimestamp}}",
+      "note": "Triggered from Postman - Second Instance"
+  }
+
+  // Valid Checksum, No Substitution Needed
+  {
+      "conf": {
+          "valid_checksum": true,
+          "is_first_instance": true,
+          "needs_substitution": false
+      },
+      "dag_run_id": "manual_run_{{$timestamp}}",
+      "logical_date": "{{$isoTimestamp}}",
+      "note": "Triggered from Postman - No Substitution"
+  }
