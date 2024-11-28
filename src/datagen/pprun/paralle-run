@@ -1,0 +1,23 @@
+Subject: Managing Parallel Execution in Airflow DAGs
+
+Hi [Manager's Name],
+
+Here's a simplified explanation of managing parallel execution in Airflow, applied to our scenario:
+
+Default Behavior Without Configuration
+Scenario:
+The DAG data_engineering_1 is currently running.
+A user manually triggers the same DAG again.
+What Happens:
+By default, Airflow allows up to 16 concurrent runs (max_active_runs = 16).
+This means both DAG runs will start and execute independently, with tasks potentially running in parallel (as long as task-level concurrency limits aren't exceeded).
+Why This Could Be a Problem
+Challenges:
+Parallel execution may lead to data duplication, resource contention, or logical inconsistencies.
+This is especially problematic if the DAG processes the same dataset or modifies shared resources.
+Preventing Parallel Runs
+Solution:
+Set max_active_runs to 1 for the DAG.
+Effect:
+Only one instance of the DAG will run at a time.
+Any additional triggers (manual or scheduled) will wait in a queue until the current run finishes.
