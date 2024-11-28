@@ -1,0 +1,4 @@
+Apache Airflow is a platform to programmatically author, schedule and monitor workflows.
+Use Airflow to author workflows as Directed Acyclic Graphs (DAGs) of tasks.
+The rich user interface makes it easy to visualize pipelines running in production.
+Airflow is not a data streaming solution.
