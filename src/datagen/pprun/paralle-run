@@ -152,3 +152,41 @@ Best Practices:
 
 Monitoring: Always monitor DAG states and task executions, especially after pausing or resuming DAGs, to ensure expected behaviors.
 Documentation: Clearly document the reasons for pausing DAGs and any manual interventions required to handle missed schedules or dependencies.
+
+
+
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from airflow.utils.dates import days_ago
+from datetime import timedelta
+
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email': ['alerts@yourdomain.com'],
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+with DAG(
+    dag_id='data_engineering_1',
+    default_args=default_args,
+    description='Data Engineering DAG',
+    schedule_interval='@daily',
+    start_date=days_ago(1),
+    catchup=False,
+    max_active_runs=1,  # Restricts to one active run at a time
+    tags=['data_engineering'],
+) as dag:
+
+    start = DummyOperator(
+        task_id='start'
+    )
+
+    end = DummyOperator(
+        task_id='end'
+    )
+
+    start >> end
