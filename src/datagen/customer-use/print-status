@@ -86,3 +86,12 @@ with DAG('databricks_notebook_pipeline',
     end_task = DummyOperator(task_id='end_pipeline')
 
     start_task >> notebook_task >> end_task
+
+
+
+    # Add connection to Airflow's DB
+    session = Session()
+    if not session.query(Connection).filter(Connection.conn_id == databricks_conn.conn_id).first():
+        session.add(databricks_conn)
+        session.commit()
+    session.close()
