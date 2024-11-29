@@ -47,3 +47,42 @@ with DAG('databricks_jobs_chain',
         submit_run
 
 
+
+
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from airflow.providers.databricks.operators.databricks import DatabricksSubmitRunOperator
+from airflow.models.connection import Connection
+from datetime import datetime
+
+# Create DAG
+with DAG('databricks_notebook_pipeline',
+         start_date=datetime(2024, 1, 1),
+         schedule_interval=None,
+         catchup=False) as dag:
+
+    # Create connection programmatically
+    databricks_conn = Connection(
+        conn_id="databricks_default",
+        conn_type="databricks",
+        host="https://your-workspace.cloud.databricks.com",
+        password="your-token"
+    )
+
+    start_task = DummyOperator(task_id='start_pipeline')
+
+    # Use the connection in operator
+    notebook_task = DatabricksSubmitRunOperator(
+        task_id='run_notebook',
+        databricks_conn_id=databricks_conn.conn_id,
+        json={
+            'notebook_task': {
+                'notebook_path': '/Users/your-username/your-notebook'
+            },
+            'existing_cluster_id': 'your-cluster-id'
+        }
+    )
+
+    end_task = DummyOperator(task_id='end_pipeline')
+
+    start_task >> notebook_task >> end_task
