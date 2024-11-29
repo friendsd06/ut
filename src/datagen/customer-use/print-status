@@ -31,4 +31,19 @@ with DAG('databricks_jobs_chain',
     # Set job2 to run after job1
     job1 >> job2
 
+    submit_run = DatabricksSubmitRunOperator(
+            task_id='submit_databricks_run',
+            databricks_conn_id='databricks_default',
+            json={
+                'existing_cluster_id': 'cluster-1234-abcdef',  # Replace with your actual Cluster ID
+                'notebook_task': {
+                    'notebook_path': '/Users/your-username/your-notebook',
+                    # No base_parameters since no parameters are needed
+                },
+                # Optionally, you can specify other run parameters like timeout, libraries, etc.
+            },
+        )
+
+        submit_run
+
 
