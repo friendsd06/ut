@@ -96,6 +96,7 @@ with DAG('databricks_notebook_pipeline',
         session.commit()
     session.close()
 
+from airflow.providers.databricks.hooks.databricks import DatabricksHook
 
     # Test Databricks connection function
     def test_databricks_connection(databricks_conn_id):
