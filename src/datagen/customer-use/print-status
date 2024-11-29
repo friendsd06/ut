@@ -95,3 +95,16 @@ with DAG('databricks_notebook_pipeline',
         session.add(databricks_conn)
         session.commit()
     session.close()
+
+
+    # Test Databricks connection function
+    def test_databricks_connection(databricks_conn_id):
+        try:
+            hook = DatabricksHook(databricks_conn_id=databricks_conn_id)
+            # Try to list clusters which will verify connection
+            hook.get_conn().cluster.list_clusters()
+            print("Successfully connected to Databricks!")
+            return True
+        except Exception as e:
+            print(f"Failed to connect to Databricks: {str(e)}")
+            return False
