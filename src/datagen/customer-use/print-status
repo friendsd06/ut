@@ -1,0 +1,32 @@
+from airflow.providers.databricks.operators.databricks import DatabricksRunNowOperator
+from airflow.models import DAG
+from datetime import datetime
+
+class DatabricksJobWithStatus(DatabricksRunNowOperator):
+    def execute(self, context):
+        print(f"\nStarting {self.task_id}...")
+        run_id = super().execute(context)
+        status = self.get_run_status(run_id)
+        print(f"{self.task_id} Status: {status['state']['life_cycle_state']}")
+        return run_id
+
+with DAG('databricks_jobs_chain',
+         start_date=datetime(2024, 1, 1),
+         schedule_interval=None) as dag:
+
+    # First Databricks job
+    job1 = DatabricksJobWithStatus(
+        task_id='first_job',
+        databricks_conn_id='databricks_default',
+        job_id='job1_id'  # Replace with your first job ID
+    )
+
+    # Second Databricks job
+    job2 = DatabricksJobWithStatus(
+        task_id='second_job',
+        databricks_conn_id='databricks_default',
+        job_id='job2_id'  # Replace with your second job ID
+    )
+
+    # Set job2 to run after job1
+    job1 >> job2
