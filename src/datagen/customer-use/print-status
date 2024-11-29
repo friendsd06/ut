@@ -30,3 +30,11 @@ with DAG('databricks_jobs_chain',
 
     # Set job2 to run after job1
     job1 >> job2
+
+
+    The DatabricksRunNowOperator already has built-in logic to cancel jobs on Databricks! We don't need to write a custom on_kill() method.
+    When you cancel a task from the Airflow UI:
+
+    Airflow calls the operator's built-in on_kill()
+    The operator automatically uses the Databricks hook to cancel the run
+    The job gets cancelled both in Airflow and Databricks
