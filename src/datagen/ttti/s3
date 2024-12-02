@@ -1,0 +1,119 @@
+from airflow import DAG, settings
+from airflow.models import Connection
+from airflow.sensors.s3_key_sensor import S3KeySensor
+from airflow.operators.python_operator import PythonOperator
+from airflow.hooks.S3_hook import S3Hook
+from airflow.utils.session import create_session
+from datetime import datetime, timedelta
+import os
+
+# Function to create S3 connection
+def create_s3_connection():
+    with create_session() as session:
+        # Check if connection exists and delete it
+        if session.query(Connection).filter(Connection.conn_id == 's3_conn').first():
+            session.query(Connection).filter(Connection.conn_id == 's3_conn').delete()
+
+        # Create new connection
+        conn = Connection(
+            conn_id='s3_conn',
+            conn_type='s3',
+            extra={
+                "aws_access_key_id": "test",  # For LocalStack
+                "aws_secret_access_key": "test",  # For LocalStack
+                "host": "http://localhost:4566",  # LocalStack endpoint
+                "region_name": "us-east-1"
+            }
+        )
+        session.add(conn)
+        session.commit()
+        print("Connection 's3_conn' successfully created/updated")
+
+# Create connection when DAG is loaded
+create_s3_connection()
+
+# Define default arguments
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'start_date': datetime(2024, 1, 1),
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5)
+}
+
+# Function to process the file from S3
+def process_s3_file(**context):
+    # Get the S3 hook
+    s3_hook = S3Hook(aws_conn_id='s3_conn')
+
+    # Get bucket and key information
+    bucket_name = 'your-bucket-name'  # Replace with your bucket name
+    key = context['task_instance'].xcom_pull(task_ids='wait_for_file')
+
+    # Read the file content
+    file_content = s3_hook.read_key(key, bucket_name)
+    print(f"Processing file: {key}")
+    print(f"File content: {file_content}")
+
+    # Add your file processing logic here
+    # For example, you could:
+    # - Parse CSV/JSON data
+    # - Transform data
+    # - Save to database
+    # - Generate reports
+
+    return f"Successfully processed file: {key}"
+
+# Function to list files in bucket
+def list_bucket_files(**context):
+    s3_hook = S3Hook(aws_conn_id='s3_conn')
+    bucket_name = 'your-bucket-name'  # Replace with your bucket name
+
+    # List files in bucket
+    files = s3_hook.list_keys(bucket_name)
+    print(f"Files in bucket {bucket_name}:")
+    for file in files:
+        print(f"- {file}")
+
+    return files
+
+# Create DAG
+dag = DAG(
+    's3_file_processing_dag',
+    default_args=default_args,
+    description='DAG to monitor and process S3 files',
+    schedule_interval=timedelta(minutes=30),  # Run every 30 minutes
+    catchup=False
+)
+
+# Task to list bucket contents
+list_files = PythonOperator(
+    task_id='list_files',
+    python_callable=list_bucket_files,
+    provide_context=True,
+    dag=dag
+)
+
+# S3 sensor task to wait for new file
+wait_for_file = S3KeySensor(
+    task_id='wait_for_file',
+    bucket_name='your-bucket-name',  # Replace with your bucket name
+    bucket_key='path/to/your/file*.csv',  # Replace with your file pattern
+    aws_conn_id='s3_conn',
+    timeout=18*60*60,  # 18 hours timeout
+    poke_interval=300,  # Check every 5 minutes
+    dag=dag
+)
+
+# Task to process the file
+process_file = PythonOperator(
+    task_id='process_file',
+    python_callable=process_s3_file,
+    provide_context=True,
+    dag=dag
+)
+
+# Set task dependencies
+list_files >> wait_for_file >> process_file
