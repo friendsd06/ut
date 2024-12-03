@@ -112,4 +112,12 @@ with DAG(
 
     # Set main DAG dependencies
     start >> ingestion_monitoring >> enrichment_process >> end
+
+
+        trigger_enrichment = TriggerDagRunOperator(
+            task_id='trigger_enrichment',
+            trigger_dag_id='enrichment_dag',
+            conf={'source': 'loan'},
+            wait_for_completion=False
+        )
 ```
