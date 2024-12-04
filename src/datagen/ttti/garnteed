@@ -1,0 +1,288 @@
+Here are the key reasons why DatabricksSubmitRunOperator doesn't provide guaranteed termination:
+
+Architectural Limitations:
+
+Simple Implementation: The operator uses a basic cancellation mechanism with a single API call
+No State Management: Doesn't track or verify the job's state after cancellation
+Limited Retry Logic: No built-in retry mechanism for failed cancellation attempts
+
+
+Technical Challenges:
+
+Asynchronous Nature: Databricks jobs run independently of Airflow
+State Transitions: Jobs can be in various states when cancellation is requested
+Network Issues: API calls can fail due to connectivity problems
+Cluster States: The underlying cluster state affects job termination
+
+
+Edge Cases:
+
+Running Jobs: Jobs might be in a non-cancellable state
+Cluster Issues: Underlying cluster problems can prevent termination
+State Transitions: Jobs might change state during cancellation
+Resource Cleanup: No guaranteed cleanup of cluster resources
+
+
+Code Implementation Limitations:
+
+
+Missing Critical Features:
+
+No Status Verification: Doesn't check if cancellation was successful
+No Force Termination: Doesn't escalate to force termination if needed
+No Retry Mechanism: Doesn't retry failed cancellation attempts
+No Resource Cleanup: Doesn't ensure cluster resources are released
+
+
+Complex Scenarios:
+
+Long-Running Jobs: May require multiple cancellation attempts
+Stuck Jobs: May need force termination
+Resource Leaks: May leave orphaned resources
+State Inconsistencies: May result in unclear job status
+
+
+Business Impact:
+
+Cost Implications: Uncontrolled running jobs consume resources
+Resource Availability: Stuck jobs can block resources
+Monitoring Complexity: Difficult to track actual job status
+Operational Overhead: Requires manual intervention
+
+
+
+This is why organizations often need to implement custom solutions (like the GuaranteedTerminationDatabricksOperator we discussed earlier) to ensure reliable job termination and resource cleanup.
+Would you like me to explain any specific aspect of these limitations in more detail or discuss strategies to overcome them? CopyRetryClaude does not have the ability to run the code it generates yet.Acan we build this framework more adavance
+from datetime import datetime, timedelta
+import threading
+import time
+class JobControlFramework:
+    def init(self, job_id, max_runtime_minutes=120):
+        self.job_id = job_id
+        self.max_runtime = timedelta(minutes=max_runtime_minutes)
+        self.start_time = datetime.now()
+        self.heartbeat_timestamp = datetime.now()
+        self.terminated = False    def start_monitoring(self):
+        monitor_thread = threading.Thread(target=self._monitor_job)
+        monitor_thread.start()    def update_heartbeat(self):
+        self.heartbeat_timestamp = datetime.now()    def monitorjob(self):
+        while not self.terminated:
+            current_time = datetime.now()            # Check max runtime
+            if current_time - self.start_time > self.max_runtime:
+                self._terminate_job("Exceeded maximum runtime")
+                break            # Check heartbeat
+            if current_time - self.heartbeat_timestamp > timedelta(minutes=5):
+                self._terminate_job("Heartbeat timeout")
+                break            time.sleep(60)    def terminatejob(self, reason):
+        self.terminated = True
+        # Implement force termination logic here
+        # Log termination reason
+        # Send alertsEditI'll create an advanced version of the JobControlFramework with more robust features, monitoring, and error handling.
+Advanced Job Control FrameworkClick to open code
+Here's how to use this advanced framework:
+pythonCopy# Example usage
+def monitor_callback(framework):
+    # Custom monitoring logic
+    print(f"Custom monitoring for job {framework.job_id}")
+
+def termination_callback(framework):
+    # Custom termination logic
+    print(f"Job {framework.job_id} terminated with reason: {framework.termination_reason}")
+
+# Configure alerts
+alert_configs = {
+    'email': {
+        'recipients': ['admin@example.com'],
+        'smtp_config': {...}
+    },
+    'slack': {
+        'webhook_url': 'https://hooks.slack.com/...',
+        'channel': '#alerts'
+    }
+}
+
+# Initialize framework
+job_control = AdvancedJobControlFramework(
+    job_id="test_job_123",
+    max_runtime_minutes=180,
+    heartbeat_interval_minutes=5,
+    max_retries=3,
+    resource_limits={
+        'max_cpu_usage': 90.0,
+        'max_memory_usage': 85.0,
+        'max_error_count': 5
+    },
+    alert_configs=alert_configs,
+    callbacks={
+        'monitor': monitor_callback,
+        'termination': termination_callback
+    }
+)
+
+# Start monitoring
+job_control.start_monitoring()
+
+# Update metrics periodically
+job_control.update_heartbeat({
+    'cpu_usage': 75.0,
+    'memory_usage': 80.0
+})
+
+# Get current status
+status = job_control.get_status()
+print(json.dumps(status, indent=2))
+Key Improvements in this Advanced Version:
+
+Enhanced Monitoring:
+
+Resource usage tracking
+Error and warning counting
+Custom monitoring callbacks
+Metric locking for thread safety
+
+
+Flexible Termination:
+
+Multiple termination strategies
+Retry mechanism with exponential backoff
+Graceful and force termination options
+Customizable termination reasons
+
+
+Advanced Alerting:
+
+Asynchronous alert processing
+Multiple alert channels
+Severity levels
+Queue-based alert handling
+
+
+Better Resource Management:
+
+Configurable resource limits
+Automatic violation detection
+Custom resource monitoring
+
+
+Improved Error Handling:
+
+Thread-safe operations
+Comprehensive error tracking
+Detailed logging
+Exception management
+
+
+Status Management:
+
+Detailed status reporting
+Metric collection
+State tracking
+Performance monitoring
+
+
+
+Would you like me to explain any specific aspect of this implementation in more detail or add any additional features? CopyRetryClaude does not have the ability to run the code it generates yet.AI want to use on Airflow built in operatorEditI'll create an advanced implementation that extends Airflow's built-in operators with enhanced monitoring and termination capabilities.
+Advanced Airflow Control FrameworkClick to open code
+Here's how to use these enhanced operators in your DAG:
+pythonCopyfrom datetime import datetime
+from airflow import DAG
+
+# Example DAG using ControlledDatabricksOperator
+with DAG(
+    'controlled_databricks_example',
+    start_date=datetime(2024, 1, 1),
+    schedule_interval='@daily'
+) as dag:
+
+    databricks_task = ControlledDatabricksOperator(
+        task_id='controlled_databricks_job',
+        databricks_conn_id='databricks_default',
+        json={
+            "notebook_task": {
+                "notebook_path": "/path/to/notebook",
+            },
+            "new_cluster": {
+                "spark_version": "11.3.x-scala2.12",
+                "node_type_id": "Standard_DS3_v2",
+                "num_workers": 2
+            }
+        },
+        max_runtime_minutes=180,
+        heartbeat_interval_minutes=5,
+        max_retries=3,
+        monitoring_interval=60,
+        resource_limits={
+            'max_cpu_usage': 90.0,
+            'max_memory_usage': 85.0
+        },
+        alert_on_failure=True
+    )
+
+# Example DAG using ControlledSparkOperator
+with DAG(
+    'controlled_spark_example',
+    start_date=datetime(2024, 1, 1),
+    schedule_interval='@daily'
+) as dag:
+
+    spark_task = ControlledSparkOperator(
+        task_id='controlled_spark_job',
+        application='/path/to/app.jar',
+        java_class='com.example.SparkApp',
+        max_runtime_minutes=120,
+        heartbeat_interval_minutes=5,
+        max_retries=3,
+        monitoring_interval=60,
+        resource_limits={
+            'max_cpu_usage': 85.0,
+            'max_memory_usage': 80.0
+        },
+        alert_on_failure=True
+    )
+Key Features of this Implementation:
+
+Enhanced Monitoring:
+
+Runtime monitoring
+Resource usage tracking
+Heartbeat mechanism
+Customizable monitoring intervals
+
+
+Advanced Control:
+
+Multiple termination attempts
+Graceful and force termination
+Resource limit enforcement
+Timeout handling
+
+
+Error Management:
+
+Comprehensive error handling
+Retry mechanism with exponential backoff
+Alert system integration
+Detailed logging
+
+
+Flexibility:
+
+Works with multiple operator types
+Customizable resource limits
+Configurable timeouts and intervals
+Extensible monitoring system
+
+
+Thread Safety:
+
+Safe thread management
+Proper cleanup on termination
+Protected metric updates
+Controlled shutdown
+
+
+
+Would you like me to explain any specific aspect in more detail or add additional features? CopyRetryClaude does not have the ability to run the code it generates yet.Acan we make it more advanceEditI'll create an even more advanced version with additional features like metrics collection, job profiling, recovery mechanisms, and distributed monitoring.
+Enterprise-Grade Airflow Control FrameworkClick to open code CopyRetryClaude’s response was limited as it hit the maximum length allowed at this time.Aprovide complete implementationEditI'll provide a complete implementation of the advanced Airflow control framework. Due to the size of the implementation, I'll break it into multiple logical parts.
+Base Classes and UtilitiesClick to open code
+Let me create the next part with the core control operator implementation. Would you like me to continue? CopyRetryClaude can make mistakes. Please double-check responses.
