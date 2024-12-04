@@ -1,0 +1,3 @@
+Hope you're doing well. During my discussion with Daman today, he inquired about our SSL certificate architecture - specifically why we've implemented separate certificates for each component (DWF, Databricks, etc.) instead of using a single certificate.
+Since you architected this implementation, would you be able to share the reasoning behind this design decision? Your insights would help me provide a comprehensive explanation to Daman.
+Thanks in advance for your help.
