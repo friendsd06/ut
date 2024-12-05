@@ -54,3 +54,28 @@ Airflow 2.2+
 Configured trigger service
 Compatible database backend
 Updated DAG code to use deferrable flag
+
+=================================================
+
+ExternalTaskSensor Issues:
+
+Worker Blocking: Workers get locked up running sensors
+Each sensor occupies a worker slot continuously
+Frequent polling creates unnecessary database load
+Multiple sensors can quickly exhaust worker pool
+
+
+TriggerDagRunOperator Problems:
+
+Uncontrolled triggering can flood the system
+Target DAGs may create too many concurrent tasks
+Queue backlog leads to resource exhaustion
+No built-in rate limiting
+
+
+Resource Impact:
+
+Database connection pool exhaustion
+Worker slots getting blocked
+Memory usage growing with each sensor
+CPU waste on frequent polling
