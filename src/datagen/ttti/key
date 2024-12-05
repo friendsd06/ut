@@ -79,3 +79,15 @@ Database connection pool exhaustion
 Worker slots getting blocked
 Memory usage growing with each sensor
 CPU waste on frequent polling
+
+=============================
+
+Key Recommendations:
+
+Use mode='reschedule' for sensors to release worker slots
+Set appropriate poke_interval to reduce polling frequency
+Always configure timeouts to prevent infinite waiting
+Implement rate limiting for triggers
+Consider using smart sensors for better resource utilization
+Monitor sensor execution time and adjust parameters
+Use pools to limit concurrent sensor execution
