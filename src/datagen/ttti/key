@@ -1,0 +1,56 @@
+Key Differences and Benefits of Deferrable Operators:
+
+Resource Usage:
+
+Traditional: Each sensor/trigger occupies a worker slot continuously
+Deferrable: Uses async trigger service, freeing up workers
+
+
+Worker Efficiency:
+
+Traditional: Workers blocked during waiting periods
+Deferrable: Workers available for actual task processing
+
+
+
+
+# Traditional Sensor
+sensor = ExternalTaskSensor(
+    task_id='wait_for_task',
+    external_dag_id='other_dag',
+    external_task_id='task_to_wait_for',
+    mode='reschedule'  # Still blocks a worker
+)
+
+# Deferrable Sensor
+deferrable_sensor = ExternalTaskSensor(
+    task_id='wait_for_task',
+    external_dag_id='other_dag',
+    external_task_id='task_to_wait_for',
+    deferrable=True  # Async operation
+)
+
+# Deferrable Trigger
+deferrable_trigger = TriggerDagRunOperator(
+    task_id='trigger_dag',
+    trigger_dag_id='target_dag',
+    wait_for_completion=True,
+    deferrable=True
+)
+
+-------------
+
+Scaling Benefits:
+
+Reduced worker node requirements
+Better handling of concurrent tasks
+Lower infrastructure costs
+Improved system reliability
+
+
+Prerequisites for Deferrable Operators:
+
+Airflow 2.2+
+Configured trigger service
+Compatible database backend
+Updated DAG code to use deferrable flag
