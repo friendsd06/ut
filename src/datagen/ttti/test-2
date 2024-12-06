@@ -70,3 +70,16 @@ task_metadata = [
     {"taskid": "join", "operator": "PythonOperator", "dependencytype": "sequential"},
     {"taskid": "end", "operator": "PythonOperator", "dependencytype": "sequential"}
 ]
+
+# Cyclic pipeline test data (for testing cycle detection)
+pipeline_data = [
+    {"pipelineid": "cyclic_pipeline", "taskid": "task_a", "dependenttaskid": "task_c"},
+    {"pipelineid": "cyclic_pipeline", "taskid": "task_b", "dependenttaskid": "task_a"},
+    {"pipelineid": "cyclic_pipeline", "taskid": "task_c", "dependenttaskid": "task_b"}
+]
+
+task_metadata = [
+    {"taskid": "task_a", "operator": "PythonOperator", "dependencytype": "sequential"},
+    {"taskid": "task_b", "operator": "PythonOperator", "dependencytype": "sequential"},
+    {"taskid": "task_c", "operator": "PythonOperator", "dependencytype": "sequential"}
+]
