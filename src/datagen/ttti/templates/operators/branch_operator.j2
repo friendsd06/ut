@@ -1,0 +1,14 @@
+{# templates/operators/branch_python_operator.j2 #}
+{% macro render_branch_operator(task) %}
+BranchPythonOperator(
+    task_id="{{ task.taskid }}",
+    python_callable={{ task.python_callable }},
+    {% if task.op_args %}
+    op_args={{ task.op_args | tojson }},
+    {% endif %}
+    {% if task.op_kwargs %}
+    op_kwargs={{ task.op_kwargs | tojson }},
+    {% endif %}
+    {% include 'operators/common_args.j2' %}
+)
+{% endmacro %}

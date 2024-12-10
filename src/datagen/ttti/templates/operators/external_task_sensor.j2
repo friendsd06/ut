@@ -1,0 +1,33 @@
+{% macro render_external_task_sensor(task) %}
+ExternalTaskSensor(
+    task_id="{{ task.taskid }}",
+    external_dag_id={{ task.task_params.get('external_dag_id') | tojson }},
+    {% if task.task_params.get('external_task_id') is not none %}
+    external_task_id={{ task.task_params.external_task_id | tojson }},
+    {% else %}
+    external_task_id=None,
+    {% endif %}
+    {% if task.task_params.get('allowed_states') %}
+    allowed_states={{ task.task_params.allowed_states | tojson }},
+    {% endif %}
+    {% if task.task_params.get('failed_states') %}
+    failed_states={{ task.task_params.failed_states | tojson }},
+    {% endif %}
+    {% if task.task_params.get('execution_delta') %}
+    execution_delta={{ task.task_params.execution_delta }},
+    {% endif %}
+    {% if task.task_params.get('execution_date_fn') %}
+    execution_date_fn={{ task.task_params.execution_date_fn }},
+    {% endif %}
+    {% if task.task_params.get('timeout') is not none %}
+    timeout={{ task.task_params.timeout }},
+    {% endif %}
+    {% if task.task_params.get('mode') %}
+    mode={{ task.task_params.mode | tojson }},
+    {% endif %}
+    {% if task.task_params.get('poke_interval') %}
+    poke_interval={{ task.task_params.poke_interval }},
+    {% endif %}
+    {% include 'operators/common_args.j2' %}
+)
+{% endmacro %}
