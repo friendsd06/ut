@@ -1,8 +1,0 @@
-Flow Description:
-
-Start → Checksum Validation
-If checksum invalid → Error Handler → End
-If checksum valid → Generate LEV IDs → Activation Check
-If records non-active → Substitution → Dump Data
-If all records active → Dump Data directly
-All paths end with Trigger Ingestion → End

@@ -1,9 +1,0 @@
-Create the project directory structure.
-Set up a virtual environment.
-Install the required dependencies.
-Set up the PostgreSQL database and tables.
-Populate the database with sample data.
-Configure environment variables.
-Place the Python modules and template files.
-Run the application.
-
