@@ -1,7 +1,0 @@
-Key Features:
-
-Hierarchical Priority: 4-level priority system
-Resource Isolation: Separate namespaces and pools per priority
-Flexible Scaling: Adjustable resources per priority level
-Fair Scheduling: Priority-based execution without starvation
-Resource Guarantees: Critical DAGs always get resources first
