@@ -31,3 +31,8 @@ Use Case: A DAG processes a file from S3 and then triggers another DAG for datab
 Increased Debugging Complexity
 Problem: Debugging becomes harder because dependencies are not defined within Airflow but distributed across external systems.
 Use Case: A failure in a downstream task due to missing upstream data requires checking multiple systems (e.g., Kafka, APIs, and Airflow logs), increasing the time to resolve issues.
+
+
+Inconsistent State Tracking
+Problem: Airflow's task and DAG state tracking is bypassed in a push-based model, leading to potential inconsistencies.
+Scenario: An event triggers a DAG while another run is still in progress. Without state management, overlapping DAG runs may lead to resource contention or inconsistent outputs.
