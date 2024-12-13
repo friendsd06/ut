@@ -1,0 +1,382 @@
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.utils.edgemodifier import Label
+from airflow.utils.trigger_rule import TriggerRule
+from datetime import datetime
+
+# -----------------------
+# Mock/Placeholder functions
+# -----------------------
+
+def determine_scenario(**context):
+    """
+    Determine which path to take:
+    Possible inputs:
+    - scenario: 'SLA_TRIGGER', 'PRIMARY_FILE', 'SECONDARY_FILE'
+
+    Provided via dag_run.conf or variables.
+    """
+    scenario = context['dag_run'].conf.get('scenario', 'PRIMARY_FILE')
+    if scenario == 'SLA_TRIGGER':
+        return 'check_manual_or_automated'
+    elif scenario == 'PRIMARY_FILE':
+        return 'move_file_primary'
+    elif scenario == 'SECONDARY_FILE':
+        return 'move_file_secondary'
+    else:
+        # default to primary if not specified
+        return 'move_file_primary'
+
+def is_manual_or_automated(**context):
+    """
+    Check if SLA trigger is manual or automated.
+    Return appropriate task_id based on condition.
+    """
+    # Placeholder logic
+    # Assume dag_run.conf{'trigger_type': 'manual' or 'automated'}
+    trigger_type = context['dag_run'].conf.get('trigger_type', 'automated')
+    if trigger_type == 'manual':
+        # For manual triggers, maybe we go a certain path
+        return 'handle_manual_trigger'
+    else:
+        # Automated path
+        return 'check_substitution_block'
+
+def handle_manual_trigger(**context):
+    # Implement logic for manual trigger scenario
+    print("Handling manual SLA trigger")
+    # After handling manual, go to final notification or end?
+    return 'final_notify_event_hub_sla'
+
+def check_substitution_block(**context):
+    """
+    Check if substitution is blocked/unblocked.
+    If allowed, proceed to unblock. If not, end or handle differently.
+    """
+    # Placeholder logic
+    substitution_allowed = True
+    if substitution_allowed:
+        return 'unblock_substitution'
+    else:
+        # If not allowed, maybe directly end or notify?
+        return 'final_notify_event_hub_sla'
+
+def unblock_substitution(**context):
+    print("Unblocking substitution...")
+    return 'final_notify_event_hub_sla'
+
+def final_notify_event_hub_sla(**context):
+    print("Notifying Event Hub/LEV about SLA Trigger outcome...")
+    # End SLA path
+    return 'end_sla'
+
+
+# --------------- Primary File Flow ---------------
+
+def move_file_primary(**context):
+    print("Moving primary (first instance) file to processing directory...")
+    return 'validate_file_primary'
+
+def validate_file_primary(**context):
+    # Check file validation logic
+    # Return branch: if file satisfies validation: go register_Levid_primary, else block
+    validation_passed = True
+    if validation_passed:
+        return 'register_get_levid_primary'
+    else:
+        # If validation fails, possibly block or end?
+        return 'block_primary_processing'
+
+def register_get_levid_primary(**context):
+    print("Registering and getting LevID for primary file...")
+    return 'run_transformation_primary'
+
+def run_transformation_primary(**context):
+    print("Running transformation, derivation & validation for primary file...")
+    # After transformation, check validation threshold
+    validation_breached = False
+    if validation_breached:
+        return 'block_primary_processing'
+    else:
+        return 'persist_data_primary'
+
+def persist_data_primary(**context):
+    print("Persisting data to Data Table for primary file...")
+    return 'notify_event_hub_primary'
+
+def notify_event_hub_primary(**context):
+    print("Notifying Event Hub/LEV for primary file flow completion...")
+    # Flow ends
+    return 'end_primary'
+
+def block_primary_processing(**context):
+    print("Primary file did not satisfy checks or threshold breached - block scenario")
+    # Potentially notify or halt
+    return 'end_primary'
+
+
+# --------------- Secondary File Flow ---------------
+
+def move_file_secondary(**context):
+    print("Moving secondary (second instance) file to processing directory...")
+    return 'check_allow_feed_processing_secondary'
+
+def check_allow_feed_processing_secondary(**context):
+    """
+    The diagram suggests there's a status that confirms 'Allow' or stays 'Block'.
+    If allowed, proceed to validation.
+    """
+    # Placeholder logic:
+    allow_feed = context['dag_run'].conf.get('allow_secondary', True)
+    if allow_feed:
+        return 'validate_file_secondary'
+    else:
+        return 'end_secondary'  # If not allowed, just end or block
+
+def validate_file_secondary(**context):
+    # Validate the secondary file
+    validation_passed = True
+    if validation_passed:
+        return 'register_get_levid_secondary'
+    else:
+        return 'end_secondary'  # block scenario if fail
+
+def register_get_levid_secondary(**context):
+    print("Register and get LevID for secondary file...")
+    return 'run_transformation_secondary'
+
+def run_transformation_secondary(**context):
+    print("Run transformation, derivation & validation for secondary file...")
+    validation_breached = False
+    if validation_breached:
+        # If validation breached for secondary:
+        # According to diagram, if threshold not breached => persist immediately
+        # If breached => Wait for Activation from DMC
+        # Let's say if breached = True, we must wait for activation:
+        return 'wait_for_activation_dmc'
+    else:
+        # If not breached:
+        return 'persist_data_secondary'
+
+def wait_for_activation_dmc(**context):
+    print("Waiting for Activation from DMC...")
+    # Placeholder for waiting logic
+    activated = True
+    if activated:
+        return 'persist_data_secondary'
+    else:
+        return 'end_secondary'
+
+def persist_data_secondary(**context):
+    print("Persisting data for secondary file...")
+    return 'notify_event_hub_secondary'
+
+def notify_event_hub_secondary(**context):
+    print("Notifying Event Hub/LEV for secondary file flow completion...")
+    return 'end_secondary'
+
+
+# Dummy endpoints to finalize each branch
+def end_sla(**context):
+    print("SLA flow ended.")
+def end_primary(**context):
+    print("Primary flow ended.")
+def end_secondary(**context):
+    print("Secondary flow ended.")
+
+
+# -----------------------
+# DAG Definition
+# -----------------------
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2024,1,1),
+    'catchup': False
+}
+
+with DAG(
+    'complex_flow_dag',
+    default_args=default_args,
+    schedule_interval=None,
+    description='DAG representing the complex flow from the given diagram'
+) as dag:
+
+    # Entry point: Determine scenario
+    scenario_decision = BranchPythonOperator(
+        task_id='scenario_decision',
+        python_callable=determine_scenario,
+        provide_context=True
+    )
+
+    # SLA Trigger path
+    check_manual_or_automated = BranchPythonOperator(
+        task_id='check_manual_or_automated',
+        python_callable=is_manual_or_automated,
+        provide_context=True
+    )
+
+    handle_manual_trigger_task = BranchPythonOperator(
+        task_id='handle_manual_trigger',
+        python_callable=handle_manual_trigger,
+        provide_context=True
+    )
+
+    check_substitution_block_task = BranchPythonOperator(
+        task_id='check_substitution_block',
+        python_callable=check_substitution_block,
+        provide_context=True
+    )
+
+    unblock_substitution_task = BranchPythonOperator(
+        task_id='unblock_substitution',
+        python_callable=unblock_substitution,
+        provide_context=True
+    )
+
+    final_notify_event_hub_sla_task = PythonOperator(
+        task_id='final_notify_event_hub_sla',
+        python_callable=final_notify_event_hub_sla,
+        provide_context=True
+    )
+
+    end_sla_task = PythonOperator(
+        task_id='end_sla',
+        python_callable=end_sla,
+        trigger_rule=TriggerRule.NONE_FAILED
+    )
+
+    # Primary File path
+    move_file_primary_task = BranchPythonOperator(
+        task_id='move_file_primary',
+        python_callable=move_file_primary,
+        provide_context=True
+    )
+
+    validate_file_primary_task = BranchPythonOperator(
+        task_id='validate_file_primary',
+        python_callable=validate_file_primary,
+        provide_context=True
+    )
+
+    register_get_levid_primary_task = BranchPythonOperator(
+        task_id='register_get_levid_primary',
+        python_callable=register_get_levid_primary,
+        provide_context=True
+    )
+
+    run_transformation_primary_task = BranchPythonOperator(
+        task_id='run_transformation_primary',
+        python_callable=run_transformation_primary,
+        provide_context=True
+    )
+
+    persist_data_primary_task = BranchPythonOperator(
+        task_id='persist_data_primary',
+        python_callable=persist_data_primary,
+        provide_context=True
+    )
+
+    notify_event_hub_primary_task = BranchPythonOperator(
+        task_id='notify_event_hub_primary',
+        python_callable=notify_event_hub_primary,
+        provide_context=True
+    )
+
+    block_primary_processing_task = PythonOperator(
+        task_id='block_primary_processing',
+        python_callable=block_primary_processing,
+        provide_context=True
+    )
+
+    end_primary_task = PythonOperator(
+        task_id='end_primary',
+        python_callable=end_primary,
+        trigger_rule=TriggerRule.ALL_DONE
+    )
+
+    # Secondary File path
+    move_file_secondary_task = BranchPythonOperator(
+        task_id='move_file_secondary',
+        python_callable=move_file_secondary,
+        provide_context=True
+    )
+
+    check_allow_feed_processing_secondary_task = BranchPythonOperator(
+        task_id='check_allow_feed_processing_secondary',
+        python_callable=check_allow_feed_processing_secondary,
+        provide_context=True
+    )
+
+    validate_file_secondary_task = BranchPythonOperator(
+        task_id='validate_file_secondary',
+        python_callable=validate_file_secondary,
+        provide_context=True
+    )
+
+    register_get_levid_secondary_task = BranchPythonOperator(
+        task_id='register_get_levid_secondary',
+        python_callable=register_get_levid_secondary,
+        provide_context=True
+    )
+
+    run_transformation_secondary_task = BranchPythonOperator(
+        task_id='run_transformation_secondary',
+        python_callable=run_transformation_secondary,
+        provide_context=True
+    )
+
+    wait_for_activation_dmc_task = BranchPythonOperator(
+        task_id='wait_for_activation_dmc',
+        python_callable=wait_for_activation_dmc,
+        provide_context=True
+    )
+
+    persist_data_secondary_task = BranchPythonOperator(
+        task_id='persist_data_secondary',
+        python_callable=persist_data_secondary,
+        provide_context=True
+    )
+
+    notify_event_hub_secondary_task = BranchPythonOperator(
+        task_id='notify_event_hub_secondary',
+        python_callable=notify_event_hub_secondary,
+        provide_context=True
+    )
+
+    end_secondary_task = PythonOperator(
+        task_id='end_secondary',
+        python_callable=end_secondary,
+        trigger_rule=TriggerRule.ALL_DONE
+    )
+
+    # -----------------------
+    # Set Up Dependencies
+    # -----------------------
+    scenario_decision >> [check_manual_or_automated, move_file_primary_task, move_file_secondary_task]
+
+    # SLA branch
+    check_manual_or_automated >> [handle_manual_trigger_task, check_substitution_block_task]
+    handle_manual_trigger_task >> final_notify_event_hub_sla_task >> end_sla_task
+    check_substitution_block_task >> unblock_substitution_task >> final_notify_event_hub_sla_task
+
+    # Primary file branch
+    move_file_primary_task >> validate_file_primary_task
+    validate_file_primary_task >> [register_get_levid_primary_task, block_primary_processing_task]
+    register_get_levid_primary_task >> run_transformation_primary_task
+    run_transformation_primary_task >> [persist_data_primary_task, block_primary_processing_task]
+    persist_data_primary_task >> notify_event_hub_primary_task >> end_primary_task
+    block_primary_processing_task >> end_primary_task
+
+    # Secondary file branch
+    move_file_secondary_task >> check_allow_feed_processing_secondary_task
+    check_allow_feed_processing_secondary_task >> [validate_file_secondary_task, end_secondary_task]
+    validate_file_secondary_task >> [register_get_levid_secondary_task, end_secondary_task]
+    register_get_levid_secondary_task >> run_transformation_secondary_task
+    # run_transformation_secondary_task can go two ways:
+    # If threshold not breached -> persist_data_secondary_task directly
+    # If breached -> wait_for_activation_dmc_task then persist
+    run_transformation_secondary_task >> [persist_data_secondary_task, wait_for_activation_dmc_task]
+    wait_for_activation_dmc_task >> [persist_data_secondary_task, end_secondary_task]
+    persist_data_secondary_task >> notify_event_hub_secondary_task >> end_secondary_task
+
