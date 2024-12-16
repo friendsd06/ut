@@ -1,4 +1,0 @@
-docker run -p 8080:8080 airflow-metadata
-docker build -t airflow-metadata .
-docker exec -it airflowmetadata-container /bin/bash
-ps aux | grep airflow
