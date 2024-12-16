@@ -15,3 +15,28 @@ Maintenance	Centralized Maintenance: All logic and waiting conditions are define
 Flexibility	Good: Changing conditions or adding dependencies can be done in DAG code. Airflow manages all logic internally.	Flexible if Already Event-Driven: Works best if the organization is already using event streams or webhooks. Changes to triggering logic may require updates to external systems.
 Cost During Idle Times	Minimal: The Triggerer is lightweight. Even with many deferrable tasks, cost remains low as no workers are waiting idly.	Zero: If no events trigger DAGs, Airflow is idle. No cost for waiting or monitoring since there’s no internal waiting at all.
 Latency for Starting Tasks	Slight Delay: The Triggerer checks events asynchronously. Still efficient, but there may be a brief waiting period before tasks resume.	Potentially Immediate: As soon as the external event occurs, the DAG is triggered, resulting in near-instant task starts (assuming quick API calls).
+
+
+
+
+
+------------
+
+Below is an enhanced comparison table that includes a cost approximation scenario. We’ll assume a pricing model for illustrative purposes:
+
+Assumptions for Cost Calculation:
+
+Scenario: 100 concurrent tasks waiting or triggered.
+Worker Cost: $0.50/hour per worker node.
+Triggerer Cost: Lightweight process on the same infrastructure, negligible compared to workers. Let’s approximate Triggerer overhead at $0.05/hour as a minor incremental cost.
+Push-Based External Triggering Cost: No continuous Airflow waiting. Airflow only spins up workers when a task runs. We assume tasks run on-demand and take 5 minutes each. With 100 tasks, if they all trigger at once and can be processed by fewer workers (say 5 workers running 20 tasks each sequentially), total processing time would be about 500 minutes (just over 8 hours total if run sequentially, or scaled horizontally for parallel execution). We’ll provide a simple scenario.
+Cost Scenario Setup:
+Triggerer-Based:
+
+Waiting tasks don’t consume worker slots. Let’s say we keep a small cluster of 2 workers plus 1 Triggerer process. 2 workers @ $0.50/hour = $1.00/hour + $0.05/hour for Triggerer = $1.05/hour standing cost. When tasks are ready to execute, they run on these 2 workers. If the actual work of 100 tasks totals about 10 hours (including waiting + execution time), total cost ≈ $10.50 + (Triggerer negligible) ≈ $10.50.
+Push-Based:
+
+If the DAGs are triggered only when tasks need to run, you might start with 0 workers and scale up dynamically. Let’s say you spin up 5 workers for the duration of processing the 100 tasks. If all 100 tasks run for 5 minutes each in parallel (assuming 20 tasks per worker sequentially):
+5 minutes each × 100 tasks = 500 minutes total task time, but if each worker can run tasks in parallel, you might reduce total wall-time. Let’s assume you keep workers for ~2 hours to handle the workload comfortably.
+5 workers × $0.50/hour × 2 hours = $5.00 total. No triggerer cost, no waiting cost.
+These are illustrative calculations. Actual costs depend on parallelization, runtime, and scaling strategy.
