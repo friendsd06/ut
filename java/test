@@ -1,0 +1,139 @@
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import col, explode, flatten
+from typing import List, Dict
+from abc import ABC, abstractmethod
+import yaml
+
+class ConfigReader:
+    """Simple configuration reader"""
+    def __init__(self, config_path: str):
+        self.config = self._load_config(config_path)
+
+    def _load_config(self, path: str) -> Dict:
+        with open(path, 'r') as file:
+            return yaml.safe_load(file)
+
+    def get_table_config(self, table_name: str) -> Dict:
+        return self.config['tables'].get(table_name, {})
+
+    def get_s3_config(self) -> Dict:
+        return self.config['s3_settings']
+
+class FlatteningStrategy(ABC):
+    """Abstract base class for flattening strategies"""
+    @abstractmethod
+    def flatten(self, df: DataFrame, columns: List[str]) -> DataFrame:
+        pass
+
+class SingleColumnFlattening(FlatteningStrategy):
+    """Flattening strategy for single nested columns using explode"""
+    def flatten(self, df: DataFrame, columns: List[str]) -> DataFrame:
+        result_df = df
+        for column in columns:
+            result_df = result_df.withColumn(column, explode(col(column)))
+        return result_df
+
+class MultiColumnFlattening(FlatteningStrategy):
+    """Flattening strategy for multiple nested columns using flatten"""
+    def flatten(self, df: DataFrame, columns: List[str]) -> DataFrame:
+        result_df = df
+        for column in columns:
+            result_df = result_df.select("*", flatten(col(column)).alias(f"{column}_flat"))
+            result_df = result_df.drop(column).withColumnRenamed(f"{column}_flat", column)
+        return result_df
+
+class FlatteningFactory:
+    """Factory for creating flattening strategies"""
+    @staticmethod
+    def get_strategy(strategy_type: str) -> FlatteningStrategy:
+        strategies = {
+            'single': SingleColumnFlattening(),
+            'multi': MultiColumnFlattening()
+        }
+        return strategies.get(strategy_type)
+
+class DataReader:
+    """Handles reading data from Databricks tables"""
+    def __init__(self, spark: SparkSession):
+        self.spark = spark
+
+    def read_table(self, table_name: str) -> DataFrame:
+        return self.spark.table(table_name)
+
+class DataWriter:
+    """Handles writing data to S3"""
+    def __init__(self, s3_config: Dict):
+        self.s3_config = s3_config
+
+    def write_to_s3(self, df: DataFrame, path: str, format: str = 'parquet'):
+        df.write \
+            .mode('overwrite') \
+            .format(format) \
+            .save(f"{self.s3_config['base_path']}/{path}")
+
+class FlatteningProcessor:
+    """Main processor that orchestrates the flattening process"""
+    def __init__(self, config_path: str):
+        self.spark = SparkSession.builder \
+            .appName("Simple Flattening Processor") \
+            .getOrCreate()
+
+        self.config_reader = ConfigReader(config_path)
+        self.data_reader = DataReader(self.spark)
+        self.data_writer = DataWriter(self.config_reader.get_s3_config())
+        self.flattening_factory = FlatteningFactory()
+
+    def process_table(self, table_name: str):
+        """Process a single table"""
+        try:
+            # Get table configuration
+            table_config = self.config_reader.get_table_config(table_name)
+
+            # Read data
+            df = self.data_reader.read_table(table_name)
+
+            # Apply flattening if needed
+            if table_config.get('flatten_columns'):
+                strategy = self.flattening_factory.get_strategy(table_config['flatten_type'])
+                df = strategy.flatten(df, table_config['flatten_columns'])
+
+            # Write to S3
+            self.data_writer.write_to_s3(
+                df,
+                f"{table_config['s3_path']}/{table_name}",
+                table_config.get('format', 'parquet')
+            )
+
+            print(f"Successfully processed table: {table_name}")
+
+        except Exception as e:
+            print(f"Error processing table {table_name}: {str(e)}")
+            raise
+
+# Example configuration
+example_config = """
+tables:
+  customer_orders:
+    flatten_columns: ['items', 'addresses']
+    flatten_type: 'multi'
+    s3_path: 'processed/customers'
+    format: 'parquet'
+
+  product_reviews:
+    flatten_columns: ['ratings']
+    flatten_type: 'single'
+    s3_path: 'processed/reviews'
+    format: 'parquet'
+
+s3_settings:
+  base_path: 's3://your-bucket'
+"""
+
+# Simple usage example
+if __name__ == "__main__":
+    processor = FlatteningProcessor("config.yaml")
+
+    # Process tables sequentially
+    tables_to_process = ['customer_orders', 'product_reviews']
+    for table in tables_to_process:
+        processor.process_table(table)
