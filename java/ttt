@@ -1,0 +1,4 @@
+Conclusion:
+
+If your main goal is absolute cost efficiency and you have a robust external event infrastructure, push-based triggering is likely the cheapest, as Airflow does not wait at all.
+If you want easier debugging, visibility, and centralized orchestration while still maintaining low cost and high scalability, using the Triggerer with deferrable operators is an excellent balance.
