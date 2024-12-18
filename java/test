@@ -1,0 +1,196 @@
+from pyspark.sql.types import *
+from pyspark.sql.functions import *
+from datetime import datetime, date
+
+# Scenario 1: Customer Orders Table
+# Contains array of struct (order items) and struct (address)
+customer_orders_schema = StructType([
+    StructField("customer_id", StringType(), False),
+    StructField("order_date", DateType(), False),
+    StructField("total_amount", DecimalType(10,2), False),
+    StructField("items", ArrayType(StructType([
+        StructField("item_id", StringType(), False),
+        StructField("product_name", StringType(), False),
+        StructField("quantity", IntegerType(), False),
+        StructField("price", DecimalType(10,2), False)
+    ])), False),
+    StructField("shipping_address", StructType([
+        StructField("street", StringType(), False),
+        StructField("city", StringType(), False),
+        StructField("state", StringType(), False),
+        StructField("zip", StringType(), False)
+    ]), False),
+    StructField("status", StringType(), False)
+])
+
+# Create sample data for customer_orders
+customer_orders_data = [
+    (
+        "C001",
+        date(2024, 1, 1),
+        150.50,
+        [
+            {"item_id": "I1", "product_name": "Laptop", "quantity": 1, "price": 100.00},
+            {"item_id": "I2", "product_name": "Mouse", "quantity": 2, "price": 25.25}
+        ],
+        {"street": "123 Main St", "city": "Boston", "state": "MA", "zip": "02108"},
+        "COMPLETED"
+    ),
+    (
+        "C002",
+        date(2024, 1, 2),
+        300.75,
+        [
+            {"item_id": "I3", "product_name": "Monitor", "quantity": 2, "price": 150.25},
+            {"item_id": "I4", "product_name": "Keyboard", "quantity": 1, "price": 0.25}
+        ],
+        {"street": "456 Elm St", "city": "New York", "state": "NY", "zip": "10001"},
+        "PENDING"
+    )
+]
+
+# Scenario 2: Product Catalog Table
+# Contains array of arrays (categories) and map (attributes)
+product_catalog_schema = StructType([
+    StructField("product_id", StringType(), False),
+    StructField("name", StringType(), False),
+    StructField("base_price", DecimalType(10,2), False),
+    StructField("categories", ArrayType(ArrayType(StringType())), False),
+    StructField("attributes", MapType(StringType(), StringType()), False),
+    StructField("active", BooleanType(), False)
+])
+
+# Create sample data for product_catalog
+product_catalog_data = [
+    (
+        "P001",
+        "Gaming Laptop",
+        1299.99,
+        [["Electronics", "Computers"], ["Gaming", "Laptops"]],
+        {"color": "black", "ram": "16GB", "storage": "1TB"},
+        True
+    ),
+    (
+        "P002",
+        "Wireless Mouse",
+        49.99,
+        [["Electronics", "Accessories"], ["Computing", "Input Devices"]],
+        {"color": "white", "connection": "bluetooth", "battery": "rechargeable"},
+        True
+    )
+]
+
+# Scenario 3: User Activity Table
+# Contains array of timestamps and struct with array
+user_activity_schema = StructType([
+    StructField("user_id", StringType(), False),
+    StructField("session_id", StringType(), False),
+    StructField("login_times", ArrayType(TimestampType()), False),
+    StructField("actions", StructType([
+        StructField("page_views", ArrayType(StructType([
+            StructField("page", StringType(), False),
+            StructField("timestamp", TimestampType(), False),
+            StructField("duration", IntegerType(), False)
+        ])), False),
+        StructField("total_duration", IntegerType(), False)
+    ]), False),
+    StructField("device_type", StringType(), False),
+    StructField("last_updated", TimestampType(), False)
+])
+
+# Create sample data for user_activity
+user_activity_data = [
+    (
+        "U001",
+        "S1",
+        [datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 14, 0)],
+        {
+            "page_views": [
+                {"page": "/home", "timestamp": datetime(2024, 1, 1, 10, 5), "duration": 300},
+                {"page": "/products", "timestamp": datetime(2024, 1, 1, 10, 10), "duration": 400}
+            ],
+            "total_duration": 700
+        },
+        "mobile",
+        datetime(2024, 1, 1, 14, 30)
+    ),
+    (
+        "U002",
+        "S2",
+        [datetime(2024, 1, 2, 9, 0), datetime(2024, 1, 2, 11, 0)],
+        {
+            "page_views": [
+                {"page": "/home", "timestamp": datetime(2024, 1, 2, 9, 5), "duration": 200},
+                {"page": "/cart", "timestamp": datetime(2024, 1, 2, 9, 15), "duration": 300}
+            ],
+            "total_duration": 500
+        },
+        "desktop",
+        datetime(2024, 1, 2, 11, 30)
+    )
+]
+
+# Create DataFrames
+customer_orders_df = spark.createDataFrame(customer_orders_data, customer_orders_schema)
+product_catalog_df = spark.createDataFrame(product_catalog_data, product_catalog_schema)
+user_activity_df = spark.createDataFrame(user_activity_data, user_activity_schema)
+
+# Write tables to Databricks Delta format
+customer_orders_df.write.format("delta").mode("overwrite").saveAsTable("customer_orders")
+product_catalog_df.write.format("delta").mode("overwrite").saveAsTable("product_catalog")
+user_activity_df.write.format("delta").mode("overwrite").saveAsTable("user_activity")
+
+# Example queries to flatten/explode nested structures
+
+# 1. Flatten Customer Orders - explode items array
+flattened_orders = spark.sql("""
+    SELECT
+        customer_id,
+        order_date,
+        total_amount,
+        exploded_items.*,
+        shipping_address.street,
+        shipping_address.city,
+        shipping_address.state,
+        shipping_address.zip,
+        status
+    FROM customer_orders
+    LATERAL VIEW explode(items) as exploded_items
+""")
+
+# 2. Flatten Product Categories - flatten nested arrays and explode
+flattened_products = spark.sql("""
+    SELECT
+        product_id,
+        name,
+        base_price,
+        category,
+        attributes['color'] as color,
+        attributes['ram'] as ram,
+        attributes['storage'] as storage,
+        active
+    FROM product_catalog
+    LATERAL VIEW explode(flatten(categories)) as category
+""")
+
+# 3. Flatten User Activity - explode page views with nested structure
+flattened_activity = spark.sql("""
+    SELECT
+        user_id,
+        session_id,
+        login_time,
+        page_view.page,
+        page_view.timestamp as view_timestamp,
+        page_view.duration,
+        actions.total_duration,
+        device_type,
+        last_updated
+    FROM user_activity
+    LATERAL VIEW explode(login_times) as login_time
+    LATERAL VIEW explode(actions.page_views) as page_view
+""")
+
+# Example of writing flattened results
+flattened_orders.write.format("delta").mode("overwrite").saveAsTable("flattened_customer_orders")
+flattened_products.write.format("delta").mode("overwrite").saveAsTable("flattened_product_catalog")
+flattened_activity.write.format("delta").mode("overwrite").saveAsTable("flattened_user_activity")
