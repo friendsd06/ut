@@ -1,196 +1,225 @@
-from pyspark.sql.types import *
-from pyspark.sql.functions import *
-from datetime import datetime, date
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import col, explode, flatten
+from pyspark.sql.types import ArrayType
+from typing import List, Dict, Optional
+from dataclasses import dataclass
+import yaml
+import logging
 
-# Scenario 1: Customer Orders Table
-# Contains array of struct (order items) and struct (address)
-customer_orders_schema = StructType([
-    StructField("customer_id", StringType(), False),
-    StructField("order_date", DateType(), False),
-    StructField("total_amount", DecimalType(10,2), False),
-    StructField("items", ArrayType(StructType([
-        StructField("item_id", StringType(), False),
-        StructField("product_name", StringType(), False),
-        StructField("quantity", IntegerType(), False),
-        StructField("price", DecimalType(10,2), False)
-    ])), False),
-    StructField("shipping_address", StructType([
-        StructField("street", StringType(), False),
-        StructField("city", StringType(), False),
-        StructField("state", StringType(), False),
-        StructField("zip", StringType(), False)
-    ]), False),
-    StructField("status", StringType(), False)
-])
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Create sample data for customer_orders
-customer_orders_data = [
-    (
-        "C001",
-        date(2024, 1, 1),
-        150.50,
-        [
-            {"item_id": "I1", "product_name": "Laptop", "quantity": 1, "price": 100.00},
-            {"item_id": "I2", "product_name": "Mouse", "quantity": 2, "price": 25.25}
-        ],
-        {"street": "123 Main St", "city": "Boston", "state": "MA", "zip": "02108"},
-        "COMPLETED"
-    ),
-    (
-        "C002",
-        date(2024, 1, 2),
-        300.75,
-        [
-            {"item_id": "I3", "product_name": "Monitor", "quantity": 2, "price": 150.25},
-            {"item_id": "I4", "product_name": "Keyboard", "quantity": 1, "price": 0.25}
-        ],
-        {"street": "456 Elm St", "city": "New York", "state": "NY", "zip": "10001"},
-        "PENDING"
-    )
-]
+@dataclass
+class SourceConfig:
+    """Configuration for data source"""
+    table_name: Optional[str] = None
+    query: Optional[str] = None
 
-# Scenario 2: Product Catalog Table
-# Contains array of arrays (categories) and map (attributes)
-product_catalog_schema = StructType([
-    StructField("product_id", StringType(), False),
-    StructField("name", StringType(), False),
-    StructField("base_price", DecimalType(10,2), False),
-    StructField("categories", ArrayType(ArrayType(StringType())), False),
-    StructField("attributes", MapType(StringType(), StringType()), False),
-    StructField("active", BooleanType(), False)
-])
+@dataclass
+class WriteConfig:
+    """Configuration for data writing"""
+    path: str
+    format: str = 'parquet'
+    mode: str = 'overwrite'
+    partition_by: Optional[List[str]] = None
+    options: Dict[str, str] = None
 
-# Create sample data for product_catalog
-product_catalog_data = [
-    (
-        "P001",
-        "Gaming Laptop",
-        1299.99,
-        [["Electronics", "Computers"], ["Gaming", "Laptops"]],
-        {"color": "black", "ram": "16GB", "storage": "1TB"},
-        True
-    ),
-    (
-        "P002",
-        "Wireless Mouse",
-        49.99,
-        [["Electronics", "Accessories"], ["Computing", "Input Devices"]],
-        {"color": "white", "connection": "bluetooth", "battery": "rechargeable"},
-        True
-    )
-]
+class ConfigReader:
+    """Configuration reader with validation"""
+    def __init__(self, config_input: str, is_file: bool = False):
+        self.config = self._load_config(config_input, is_file)
 
-# Scenario 3: User Activity Table
-# Contains array of timestamps and struct with array
-user_activity_schema = StructType([
-    StructField("user_id", StringType(), False),
-    StructField("session_id", StringType(), False),
-    StructField("login_times", ArrayType(TimestampType()), False),
-    StructField("actions", StructType([
-        StructField("page_views", ArrayType(StructType([
-            StructField("page", StringType(), False),
-            StructField("timestamp", TimestampType(), False),
-            StructField("duration", IntegerType(), False)
-        ])), False),
-        StructField("total_duration", IntegerType(), False)
-    ]), False),
-    StructField("device_type", StringType(), False),
-    StructField("last_updated", TimestampType(), False)
-])
+    def _load_config(self, config_input: str, is_file: bool) -> Dict:
+        try:
+            if is_file:
+                with open(config_input, 'r') as file:
+                    config = yaml.safe_load(file)
+            else:
+                config = yaml.safe_load(config_input)
 
-# Create sample data for user_activity
-user_activity_data = [
-    (
-        "U001",
-        "S1",
-        [datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 14, 0)],
-        {
-            "page_views": [
-                {"page": "/home", "timestamp": datetime(2024, 1, 1, 10, 5), "duration": 300},
-                {"page": "/products", "timestamp": datetime(2024, 1, 1, 10, 10), "duration": 400}
-            ],
-            "total_duration": 700
-        },
-        "mobile",
-        datetime(2024, 1, 1, 14, 30)
-    ),
-    (
-        "U002",
-        "S2",
-        [datetime(2024, 1, 2, 9, 0), datetime(2024, 1, 2, 11, 0)],
-        {
-            "page_views": [
-                {"page": "/home", "timestamp": datetime(2024, 1, 2, 9, 5), "duration": 200},
-                {"page": "/cart", "timestamp": datetime(2024, 1, 2, 9, 15), "duration": 300}
-            ],
-            "total_duration": 500
-        },
-        "desktop",
-        datetime(2024, 1, 2, 11, 30)
-    )
-]
+            self._validate_config(config)
+            return config
+        except Exception as e:
+            raise ValueError(f"Error loading configuration: {str(e)}")
 
-# Create DataFrames
-customer_orders_df = spark.createDataFrame(customer_orders_data, customer_orders_schema)
-product_catalog_df = spark.createDataFrame(product_catalog_data, product_catalog_schema)
-user_activity_df = spark.createDataFrame(user_activity_data, user_activity_schema)
+    def _validate_config(self, config: Dict):
+        if not isinstance(config, dict):
+            raise ValueError("Configuration must be a dictionary")
 
-# Write tables to Databricks Delta format
-customer_orders_df.write.format("delta").mode("overwrite").saveAsTable("customer_orders")
-product_catalog_df.write.format("delta").mode("overwrite").saveAsTable("product_catalog")
-user_activity_df.write.format("delta").mode("overwrite").saveAsTable("user_activity")
+        required_fields = ['tables', 's3_settings']
+        if not all(field in config for field in required_fields):
+            raise ValueError(f"Missing required fields: {required_fields}")
 
-# Example queries to flatten/explode nested structures
+        if 'base_path' not in config['s3_settings']:
+            raise ValueError("'base_path' is required in s3_settings")
 
-# 1. Flatten Customer Orders - explode items array
-flattened_orders = spark.sql("""
-    SELECT
-        customer_id,
-        order_date,
-        total_amount,
-        exploded_items.*,
-        shipping_address.street,
-        shipping_address.city,
-        shipping_address.state,
-        shipping_address.zip,
-        status
-    FROM customer_orders
-    LATERAL VIEW explode(items) as exploded_items
-""")
+    def get_table_config(self, table_name: str) -> Dict:
+        return self.config['tables'].get(table_name, {})
 
-# 2. Flatten Product Categories - flatten nested arrays and explode
-flattened_products = spark.sql("""
-    SELECT
-        product_id,
-        name,
-        base_price,
-        category,
-        attributes['color'] as color,
-        attributes['ram'] as ram,
-        attributes['storage'] as storage,
-        active
-    FROM product_catalog
-    LATERAL VIEW explode(flatten(categories)) as category
-""")
+    def get_s3_config(self) -> Dict:
+        return self.config['s3_settings']
 
-# 3. Flatten User Activity - explode page views with nested structure
-flattened_activity = spark.sql("""
-    SELECT
-        user_id,
-        session_id,
-        login_time,
-        page_view.page,
-        page_view.timestamp as view_timestamp,
-        page_view.duration,
-        actions.total_duration,
-        device_type,
-        last_updated
-    FROM user_activity
-    LATERAL VIEW explode(login_times) as login_time
-    LATERAL VIEW explode(actions.page_views) as page_view
-""")
+class DataReader:
+    """Handles reading data from Spark"""
+    def __init__(self, spark: SparkSession):
+        self.spark = spark
 
-# Example of writing flattened results
-flattened_orders.write.format("delta").mode("overwrite").saveAsTable("flattened_customer_orders")
-flattened_products.write.format("delta").mode("overwrite").saveAsTable("flattened_product_catalog")
-flattened_activity.write.format("delta").mode("overwrite").saveAsTable("flattened_user_activity")
+    def read_data(self, source_config: SourceConfig) -> DataFrame:
+        if source_config.query:
+            logger.info(f"Reading data using SQL query")
+            return self.spark.sql(source_config.query)
+        elif source_config.table_name:
+            logger.info(f"Reading data from table: {source_config.table_name}")
+            return self.spark.table(source_config.table_name)
+        else:
+            raise ValueError("Either query or table_name must be provided")
+
+class DataWriter:
+    """Handles writing data to S3"""
+    def __init__(self, s3_config: Dict):
+        self.s3_config = s3_config
+
+    def write_data(self, df: DataFrame, write_config: WriteConfig) -> None:
+        base_path = self.s3_config['base_path']
+        full_path = f"{base_path}/{write_config.path}"
+
+        writer = df.write.mode(write_config.mode)
+
+        # Configure writer
+        if write_config.partition_by:
+            writer = writer.partitionBy(write_config.partition_by)
+
+        if write_config.options:
+            for key, value in write_config.options.items():
+                writer = writer.option(key, value)
+
+        logger.info(f"Writing data to: {full_path}")
+        writer.format(write_config.format).save(full_path)
+
+class DataFlattener:
+    """Handles flattening of nested structures"""
+    def flatten_data(self, df: DataFrame, columns: List[str]) -> DataFrame:
+        if not columns:
+            return df
+
+        result_df = df
+        for column in columns:
+            if column not in result_df.columns:
+                logger.warning(f"Column '{column}' not found in data, skipping")
+                continue
+
+            field = [f for f in result_df.schema.fields if f.name == column][0]
+            if isinstance(field.dataType, ArrayType):
+                if isinstance(field.dataType.elementType, ArrayType):
+                    logger.info(f"Flattening nested array: {column}")
+                    result_df = result_df.withColumn(column, flatten(col(column)))
+                logger.info(f"Exploding array: {column}")
+                result_df = result_df.withColumn(column, explode(col(column)))
+
+        return result_df
+
+class BatchProcessor:
+    """Handles batch processing of multiple tables"""
+    def __init__(self, processor: 'DataProcessor'):
+        self.processor = processor
+
+    def process_tables(self, table_names: List[str]) -> Dict[str, str]:
+        """Process multiple tables"""
+        results = {}
+
+        for table in table_names:
+            try:
+                logger.info(f"Processing table: {table}")
+
+                # Get table configuration
+                table_config = self.processor.config_reader.get_table_config(table)
+                if not table_config:
+                    raise ValueError(f"No configuration found for table: {table}")
+
+                # Create configurations
+                source_config = SourceConfig(**table_config.get('source', {}))
+                write_config = WriteConfig(
+                    path=table_config['s3_path'],
+                    format=table_config.get('format', 'parquet'),
+                    mode=table_config.get('mode', 'overwrite'),
+                    partition_by=table_config.get('partition_by'),
+                    options=table_config.get('options', {})
+                )
+
+                # Process data
+                df = self.processor.reader.read_data(source_config)
+
+                if table_config.get('flatten_columns'):
+                    df = self.processor.flattener.flatten_data(df, table_config['flatten_columns'])
+
+                self.processor.writer.write_data(df, write_config)
+
+                results[table] = "Success"
+                logger.info(f"Successfully processed table: {table}")
+
+            except Exception as e:
+                results[table] = f"Failed: {str(e)}"
+                logger.error(f"Error processing table {table}: {str(e)}")
+
+        return results
+
+class DataProcessor:
+    """Main processor class"""
+    def __init__(self, config_reader: ConfigReader):
+        self.config_reader = config_reader
+        self.reader = DataReader(SparkSession.active)
+        self.writer = DataWriter(config_reader.get_s3_config())
+        self.flattener = DataFlattener()
+
+class ProcessorFactory:
+    """Factory for creating processor instances"""
+    @staticmethod
+    def create_processor(config_input: str, is_file: bool = False) -> tuple[DataProcessor, BatchProcessor]:
+        config_reader = ConfigReader(config_input, is_file)
+        processor = DataProcessor(config_reader)
+        batch_processor = BatchProcessor(processor)
+        return processor, batch_processor
+
+# Example usage
+def process_example():
+    # Configuration
+    config = """
+    tables:
+      customer_orders:
+        source:
+          table_name: orders
+        flatten_columns:
+          - items
+        s3_path: processed/orders
+        format: delta
+        partition_by:
+          - date
+
+      product_inventory:
+        source:
+          query: SELECT * FROM inventory WHERE active = true
+        flatten_columns:
+          - locations
+        s3_path: processed/inventory
+        format: parquet
+        partition_by:
+          - category
+
+    s3_settings:
+      base_path: s3://your-bucket
+    """
+
+    # Create processors
+    processor, batch_processor = ProcessorFactory.create_processor(config)
+
+    # Process multiple tables
+    tables = ['customer_orders', 'product_inventory']
+    results = batch_processor.process_tables(tables)
+
+    # Print results
+    for table, status in results.items():
+        print(f"Table: {table} - Status: {status}")
+
+# Use in Databricks notebook
+# process_example()
