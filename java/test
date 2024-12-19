@@ -1,4 +1,4 @@
-from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, explode, flatten
 from pyspark.sql.types import ArrayType
 from typing import List, Dict, Optional
@@ -27,32 +27,17 @@ class WriteConfig:
 
 class ConfigReader:
     """Configuration reader with validation"""
-    def __init__(self, config_input: str, is_file: bool = False):
-        self.config = self._load_config(config_input, is_file)
+    def __init__(self, config_input: str):
+        self.config = yaml.safe_load(config_input)
+        self._validate_config()
 
-    def _load_config(self, config_input: str, is_file: bool) -> Dict:
-        try:
-            if is_file:
-                with open(config_input, 'r') as file:
-                    config = yaml.safe_load(file)
-            else:
-                config = yaml.safe_load(config_input)
-
-            self._validate_config(config)
-            return config
-        except Exception as e:
-            raise ValueError(f"Error loading configuration: {str(e)}")
-
-    def _validate_config(self, config: Dict):
-        if not isinstance(config, dict):
+    def _validate_config(self):
+        if not isinstance(self.config, dict):
             raise ValueError("Configuration must be a dictionary")
 
         required_fields = ['tables', 's3_settings']
-        if not all(field in config for field in required_fields):
+        if not all(field in self.config for field in required_fields):
             raise ValueError(f"Missing required fields: {required_fields}")
-
-        if 'base_path' not in config['s3_settings']:
-            raise ValueError("'base_path' is required in s3_settings")
 
     def get_table_config(self, table_name: str) -> Dict:
         return self.config['tables'].get(table_name, {})
@@ -61,17 +46,14 @@ class ConfigReader:
         return self.config['s3_settings']
 
 class DataReader:
-    """Handles reading data from Spark"""
-    def __init__(self, spark: SparkSession):
-        self.spark = spark
-
+    """Handles reading data from Databricks tables"""
     def read_data(self, source_config: SourceConfig) -> DataFrame:
         if source_config.query:
             logger.info(f"Reading data using SQL query")
-            return self.spark.sql(source_config.query)
+            return spark.sql(source_config.query)
         elif source_config.table_name:
             logger.info(f"Reading data from table: {source_config.table_name}")
-            return self.spark.table(source_config.table_name)
+            return spark.table(source_config.table_name)
         else:
             raise ValueError("Either query or table_name must be provided")
 
@@ -86,7 +68,10 @@ class DataWriter:
 
         writer = df.write.mode(write_config.mode)
 
-        # Configure writer
+        if write_config.format == 'delta':
+            writer = writer.option("mergeSchema", "true")
+            writer = writer.option("optimizeWrite", "true")
+
         if write_config.partition_by:
             writer = writer.partitionBy(write_config.partition_by)
 
@@ -151,7 +136,10 @@ class BatchProcessor:
                 df = self.processor.reader.read_data(source_config)
 
                 if table_config.get('flatten_columns'):
-                    df = self.processor.flattener.flatten_data(df, table_config['flatten_columns'])
+                    df = self.processor.flattener.flatten_data(
+                        df,
+                        table_config['flatten_columns']
+                    )
 
                 self.processor.writer.write_data(df, write_config)
 
@@ -168,58 +156,98 @@ class DataProcessor:
     """Main processor class"""
     def __init__(self, config_reader: ConfigReader):
         self.config_reader = config_reader
-        self.reader = DataReader(SparkSession.active)
+        self.reader = DataReader()
         self.writer = DataWriter(config_reader.get_s3_config())
         self.flattener = DataFlattener()
 
-class ProcessorFactory:
-    """Factory for creating processor instances"""
-    @staticmethod
-    def create_processor(config_input: str, is_file: bool = False) -> tuple[DataProcessor, BatchProcessor]:
-        config_reader = ConfigReader(config_input, is_file)
-        processor = DataProcessor(config_reader)
-        batch_processor = BatchProcessor(processor)
-        return processor, batch_processor
+# Notebook usage example
+# COMMAND ----------
+# Create test table
+spark.sql("""
+CREATE TABLE IF NOT EXISTS customer_orders (
+    order_id STRING,
+    customer_id STRING,
+    order_date DATE,
+    items ARRAY<STRUCT<
+        item_id: STRING,
+        product_name: STRING,
+        quantity: INT,
+        price: DOUBLE
+    >>,
+    shipping_address STRUCT<
+        street: STRING,
+        city: STRING,
+        state: STRING,
+        zip: STRING
+    >
+) USING DELTA
+""")
 
-# Example usage
-def process_example():
-    # Configuration
-    config = """
-    tables:
-      customer_orders:
-        source:
-          table_name: orders
-        flatten_columns:
-          - items
-        s3_path: processed/orders
-        format: delta
-        partition_by:
-          - date
+# COMMAND ----------
+# Insert test data
+spark.sql("""
+INSERT INTO customer_orders
+SELECT
+    'ORD001' as order_id,
+    'CUST001' as customer_id,
+    current_date() as order_date,
+    array(
+        named_struct(
+            'item_id', 'ITEM001',
+            'product_name', 'Laptop',
+            'quantity', 1,
+            'price', 999.99
+        ),
+        named_struct(
+            'item_id', 'ITEM002',
+            'product_name', 'Mouse',
+            'quantity', 2,
+            'price', 29.99
+        )
+    ) as items,
+    named_struct(
+        'street', '123 Main St',
+        'city', 'Boston',
+        'state', 'MA',
+        'zip', '02108'
+    ) as shipping_address
+""")
 
-      product_inventory:
-        source:
-          query: SELECT * FROM inventory WHERE active = true
-        flatten_columns:
-          - locations
-        s3_path: processed/inventory
-        format: parquet
-        partition_by:
-          - category
+# COMMAND ----------
+# Define configuration
+config = """
+tables:
+  customer_orders_flat:
+    source:
+      table_name: customer_orders
+    flatten_columns:
+      - items
+    s3_path: processed/customer_orders
+    format: delta
+    partition_by:
+      - order_date
+    options:
+      mergeSchema: 'true'
 
-    s3_settings:
-      base_path: s3://your-bucket
-    """
+s3_settings:
+  base_path: '/tmp/test'  # For testing, using local path
+"""
 
-    # Create processors
-    processor, batch_processor = ProcessorFactory.create_processor(config)
+# Initialize processor
+config_reader = ConfigReader(config)
+processor = DataProcessor(config_reader)
+batch_processor = BatchProcessor(processor)
 
-    # Process multiple tables
-    tables = ['customer_orders', 'product_inventory']
-    results = batch_processor.process_tables(tables)
+# Process tables
+results = batch_processor.process_tables(['customer_orders_flat'])
 
-    # Print results
-    for table, status in results.items():
-        print(f"Table: {table} - Status: {status}")
+# Print results
+for table, status in results.items():
+    print(f"Table: {table} - Status: {status}")
 
-# Use in Databricks notebook
-# process_example()
+# Verify results
+result_df = spark.sql("SELECT * FROM delta.`/tmp/test/processed/customer_orders`")
+print("\nFlattened Data Schema:")
+result_df.printSchema()
+print("\nFlattened Data Sample:")
+result_df.show(2, False)
