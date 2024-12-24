@@ -1,0 +1,410 @@
+my_pipeline/
+├── connectors/
+│   ├── __init__.py
+│   ├── databricks_connector.py
+│   └── token_fetcher.py
+├── config/
+│   ├── __init__.py
+│   └── config_reader.py
+├── io/
+│   ├── __init__.py
+│   ├── data_reader.py
+│   └── data_writer.py
+├── models/
+│   ├── __init__.py
+│   └── data_models.py
+├── processors/
+│   ├── __init__.py
+│   ├── batch_processor.py
+│   └── data_processor.py
+├── __init__.py
+└── main.py
+
+
+---------------------------
+
+# my_pipeline/models/data_models.py
+
+from dataclasses import dataclass
+from typing import List, Dict, Optional
+
+@dataclass
+class SourceConfig:
+    """Configuration for data source."""
+    table_name: Optional[str] = None
+    query: Optional[str] = None
+
+@dataclass
+class WriteConfig:
+    """Configuration for data writing."""
+    path: str
+    format: str = 'parquet'
+    mode: str = 'overwrite'
+    partition_by: Optional[List[str]] = None
+    options: Dict[str, str] = None
+----------------------------------------
+
+# my_pipeline/config/config_reader.py
+
+import yaml
+
+class ConfigReader:
+    """
+    Reads and validates pipeline configuration from YAML.
+    Expects databricks_settings to contain only the 'host'.
+    """
+    def __init__(self, config_input: str):
+        """
+        Args:
+            config_input (str): YAML configuration as a string.
+        """
+        self.config = yaml.safe_load(config_input)
+        self._validate_config()
+
+    def _validate_config(self):
+        if not isinstance(self.config, dict):
+            raise ValueError("Configuration must be a dictionary")
+
+        # We expect 'tables', 's3_settings', and 'databricks_settings' to exist
+        required_fields = ['tables', 's3_settings', 'databricks_settings']
+        missing = [field for field in required_fields if field not in self.config]
+        if missing:
+            raise ValueError(f"Missing required fields: {missing}")
+
+        # Check that 'host' is in 'databricks_settings'
+        if 'host' not in self.config['databricks_settings']:
+            raise ValueError("databricks_settings must contain 'host'")
+
+    def get_table_config(self, table_name: str) -> dict:
+        """Retrieve a specific table's configuration."""
+        return self.config['tables'].get(table_name, {})
+
+    def get_s3_config(self) -> dict:
+        """Retrieve S3 configuration (e.g., base path)."""
+        return self.config['s3_settings']
+
+    def get_databricks_host(self) -> str:
+        """
+        Retrieve the Databricks host from configuration.
+        Example: https://my-workspace.databricks.com
+        """
+        return self.config['databricks_settings']['host']
+
+------------------------------------------------------------------
+
+# my_pipeline/connectors/token_fetcher.py
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TokenFetcherService:
+    """
+    Service responsible for fetching an authentication token
+    from an external source (API, secrets manager, etc.).
+    """
+
+    def fetch_token(self) -> str:
+        """
+        Implement your logic here to retrieve the token.
+        This could involve calling an API or reading from secrets.
+        For demonstration, we'll return a placeholder string.
+        """
+        logger.info("Fetching Databricks token from external service...")
+        # Replace this with your real token retrieval logic:
+        token = "MY-RUNTIME-FETCHED-TOKEN"
+        return token
+--------------------------------------------------------------
+
+# my_pipeline/connectors/databricks_connector.py
+
+import logging
+from pyspark.sql import SparkSession
+from .token_fetcher import TokenFetcherService
+
+logger = logging.getLogger(__name__)
+
+class DatabricksConnector:
+    """
+    Creates a Spark session for Databricks using a token-based approach,
+    but the token is fetched externally (TokenFetcherService).
+    """
+
+    def __init__(self, host: str, token_fetcher: TokenFetcherService):
+        """
+        Args:
+            host (str): Databricks workspace host.
+            token_fetcher (TokenFetcherService): Service to fetch the token.
+        """
+        if not host:
+            raise ValueError("Databricks 'host' must be provided.")
+        self.host = host
+        self.token_fetcher = token_fetcher
+        self._spark = None  # Will hold the SparkSession instance
+
+    def get_spark_session(self) -> SparkSession:
+        """
+        Returns a SparkSession configured for Databricks access,
+        using the externally fetched token.
+        """
+        if self._spark is None:
+            logger.info("Initializing SparkSession with Databricks token-based auth...")
+            token = self.token_fetcher.fetch_token()
+
+            # Example configs for Databricks token-based authentication:
+            self._spark = (
+                SparkSession.builder
+                .appName("DatabricksTokenApp")
+                .config("spark.databricks.service.address", self.host)
+                .config("spark.databricks.service.token", token)
+                .getOrCreate()
+            )
+        return self._spark
+------------------------------------
+# my_pipeline/io/data_reader.py
+
+import logging
+from pyspark.sql import SparkSession, DataFrame
+from my_pipeline.models.data_models import SourceConfig
+
+logger = logging.getLogger(__name__)
+
+class DataReader:
+    """
+    Handles reading data from Databricks (via Spark).
+    """
+
+    def __init__(self, spark: SparkSession):
+        """
+        Args:
+            spark (SparkSession): A pre-configured Spark session for Databricks.
+        """
+        self.spark = spark
+
+    def read_data(self, source_config: SourceConfig) -> DataFrame:
+        """
+        Reads data from a Databricks table or a SQL query.
+
+        Args:
+            source_config (SourceConfig): Contains table name or query.
+
+        Returns:
+            DataFrame: Spark DataFrame with the requested data.
+        """
+        if source_config.query:
+            logger.info(f"Reading data using SQL query: {source_config.query}")
+            return self.spark.sql(source_config.query)
+        elif source_config.table_name:
+            logger.info(f"Reading data from table: {source_config.table_name}")
+            return self.spark.table(source_config.table_name)
+        else:
+            raise ValueError("Either 'query' or 'table_name' must be provided.")
+----------------------------------------
+# my_pipeline/io/data_writer.py
+
+import logging
+from pyspark.sql import DataFrame
+from my_pipeline.models.data_models import WriteConfig
+
+logger = logging.getLogger(__name__)
+
+class DataWriter:
+    """
+    Handles writing data to S3 (or other storage).
+    """
+
+    def __init__(self, s3_config: dict):
+        """
+        Args:
+            s3_config (dict): Must at least contain 'base_path' for S3.
+        """
+        self.s3_config = s3_config
+        if 'base_path' not in self.s3_config:
+            raise ValueError("S3 config must contain 'base_path'")
+
+    def write_data(self, df: DataFrame, write_config: WriteConfig) -> None:
+        """
+        Writes the DataFrame to a specified location in S3.
+
+        Args:
+            df (DataFrame): Data to be written.
+            write_config (WriteConfig): Output path, format, mode, etc.
+        """
+        base_path = self.s3_config['base_path']
+        full_path = f"{base_path}/{write_config.path}"
+
+        writer = df.write.mode(write_config.mode)
+
+        if write_config.format == 'delta':
+            # Delta-specific options
+            writer = writer.option("mergeSchema", "true")
+            writer = writer.option("optimizeWrite", "true")
+
+        if write_config.partition_by:
+            writer = writer.partitionBy(write_config.partition_by)
+
+        if write_config.options:
+            for key, value in write_config.options.items():
+                writer = writer.option(key, value)
+
+        logger.info(f"Writing data to: {full_path} with format={write_config.format}")
+        writer.format(write_config.format).save(full_path)
+---------------------------------------------
+# my_pipeline/processors/data_processor.py
+
+import logging
+from my_pipeline.connectors.databricks_connector import DatabricksConnector
+from my_pipeline.connectors.token_fetcher import TokenFetcherService
+from my_pipeline.config.config_reader import ConfigReader
+from my_pipeline.io.data_reader import DataReader
+from my_pipeline.io.data_writer import DataWriter
+from my_pipeline.models.data_models import SourceConfig, WriteConfig
+
+logger = logging.getLogger(__name__)
+
+class DataProcessor:
+    """
+    Main orchestrator class that holds:
+      - ConfigReader
+      - DatabricksConnector (with token fetcher)
+      - DataReader & DataWriter
+    """
+
+    def __init__(self, config_reader: ConfigReader, token_fetcher: TokenFetcherService):
+        """
+        Args:
+            config_reader (ConfigReader): Contains pipeline config.
+            token_fetcher (TokenFetcherService): For retrieving the Databricks token.
+        """
+        self.config_reader = config_reader
+
+        # Initialize Spark session via DatabricksConnector (using token fetcher)
+        databricks_host = self.config_reader.get_databricks_host()
+        self.connector = DatabricksConnector(databricks_host, token_fetcher)
+        spark = self.connector.get_spark_session()
+
+        # Create Reader & Writer
+        self.reader = DataReader(spark)
+        self.writer = DataWriter(self.config_reader.get_s3_config())
+
+    def process_table(self, table_name: str) -> str:
+        """
+        Process a single table: read data -> (optionally transform) -> write out.
+        """
+        logger.info(f"Processing table: {table_name}")
+
+        # Get table config
+        table_config = self.config_reader.get_table_config(table_name)
+        if not table_config:
+            raise ValueError(f"No configuration found for table: {table_name}")
+
+        # Build SourceConfig & WriteConfig
+        source_config = SourceConfig(**table_config.get('source', {}))
+        write_config = WriteConfig(
+            path=table_config['s3_path'],
+            format=table_config.get('format', 'parquet'),
+            mode=table_config.get('mode', 'overwrite'),
+            partition_by=table_config.get('partition_by'),
+            options=table_config.get('options', {})
+        )
+
+        # Read & Write
+        df = self.reader.read_data(source_config)
+        # (You could add transformations here if needed.)
+        self.writer.write_data(df, write_config)
+
+        logger.info(f"Successfully processed table: {table_name}")
+        return "Success"
+----------------------------
+
+# my_pipeline/processors/batch_processor.py
+
+import logging
+from typing import List, Dict
+from .data_processor import DataProcessor
+
+logger = logging.getLogger(__name__)
+
+class BatchProcessor:
+    """
+    Handles batch processing of multiple tables in a single pipeline run.
+    """
+
+    def __init__(self, processor: DataProcessor):
+        """
+        Args:
+            processor (DataProcessor): Orchestrator containing
+                                      reader & writer logic.
+        """
+        self.processor = processor
+
+    def process_tables(self, table_names: List[str]) -> Dict[str, str]:
+        """
+        Process multiple tables and return a summary of outcomes.
+
+        Args:
+            table_names (List[str]): List of table names to process.
+
+        Returns:
+            Dict[str, str]: Mapping of table name -> "Success"/"Failed: Reason"
+        """
+        results = {}
+
+        for table_name in table_names:
+            try:
+                logger.info(f"Batch processing table: {table_name}")
+                result = self.processor.process_table(table_name)
+                results[table_name] = result
+            except Exception as e:
+                logger.error(f"Error processing table {table_name}: {e}")
+                results[table_name] = f"Failed: {str(e)}"
+
+        return results
+------------------------------------
+# my_pipeline/main.py
+
+import sys
+import logging
+
+# Local imports
+from my_pipeline.config.config_reader import ConfigReader
+from my_pipeline.connectors.token_fetcher import TokenFetcherService
+from my_pipeline.processors.data_processor import DataProcessor
+from my_pipeline.processors.batch_processor import BatchProcessor
+
+logger = logging.getLogger(__name__)
+
+def main():
+    """
+    Example entrypoint for running the pipeline.
+    """
+    # Get config path from CLI arguments or default
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    logger.info(f"Using config file: {config_path}")
+
+    # 1) Load config
+    with open(config_path, "r") as f:
+        config_str = f.read()
+
+    config_reader = ConfigReader(config_str)
+
+    # 2) Create token fetcher service
+    token_fetcher = TokenFetcherService()
+
+    # 3) Create data processor (which in turn sets up Spark + Reader + Writer)
+    data_processor = DataProcessor(config_reader, token_fetcher)
+
+    # 4) Batch process tables
+    batch_processor = BatchProcessor(data_processor)
+
+    # For example, read all table names from config or just specify them:
+    tables_to_run = list(config_reader.config['tables'].keys())
+    results = batch_processor.process_tables(tables_to_run)
+
+    logger.info("=== Batch Results ===")
+    for table_name, status in results.items():
+        logger.info(f"{table_name}: {status}")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    main()
