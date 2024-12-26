@@ -1,6 +1,86 @@
+#!/usr/bin/env python3
+"""
+test_databricks_jdbc_local.py
 
+Demonstrates connecting to a Databricks SQL Warehouse from a local
+PySpark session using the 'com.databricks.client.jdbc.Driver'.
 
-    # 1) Build JDBC URL
-            host = self.warehouse_config["host"]
-            http_path = self.warehouse_config["http_path"]
-            token = self.token_fetcher.fetch_token()
+Usage:
+  spark-submit --driver-class-path D:/my_jars/databricks-jdbc-2.6.25.jar \
+               --jars D:/my_jars/databricks-jdbc-2.6.25.jar \
+               test_databricks_jdbc_local.py
+
+OR inline config in Python code (shown below).
+"""
+
+import os
+from pyspark.sql import SparkSession
+
+# -----------------------------------------------------------------------------
+# 1) Adjust these variables to match your environment
+# -----------------------------------------------------------------------------
+JDBC_JAR_PATH = r"D:\my_jars\databricks-jdbc-2.6.25.jar"  # Path to your JDBC JAR
+DBC_HOST = "<YOUR-DATABRICKS-HOST>"     # e.g., "abc-123.cloud.databricks.com"
+DBC_HTTP_PATH = "<YOUR-SQL-WAREHOUSE-PATH>"  # e.g., "/sql/1.0/warehouses/xyz..."
+DBC_TOKEN = "<YOUR-DATABRICKS-TOKEN>"   # Or fetch from an env variable, e.g.: os.environ["DATABRICKS_TOKEN"]
+
+# -----------------------------------------------------------------------------
+# 2) Create SparkSession with the JAR on the classpath
+# -----------------------------------------------------------------------------
+spark = (
+    SparkSession.builder
+    .appName("DatabricksJDBC2.6.25Test")
+    # If you want to ensure the driver is on the driver classpath
+    .config("spark.driver.extraClassPath", JDBC_JAR_PATH)
+    # If you also want executors to have it (for parallel reads):
+    .config("spark.executor.extraClassPath", JDBC_JAR_PATH)
+    .getOrCreate()
+)
+
+# -----------------------------------------------------------------------------
+# 3) Build JDBC URL for Databricks SQL Warehouse
+# -----------------------------------------------------------------------------
+# Format typically:
+#   jdbc:spark://<host>:443/default;transportMode=http;ssl=1;httpPath=<warehouse-path>
+jdbc_url = (
+    f"jdbc:spark://{DBC_HOST}:443/default"
+    f";transportMode=http;ssl=1;httpPath={DBC_HTTP_PATH}"
+)
+
+# -----------------------------------------------------------------------------
+# 4) Define a simple query to test
+# -----------------------------------------------------------------------------
+# For example, read first 10 rows from a table in your Databricks environment
+query = "SELECT * FROM my_database.my_table LIMIT 10"
+
+# We wrap the query in parentheses and alias it for Spark
+dbtable = f"({query}) AS tmp"
+
+# -----------------------------------------------------------------------------
+# 5) Read the data via JDBC
+# -----------------------------------------------------------------------------
+df = (
+    spark.read
+    .format("jdbc")
+    .option("url", jdbc_url)
+    .option("dbtable", dbtable)
+    # IMPORTANT: Use the Databricks driver class
+    .option("driver", "com.databricks.client.jdbc.Driver")
+    .option("user", "token")          # Databricks expects 'token' as the user
+    .option("password", DBC_TOKEN)    # The actual personal access token
+    .load()
+)
+
+# -----------------------------------------------------------------------------
+# 6) Print the results
+# -----------------------------------------------------------------------------
+print("=== Schema ===")
+df.printSchema()
+
+print("=== Preview Data ===")
+df.show()
+
+# -----------------------------------------------------------------------------
+# Done
+# -----------------------------------------------------------------------------
+spark.stop()
