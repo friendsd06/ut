@@ -1,0 +1,133 @@
+# ==============================================
+# Main Configuration File
+# ----------------------------------------------
+# This file has all connection and storage settings
+# ==============================================
+
+# -----------------------------
+# Databricks Connection Settings
+# -----------------------------
+databricks:
+    # Local Environment (Your Computer)
+    # --------------------------------
+    local:
+        hostname: localhost
+        port: 443
+        transportMode: http
+        ssl: "0"
+        ConnCatalog: local_catalog
+        AuthMech: "0"
+        UseProxy: "0"
+        UseNativeQuery: "1"
+        ProxyHost: ""
+        ProxyPort: "0"
+        httpPath: /sql/1.0/warehouses/localWarehouse
+
+    # Development Environment
+    # ----------------------
+    dev:
+        hostname: dev.cloud.databricks.com
+        port: 443
+        transportMode: http
+        ssl: "1"
+        ConnCatalog: dev_catalog
+        AuthMech: "11"
+        UseProxy: "1"
+        UseNativeQuery: "0"
+        ProxyHost: dev.proxy.com
+        ProxyPort: "8080"
+        httpPath: /sql/1.0/warehouses/devWarehouse
+
+    # Test Environment
+    # ---------------
+    test:
+        hostname: test.cloud.databricks.com
+        port: 443
+        transportMode: http
+        ssl: "1"
+        ConnCatalog: test_catalog
+        AuthMech: "11"
+        UseProxy: "1"
+        UseNativeQuery: "0"
+        ProxyHost: test.proxy.com
+        ProxyPort: "8081"
+        httpPath: /sql/1.0/warehouses/testWarehouse
+
+    # Pre-Production Environment
+    # -------------------------
+    preprod:
+        hostname: preprod.cloud.databricks.com
+        port: 443
+        transportMode: http
+        ssl: "1"
+        ConnCatalog: preprod_catalog
+        AuthMech: "11"
+        UseProxy: "1"
+        UseNativeQuery: "0"
+        ProxyHost: preprod.proxy.com
+        ProxyPort: "8083"
+        httpPath: /sql/1.0/warehouses/preprodWarehouse
+
+    # Production Environment
+    # ---------------------
+    prod:
+        hostname: prod.cloud.databricks.com
+        port: 443
+        transportMode: http
+        ssl: "1"
+        ConnCatalog: prod_catalog
+        AuthMech: "11"
+        UseProxy: "1"
+        UseNativeQuery: "0"
+        ProxyHost: prod.proxy.com
+        ProxyPort: "8082"
+        httpPath: /sql/1.0/warehouses/prodWarehouse
+
+# ----------------
+# Storage Settings
+# ----------------
+s3_settings:
+    # Local Storage (Your Computer)
+    local:
+        base_path: "file:///tmp/data/"
+
+    # Development Storage
+    dev:
+        base_path: "s3://dfgdfgdf-dfgdfgdfgdfgf/s3-external/67867876/ref_data/dev/"
+
+    # Test Storage
+    test:
+        base_path: "s3://dfgdfgdf-dfgdfgdfgdfgf/s3-external/67867876/ref_data/test/"
+
+    # Pre-Production Storage
+    preprod:
+        base_path: "s3://dfgdfgdf-dfgdfgdfgdfgf/s3-external/67867876/ref_data/preprod/"
+
+    # Production Storage
+    prod:
+        base_path: "s3://dfgdfgdf-dfgdfgdfgdfgf/s3-external/67867876/ref_data/prod/"
+
+# -------------
+# Table Settings
+# -------------
+tables:
+    # Cross-Reference Table
+    rgdfdfgdfgd_xref:
+        query: >-
+            select *
+            from data.party
+            where __txn_id='2fghgfhgfhgfdf5d'
+            limit 2
+        s3_path: "rgdfdfgdfgd_xref/"
+        format: "parquet"
+        mode: "overwrite"
+
+    # Customer Information Table
+    customer_dim:
+        query: >-
+            select *
+            from data.customer_dim
+            limit 100
+        s3_path: "customer_dim/"
+        format: "parquet"
+        mode: "append"
