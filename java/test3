@@ -1,0 +1,28 @@
+project/
+├── src/
+│   └── reference_dataloader/
+├── jars/
+│   ├── hadoop-aws-3.3.2.jar
+│   ├── aws-java-sdk-bundle-1.12.261.jar
+│   └── hadoop-client-3.3.2.jar
+└── config.yml
+
+
+def setup_spark(env: str, config_reader: ConfigReader) -> SparkSession:
+    # Get the project root directory
+    project_dir = Path(__file__).parent.parent.parent
+    jars_dir = project_dir / "jars"
+
+    # List all JARs
+    jars = [str(jar_file) for jar_file in jars_dir.glob("*.jar")]
+    jars_paths = ",".join(jars)
+
+    # Create Spark session with JARs
+    builder = (SparkSession.builder
+        .appName("ReferenceDataLoader")
+        .config("spark.jars", jars_paths)
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+                "com.amazonaws.auth.DefaultAWSCredentialsProviderChain"))
+
+    return builder.getOrCreate()
