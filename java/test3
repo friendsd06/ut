@@ -12,3 +12,7 @@ python -m reference_data_loader.main --config config.yml --env dev --tables cust
         .config("spark.hadoop.fs.s3a.connection.maximum", "100")
         .config("spark.hadoop.fs.s3a.fast.upload", "true")
         .config("spark.hadoop.fs.s3a.multipart.size", "64M"))
+
+
+        "hadoop-aws>=3.3.2",  # Match with your Hadoop version
+                "aws-java-sdk>=1.12.261"  # Match with your AWS SDK version
