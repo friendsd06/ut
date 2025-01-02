@@ -3,3 +3,12 @@ python -m reference_data_loader.main --config config.yml --env dev
 
 # Load specific tables
 python -m reference_data_loader.main --config config.yml --env dev --tables customer_dim product_dim
+
+
+ # Add S3 configurations
+    builder = (builder
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
+        .config("spark.hadoop.fs.s3a.connection.maximum", "100")
+        .config("spark.hadoop.fs.s3a.fast.upload", "true")
+        .config("spark.hadoop.fs.s3a.multipart.size", "64M"))
