@@ -1,0 +1,68 @@
+# src/reference_data_loader/auth/token_service.py
+
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TokenError(Exception):
+    pass
+
+class TokenService:
+    # 1. Manages authentication tokens
+    # 2. Handles token caching and refresh
+    # 3. Provides automatic token validation
+
+    def __init__(self, cache_path: str, token_lifespan_minutes: int = 30):
+        self.cache_path = Path(cache_path)
+        self.token_lifespan = timedelta(minutes=token_lifespan_minutes)
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def get_token(self) -> str:
+        # 1. Gets token from cache or generates new
+        # 2. Validates token expiration
+        # 3. Returns valid token
+        token_data = self._read_cache()
+
+        if self._is_token_valid(token_data):
+            return token_data["token"]
+
+        return self.refresh_token()
+
+    def refresh_token(self) -> str:
+        # 1. Gets new token
+        # 2. Updates cache
+        # 3. Returns fresh token
+        token = self._fetch_new_token()
+        expiration = datetime.now() + self.token_lifespan
+
+        token_data = {
+            "token": token,
+            "expiration": expiration.isoformat()
+        }
+
+        self._write_cache(token_data)
+        return token
+
+    def _fetch_new_token(self) -> str:
+        # 1. Gets new token from auth service
+        # Note: Override this method with actual implementation
+        return f"demo_token_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    def _read_cache(self) -> dict:
+        # 1. Reads token data from cache file
+        try:
+            if not self.cache_path.exists():
+                return {}
+
+            with open(self.cache_path) as f:
+                return json.load(f)
+        except:
+            return {}
+
+    def _write_cache(self, token_data: dict) -> None:
+        # 1. Writes token data to cache file
+        with open(self.cache_path, 'w') as f:
+            json.dump(token_data, f)

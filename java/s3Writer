@@ -1,0 +1,44 @@
+# src/reference_data_loader/storage/writer.py
+
+from typing import Optional, List
+from pyspark.sql import DataFrame
+import logging
+
+logger = logging.getLogger(__name__)
+
+class StorageError(Exception):
+    pass
+
+class S3Writer:
+    # 1. Manages writing DataFrames to S3
+    # 2. Handles different file formats
+    # 3. Supports partitioning options
+
+    def __init__(self, base_path: str):
+        self.base_path = base_path.rstrip('/')
+
+    def write_dataframe(
+        self,
+        df: DataFrame,
+        relative_path: str,
+        format: str = "parquet",
+        mode: str = "overwrite",
+        partition_by: Optional[List[str]] = None
+    ) -> None:
+        # 1. Validates write parameters
+        # 2. Sets up write configuration
+        # 3. Executes write operation
+        try:
+            full_path = f"{self.base_path}/{relative_path.lstrip('/')}"
+            logger.info(f"Writing to: {full_path}")
+
+            writer = df.write.format(format).mode(mode)
+
+            if partition_by:
+                writer = writer.partitionBy(*partition_by)
+
+            writer.save(full_path)
+            logger.info("Write completed successfully")
+
+        except Exception as e:
+            raise StorageError(f"Write failed: {str(e)}")

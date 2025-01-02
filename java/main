@@ -1,0 +1,88 @@
+# src/reference_data_loader/main.py
+
+"""
+Reference Data Loader
+------------------
+Loads reference data from Databricks to S3.
+
+Usage:
+    python -m reference_data_loader.main --config config.yml --env dev
+
+
+    # Load all tables
+    python -m reference_data_loader.main --config config.yml --env dev
+
+    # Load specific tables
+    python -m reference_data_loader.main --config config.yml --env dev --tables customer_dim product_dim
+"""
+
+import argparse
+import logging
+from pathlib import Path
+from pyspark.sql import SparkSession
+
+from .loader.reference_loader import ReferenceLoader, ReferenceLoadError
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def setup_spark() -> SparkSession:
+    # 1. Creates optimized Spark session
+    # 2. Configures for better performance
+    return (SparkSession.builder
+            .appName("ReferenceDataLoader")
+            .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+            .getOrCreate())
+
+def main():
+    # 1. Parse arguments
+    # 2. Initialize components
+    # 3. Execute data loading
+    parser = argparse.ArgumentParser(description="Reference Data Loader")
+    parser.add_argument("--config", required=True, help="Path to config file")
+    parser.add_argument("--env", required=True, help="Environment (dev/test/prod)")
+    parser.add_argument("--cache-dir", help="Cache directory")
+    parser.add_argument("--tables", nargs="+", help="Specific tables to load")
+    args = parser.parse_args()
+
+    try:
+        # Initialize Spark
+        spark = setup_spark()
+
+        # Create loader
+        loader = ReferenceLoader(
+            config_path=args.config,
+            environment=args.env,
+            cache_dir=args.cache_dir
+        )
+
+        # Get tables to process
+        tables_to_load = (
+            args.tables if args.tables
+            else loader.config_reader.get_tables().keys()
+        )
+
+        # Example partitioning config
+        partition_configs = {
+            'customer_dim': ['year', 'month'],
+            'product_dim': ['category']
+        }
+
+        # Load tables
+        loader.load_tables(
+            spark=spark,
+            table_names=tables_to_load,
+            partition_configs=partition_configs
+        )
+
+        logger.info("Data loading completed successfully")
+
+    except Exception as e:
+        logger.error(f"Data loading failed: {e}")
+        raise SystemExit(1)
+    finally:
+        spark.stop()
+
+if __name__ == "__main__":
+    main()

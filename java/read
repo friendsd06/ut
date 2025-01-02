@@ -1,0 +1,103 @@
+# src/reference_data_loader/config/config_reader.py
+
+from dataclasses import dataclass
+from enum import Enum, auto
+from pathlib import Path
+from typing import Dict
+import yaml
+import logging
+
+logger = logging.getLogger(__name__)
+
+class Environment(Enum):
+    # 1. Available environments supported by the application
+    # 2. Used for environment-specific configurations
+    LOCAL = auto()
+    DEV = auto()
+    TEST = auto()
+    PREPROD = auto()
+    PROD = auto()
+
+    @classmethod
+    def from_str(cls, env_name: str) -> 'Environment':
+        try:
+            return cls[env_name.upper()]
+        except KeyError:
+            valid_envs = ', '.join(env.name.lower() for env in cls)
+            raise ValueError(f"Invalid environment: '{env_name}'. Use: {valid_envs}")
+
+@dataclass
+class DatabricksConfig:
+    # 1. Holds Databricks connection settings
+    # 2. Provides connection parameter formatting
+    hostname: str
+    port: int
+    httpPath: str
+    connCatalog: str = ""
+    ssl: str = "1"
+    transportMode: str = "http"
+    authMech: str = "11"
+
+    def get_connection_params(self) -> dict:
+        return {
+            "hostname": self.hostname,
+            "port": self.port,
+            "httpPath": self.httpPath,
+            "ConnCatalog": self.connCatalog,
+            "ssl": self.ssl,
+            "transportMode": self.transportMode,
+            "AuthMech": self.authMech
+        }
+
+@dataclass
+class S3Config:
+    # 1. Holds S3 storage configuration
+    # 2. Handles path manipulation
+    base_path: str
+
+    def get_full_path(self, relative_path: str) -> str:
+        return f"{self.base_path.rstrip('/')}/{relative_path.lstrip('/')}"
+
+@dataclass
+class TableConfig:
+    # 1. Holds table-specific configuration
+    # 2. Defines how data should be loaded and written
+    query: str
+    s3_path: str
+    format: str = "parquet"
+    mode: str = "overwrite"
+
+class ConfigReader:
+    # 1. Reads and parses configuration file
+    # 2. Provides access to environment-specific settings
+
+    def __init__(self, config_path: str):
+        self.config_path = Path(config_path)
+        self.config = self._load_config()
+        logger.info(f"Loaded configuration from: {config_path}")
+
+    def _load_config(self) -> dict:
+        if not self.config_path.exists():
+            raise FileNotFoundError(f"Config not found: {self.config_path}")
+
+        with open(self.config_path) as f:
+            return yaml.safe_load(f)
+
+    def get_databricks_config(self, env: str) -> DatabricksConfig:
+        env_config = self.config['databricks'][env]
+        return DatabricksConfig(**env_config)
+
+    def get_s3_config(self, env: str) -> S3Config:
+        env_config = self.config['s3'][env]
+        return S3Config(**env_config)
+
+    def get_table_config(self, table_name: str) -> TableConfig:
+        if table_name not in self.config['tables']:
+            raise KeyError(f"Table not found: {table_name}")
+        return TableConfig(**self.config['tables'][table_name])
+
+    def get_tables(self) -> Dict[str, TableConfig]:
+        return {
+            name: TableConfig(**config)
+            for name, config in self.config['tables'].items()
+        }

@@ -1,0 +1,129 @@
+# src/reference_data_loader/loader/reference_loader.py
+
+from typing import List, Optional
+from pyspark.sql import SparkSession
+import logging
+from pathlib import Path
+
+from ..config.config_reader import ConfigReader, Environment
+from ..auth.token_service import TokenService
+from ..warehouse.reader import WarehouseReader
+from ..storage.writer import S3Writer
+
+logger = logging.getLogger(__name__)
+
+class ReferenceLoadError(Exception):
+    pass
+
+class ReferenceLoader:
+    # 1. Manages end-to-end reference data loading
+    # 2. Coordinates components and services
+    # 3. Handles environment-specific configurations
+
+    def __init__(
+        self,
+        config_path: str,
+        environment: str,
+        cache_dir: Optional[str] = None
+    ):
+        # 1. Initialize components
+        # 2. Load configurations
+        # 3. Setup services
+        try:
+            # Initialize config
+            self.config_reader = ConfigReader(config_path)
+            self.environment = Environment.from_str(environment)
+            env_name = self.environment.name.lower()
+
+            # Get configurations
+            self.db_config = self.config_reader.get_databricks_config(env_name)
+            self.s3_config = self.config_reader.get_s3_config(env_name)
+
+            # Setup cache
+            cache_dir = cache_dir or f"./cache/{env_name}"
+            Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+            # Initialize services
+            self.token_service = TokenService(
+                cache_path=f"{cache_dir}/token_cache.json"
+            )
+
+            self.warehouse_reader = WarehouseReader(
+                config=self.db_config.get_connection_params(),
+                token_service=self.token_service
+            )
+
+            self.s3_writer = S3Writer(
+                base_path=self.s3_config.base_path
+            )
+
+            logger.info(f"Initialized ReferenceLoader for environment: {env_name}")
+
+        except Exception as e:
+            raise ReferenceLoadError(f"Initialization failed: {str(e)}")
+
+    def load_table(
+        self,
+        spark: SparkSession,
+        table_name: str,
+        partition_by: Optional[List[str]] = None
+    ) -> None:
+        # 1. Load table configuration
+        # 2. Extract data from warehouse
+        # 3. Write to S3 location
+        try:
+            logger.info(f"Processing table: {table_name}")
+
+            # Get configuration
+            table_config = self.config_reader.get_table_config(table_name)
+
+            # Extract data
+            df = self.warehouse_reader.execute_query(
+                spark=spark,
+                query=table_config.query
+            )
+
+            # Write to S3
+            # src/reference_data_loader/loader/reference_loader.py (continued)
+
+                        # Write to S3
+                        self.s3_writer.write_dataframe(
+                            df=df,
+                            relative_path=table_config.s3_path,
+                            format=table_config.format,
+                            mode=table_config.mode,
+                            partition_by=partition_by
+                        )
+
+                        logger.info(f"Table {table_name} processed successfully")
+
+                    except Exception as e:
+                        raise ReferenceLoadError(f"Failed to process table {table_name}: {str(e)}")
+
+                def load_tables(
+                    self,
+                    spark: SparkSession,
+                    table_names: List[str],
+                    partition_configs: Optional[dict] = None
+                ) -> None:
+                    # 1. Process multiple tables
+                    # 2. Apply partitioning if specified
+                    # 3. Handle failures appropriately
+                    failures = []
+
+                    for table_name in table_names:
+                        try:
+                            partitions = partition_configs.get(table_name) if partition_configs else None
+                            self.load_table(
+                                spark=spark,
+                                table_name=table_name,
+                                partition_by=partitions
+                            )
+                        except Exception as e:
+                            failures.append(f"{table_name}: {str(e)}")
+                            logger.error(f"Failed to load {table_name}: {e}")
+
+                    if failures:
+                        raise ReferenceLoadError(
+                            f"Some tables failed to load:\n" + "\n".join(failures)
+                        )
