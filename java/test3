@@ -1,0 +1,5 @@
+# Load all tables
+python -m reference_data_loader.main --config config.yml --env dev
+
+# Load specific tables
+python -m reference_data_loader.main --config config.yml --env dev --tables customer_dim product_dim
