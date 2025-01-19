@@ -1,28 +1,164 @@
-project/
-├── src/
-│   └── reference_dataloader/
-├── jars/
-│   ├── hadoop-aws-3.3.2.jar
-│   ├── aws-java-sdk-bundle-1.12.261.jar
-│   └── hadoop-client-3.3.2.jar
-└── config.yml
+from datetime import datetime, timedelta
+import os
+import json
+import logging
+import stat
+from typing import Optional, Dict, Any
+from abc import ABC, abstractmethod
+from pathlib import Path
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-def setup_spark(env: str, config_reader: ConfigReader) -> SparkSession:
-    # Get the project root directory
-    project_dir = Path(__file__).parent.parent.parent
-    jars_dir = project_dir / "jars"
+class TokenFetcherService(ABC):
+    """Base interface for token fetching services."""
 
-    # List all JARs
-    jars = [str(jar_file) for jar_file in jars_dir.glob("*.jar")]
-    jars_paths = ",".join(jars)
+    @abstractmethod
+    def get_token(self) -> str:
+        """Get a valid token, either from cache or by generating a new one."""
+        pass
 
-    # Create Spark session with JARs
-    builder = (SparkSession.builder
-        .appName("ReferenceDataLoader")
-        .config("spark.jars", jars_paths)
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
-                "com.amazonaws.auth.DefaultAWSCredentialsProviderChain"))
+    @abstractmethod
+    def refresh_token(self) -> str:
+        """Force refresh of the token."""
+        pass
 
-    return builder.getOrCreate()
+class LocalTokenFetcherService(TokenFetcherService):
+    """Service for managing local token storage and retrieval on Linux systems."""
+
+    def __init__(self, username: str, password: str) -> None:
+        """
+        Initialize service with cache in user's home directory.
+
+        Args:
+            username: Username for authentication
+            password: Password for authentication
+        """
+        self.username = username
+        self.password = password
+        home_dir = Path(os.environ['HOME'])
+        self._cache_file = home_dir / '.global-capital-reporting-etl-databricks.cache'
+        self._setup_cache()
+
+    def _setup_cache(self) -> None:
+        """Ensure cache file exists with proper permissions."""
+        if self._cache_file.exists():
+            os.chmod(self._cache_file, stat.S_IRUSR | stat.S_IWUSR)  # 600 permissions
+            os.chown(self._cache_file, os.getuid(), os.getgid())
+
+    def _read_cache(self) -> Optional[Dict[str, Any]]:
+        """Read token data from cache file."""
+        try:
+            if self._cache_file.is_file():
+                with open(self._cache_file, 'r') as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, PermissionError) as e:
+            logging.error(f"Cache read error: {e}")
+            self._cache_file.unlink(missing_ok=True)
+        return None
+
+    def _write_cache(self, token_data: Dict[str, Any]) -> None:
+        """Write token data to cache file."""
+        with open(self._cache_file, 'w') as f:
+            json.dump(token_data, f)
+        os.chmod(self._cache_file, stat.S_IRUSR | stat.S_IWUSR)
+
+    def refresh_token(self) -> str:
+        """Get new token and cache it."""
+        try:
+            token = get_databricks_ida_token(self.username, self.password, ida_env='prod')
+
+            token_data = {
+                'access_token': token,
+                'expiration': (datetime.now() + timedelta(seconds=3558)).isoformat(),
+                'username': self.username
+            }
+
+            self._write_cache(token_data)
+            return token
+
+        except Exception as e:
+            raise RuntimeError(f"Token refresh failed: {str(e)}") from e
+
+    def get_token(self) -> str:
+        """Get valid token from cache or refresh if expired."""
+        try:
+            token_data = self._read_cache()
+
+            if token_data:
+                expiration = datetime.fromisoformat(token_data['expiration'])
+                if expiration > datetime.now():
+                    return token_data['access_token']
+
+            return self.refresh_token()
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to get token: {str(e)}") from e
+
+def test_token_service(username: str, password: str) -> None:
+    """
+    Test the token service functionality.
+
+    Args:
+        username: Username for testing
+        password: Password for testing
+    """
+    logging.info("Starting token service test")
+
+    try:
+        # Initialize service
+        service = LocalTokenFetcherService(username, password)
+        logging.info("Service initialized successfully")
+
+        # Test getting token first time (should create cache)
+        logging.info("Testing initial token fetch...")
+        token1 = service.get_token()
+        logging.info("Successfully fetched initial token")
+
+        # Test reading from cache
+        logging.info("Testing cached token fetch...")
+        token2 = service.get_token()
+        logging.info("Successfully fetched cached token")
+
+        # Verify tokens match (should be same if within expiration)
+        if token1 == token2:
+            logging.info("Token cache working correctly")
+        else:
+            logging.warning("Tokens different - cache may have expired")
+
+        # Force token refresh
+        logging.info("Testing force token refresh...")
+        token3 = service.refresh_token()
+        logging.info("Successfully refreshed token")
+
+        # Verify new token is different
+        if token3 != token2:
+            logging.info("Force refresh generated new token as expected")
+        else:
+            logging.warning("Force refresh did not generate new token")
+
+    except Exception as e:
+        logging.error(f"Test failed: {str(e)}")
+        raise
+
+def main():
+    """Main entry point for testing."""
+    # Get credentials from environment variables
+    username = os.environ.get('DATABRICKS_USERNAME')
+    password = os.environ.get('DATABRICKS_PASSWORD')
+
+    if not username or not password:
+        logging.error("Missing required environment variables: DATABRICKS_USERNAME, DATABRICKS_PASSWORD")
+        return
+
+    try:
+        test_token_service(username, password)
+        logging.info("All tests completed successfully")
+    except Exception as e:
+        logging.error(f"Testing failed: {str(e)}")
+
+if __name__ == "__main__":
+    main()
