@@ -1,0 +1,641 @@
+Below are five complete, end-to-end examples of Guided Decision Tables for common banking scenarios using Drools/KIE. Each example has:
+
+A package structure (so you see how to organize your code).
+Data model classes (Java “Data Objects”).
+A Guided Decision Table (.gdst) with example rows and the DRL it would generate.
+A small driver/test class to insert data, fire rules, and show results.
+You can adapt these to your own project layout—these are illustrative so you can see five different use cases and how a Guided Decision Table is set up and used.
+
+Example 1: Loan Approval
+1. Package Structure
+bash
+Copy
+com/
+  mybank/
+    loanapproval/
+      model/
+        Applicant.java
+        Loan.java
+        LoanDecision.java
+      rules/
+        LoanApprovalTable.gdst
+      test/
+        LoanApprovalTest.java
+2. Data Model
+Applicant.java
+java
+Copy
+package com.mybank.loanapproval.model;
+
+public class Applicant {
+    private String name;
+    private Integer creditScore;
+    private Integer income;
+
+    public Applicant() {}
+
+    public Applicant(String name, Integer creditScore, Integer income) {
+        this.name = name;
+        this.creditScore = creditScore;
+        this.income = income;
+    }
+
+    public String getName() {
+        return name;
+    }
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Integer getCreditScore() {
+        return creditScore;
+    }
+    public void setCreditScore(Integer creditScore) {
+        this.creditScore = creditScore;
+    }
+
+    public Integer getIncome() {
+        return income;
+    }
+    public void setIncome(Integer income) {
+        this.income = income;
+    }
+}
+Loan.java
+java
+Copy
+package com.mybank.loanapproval.model;
+
+public class Loan {
+    private Integer amount;
+    private String status;
+    // e.g. "REQUESTED", "APPROVED", "DENIED" (or we handle approval in LoanDecision)
+
+    public Loan() {}
+
+    public Loan(Integer amount) {
+        this.amount = amount;
+        this.status = "REQUESTED";
+    }
+
+    public Integer getAmount() {
+        return amount;
+    }
+    public void setAmount(Integer amount) {
+        this.amount = amount;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+    public void setStatus(String status) {
+        this.status = status;
+    }
+}
+LoanDecision.java
+java
+Copy
+package com.mybank.loanapproval.model;
+
+public class LoanDecision {
+    private String decision;
+
+    public LoanDecision() {}
+
+    public LoanDecision(String decision) {
+        this.decision = decision;
+    }
+
+    public String getDecision() {
+        return decision;
+    }
+    public void setDecision(String decision) {
+        this.decision = decision;
+    }
+}
+3. Guided Decision Table
+Create a file LoanApprovalTable.gdst under rules/. In KIE Workbench, you’d pick Add Asset → Guided Decision Table.
+We define conditions on Applicant.creditScore (≥) and Applicant.income (≥), as well as Loan.amount (≤). Action sets LoanDecision.decision.
+
+Pseudo-table (in the web UI):
+
+Row	Applicant.creditScore ≥	Applicant.income ≥	Loan.amount ≤	THEN LoanDecision.decision
+1	700	50000	200000	"APPROVED"
+2	600	30000	100000	"CONDITIONAL"
+3	(blank)	(blank)	(blank)	"DENIED"
+Generated DRL (for illustration)
+java
+Copy
+rule "Row 1 LoanApprovalTable"
+  when
+    $applicant : Applicant( creditScore >= 700, income >= 50000 )
+    $loan : Loan( amount <= 200000 )
+    $decision : LoanDecision()
+  then
+    $decision.setDecision("APPROVED");
+end
+
+rule "Row 2 LoanApprovalTable"
+  when
+    $applicant : Applicant( creditScore >= 600, income >= 30000 )
+    $loan : Loan( amount <= 100000 )
+    $decision : LoanDecision()
+  then
+    $decision.setDecision("CONDITIONAL");
+end
+
+rule "Row 3 LoanApprovalTable"
+  when
+    $applicant : Applicant()
+    $loan : Loan()
+    $decision : LoanDecision()
+  then
+    $decision.setDecision("DENIED");
+end
+4. Test Driver
+LoanApprovalTest.java
+java
+Copy
+package com.mybank.loanapproval.test;
+
+import com.mybank.loanapproval.model.*;
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+
+public class LoanApprovalTest {
+    public static void main(String[] args) {
+        // 1) Set up KIE
+        KieServices ks = KieServices.Factory.get();
+        KieContainer kc = ks.newKieContainer(
+            ks.newReleaseId("com.mybank", "loanapproval-kjar", "1.0.0-SNAPSHOT")
+        );
+        KieSession kSession = kc.newKieSession();
+
+        // 2) Create sample data
+        Applicant applicant = new Applicant("John Doe", 750, 60000);
+        Loan loan = new Loan(150000);
+        LoanDecision decision = new LoanDecision();
+
+        // 3) Insert facts
+        kSession.insert(applicant);
+        kSession.insert(loan);
+        kSession.insert(decision);
+
+        // 4) Fire rules
+        int fired = kSession.fireAllRules();
+        kSession.dispose();
+
+        // 5) Results
+        System.out.println("Number of rules fired = " + fired);
+        System.out.println("Loan decision = " + decision.getDecision());
+    }
+}
+Compile, deploy, and run. The first row likely fires, so the decision is "APPROVED".
+
+Example 2: Credit Card Approval
+1. Package Structure
+bash
+Copy
+com/
+  mybank/
+    creditcard/
+      model/
+        Applicant.java
+        CreditCardApp.java
+        CreditCardDecision.java
+      rules/
+        CreditCardApprovalTable.gdst
+      test/
+        CreditCardApprovalTest.java
+(You can reuse the same Applicant if desired, but here we show a separate package.)
+
+2. Data Model
+Applicant.java
+java
+Copy
+package com.mybank.creditcard.model;
+
+public class Applicant {
+    private String name;
+    private Integer creditScore;
+    private Integer monthlySpending;
+
+    // Constructors, getters, setters
+}
+CreditCardApp.java
+java
+Copy
+package com.mybank.creditcard.model;
+
+public class CreditCardApp {
+    private String cardTypeRequested;  // e.g. "GOLD", "PLATINUM"
+    private String status;             // "PENDING", "APPROVED", "DENIED"
+
+    public CreditCardApp() {
+        this.status = "PENDING";
+    }
+
+    // Constructors, getters, setters
+}
+CreditCardDecision.java
+java
+Copy
+package com.mybank.creditcard.model;
+
+public class CreditCardDecision {
+    private String decision; // "APPROVED", "DENIED", etc.
+
+    // Constructors, getters, setters
+}
+3. Guided Decision Table
+Conditions:
+Applicant.creditScore ≥ some threshold
+Applicant.monthlySpending ≤ some limit
+CreditCardApp.cardTypeRequested equals certain strings
+Action: set CreditCardDecision.decision
+Example rows (pseudo):
+
+Row	creditScore ≥	monthlySpending ≤	cardTypeRequested ==	THEN decision
+1	700	2000	"PLATINUM"	"APPROVED"
+2	650	1000	"GOLD"	"APPROVED"
+3	(blank)	(blank)	(blank)	"DENIED"
+Generated DRL (excerpt)
+java
+Copy
+rule "Row 1 CreditCardApprovalTable"
+  when
+    $applicant : Applicant( creditScore >= 700, monthlySpending <= 2000 )
+    $cardApp : CreditCardApp( cardTypeRequested == "PLATINUM" )
+    $decision : CreditCardDecision()
+  then
+    $decision.setDecision("APPROVED");
+end
+
+// ... etc.
+4. Test Driver
+CreditCardApprovalTest.java
+java
+Copy
+package com.mybank.creditcard.test;
+
+import com.mybank.creditcard.model.*;
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+
+public class CreditCardApprovalTest {
+    public static void main(String[] args) {
+        KieServices ks = KieServices.Factory.get();
+        KieContainer kc = ks.newKieContainer(
+            ks.newReleaseId("com.mybank", "creditcard-kjar", "1.0.0-SNAPSHOT")
+        );
+        KieSession kSession = kc.newKieSession();
+
+        Applicant applicant = new Applicant();
+        applicant.setName("Jane Roe");
+        applicant.setCreditScore(720);
+        applicant.setMonthlySpending(1500);
+
+        CreditCardApp cardApp = new CreditCardApp();
+        cardApp.setCardTypeRequested("PLATINUM");
+
+        CreditCardDecision decision = new CreditCardDecision();
+
+        kSession.insert(applicant);
+        kSession.insert(cardApp);
+        kSession.insert(decision);
+
+        int fired = kSession.fireAllRules();
+        kSession.dispose();
+
+        System.out.println("Rules fired: " + fired);
+        System.out.println("Decision: " + decision.getDecision());
+    }
+}
+Example 3: Mortgage Rate Determination
+1. Package Structure
+bash
+Copy
+com/
+  mybank/
+    mortgage/
+      model/
+        Customer.java
+        MortgageApplication.java
+      rules/
+        MortgageRateTable.gdst
+      test/
+        MortgageRateTest.java
+2. Data Model
+Customer.java
+java
+Copy
+package com.mybank.mortgage.model;
+
+public class Customer {
+    private String name;
+    private Integer creditScore;
+    private Double downPaymentPercentage;
+
+    // Constructors, getters, setters
+}
+MortgageApplication.java
+java
+Copy
+package com.mybank.mortgage.model;
+
+public class MortgageApplication {
+    private Double principal;   // e.g. 300000.00
+    private Double interestRate; // determined by rules
+
+    public MortgageApplication() {}
+    // Constructors, getters, setters
+}
+3. Guided Decision Table
+We want to determine an interestRate based on creditScore and downPaymentPercentage. For example:
+
+Row	creditScore ≥	downPaymentPercentage ≥	THEN interestRate
+1	750	20.0	3.0
+2	700	10.0	4.0
+3	(blank)	(blank)	5.5
+Generated DRL (Excerpt)
+java
+Copy
+rule "Row 1 MortgageRateTable"
+  when
+    $customer : Customer( creditScore >= 750, downPaymentPercentage >= 20.0 )
+    $mortgage : MortgageApplication()
+  then
+    $mortgage.setInterestRate(3.0);
+end
+
+// etc...
+4. Test Driver
+MortgageRateTest.java
+java
+Copy
+package com.mybank.mortgage.test;
+
+import com.mybank.mortgage.model.*;
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+
+public class MortgageRateTest {
+    public static void main(String[] args) {
+        KieServices ks = KieServices.Factory.get();
+        KieContainer kc = ks.newKieContainer(
+            ks.newReleaseId("com.mybank", "mortgage-kjar", "1.0.0-SNAPSHOT")
+        );
+        KieSession kSession = kc.newKieSession();
+
+        Customer customer = new Customer();
+        customer.setName("Alice");
+        customer.setCreditScore(780);
+        customer.setDownPaymentPercentage(25.0);
+
+        MortgageApplication app = new MortgageApplication();
+        app.setPrincipal(300000.0);
+
+        kSession.insert(customer);
+        kSession.insert(app);
+        int fired = kSession.fireAllRules();
+        kSession.dispose();
+
+        System.out.println("Rules fired: " + fired);
+        System.out.println("Final interest rate: " + app.getInterestRate());
+    }
+}
+Example 4: Bank Fee Calculation
+1. Package Structure
+bash
+Copy
+com/
+  mybank/
+    fees/
+      model/
+        Account.java
+        FeeResult.java
+      rules/
+        FeeCalculationTable.gdst
+      test/
+        FeeCalculationTest.java
+2. Data Model
+Account.java
+java
+Copy
+package com.mybank.fees.model;
+
+public class Account {
+    private String accountType; // "CHECKING", "SAVINGS", ...
+    private Double balance;
+    private boolean overdraftProtection;
+
+    // Constructors, getters, setters
+}
+FeeResult.java
+java
+Copy
+package com.mybank.fees.model;
+
+public class FeeResult {
+    private Double monthlyFee;
+
+    public FeeResult() {
+        this.monthlyFee = 0.0;
+    }
+    // getters, setters
+}
+3. Guided Decision Table
+Rules:
+
+If accountType = "CHECKING" + no overdraft protection + balance < 1000 => fee 15.0
+If accountType = "SAVINGS" + balance < 500 => fee 10.0
+Else => fee 0
+Row	accountType ==	overdraftProtection?	balance <	THEN monthlyFee
+1	"CHECKING"	false	1000	15.0
+2	"SAVINGS"	(any)	500	10.0
+3	(blank)	(blank)	(blank)	0.0
+Generated DRL (Excerpt)
+java
+Copy
+rule "Row 1 FeeCalculationTable"
+  when
+    $account : Account(accountType == "CHECKING", overdraftProtection == false, balance < 1000)
+    $fee : FeeResult()
+  then
+    $fee.setMonthlyFee(15.0);
+end
+// ...
+4. Test Driver
+FeeCalculationTest.java
+java
+Copy
+package com.mybank.fees.test;
+
+import com.mybank.fees.model.*;
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+
+public class FeeCalculationTest {
+    public static void main(String[] args) {
+        KieServices ks = KieServices.Factory.get();
+        KieContainer kc = ks.newKieContainer(
+           ks.newReleaseId("com.mybank","fees-kjar","1.0.0-SNAPSHOT")
+        );
+        KieSession kSession = kc.newKieSession();
+
+        Account account = new Account();
+        account.setAccountType("CHECKING");
+        account.setBalance(900.0);
+        account.setOverdraftProtection(false);
+
+        FeeResult feeResult = new FeeResult();
+
+        kSession.insert(account);
+        kSession.insert(feeResult);
+
+        int fired = kSession.fireAllRules();
+        kSession.dispose();
+
+        System.out.println("Rules fired: " + fired);
+        System.out.println("Monthly fee: " + feeResult.getMonthlyFee());
+    }
+}
+Example 5: Simple Fraud Detection
+1. Package Structure
+bash
+Copy
+com/
+  mybank/
+    fraud/
+      model/
+        Transaction.java
+        FraudCheckResult.java
+      rules/
+        FraudDetectionTable.gdst
+      test/
+        FraudDetectionTest.java
+2. Data Model
+Transaction.java
+java
+Copy
+package com.mybank.fraud.model;
+
+public class Transaction {
+    private String location;
+    private Double amount;
+    private String status; // e.g. "OK", "SUSPICIOUS"
+
+    public Transaction() {
+        this.status = "OK";
+    }
+
+    // getters, setters
+}
+FraudCheckResult.java
+java
+Copy
+package com.mybank.fraud.model;
+
+public class FraudCheckResult {
+    private boolean flagged;
+
+    public FraudCheckResult() {
+        this.flagged = false;
+    }
+
+    public boolean isFlagged() {
+        return flagged;
+    }
+    public void setFlagged(boolean flagged) {
+        this.flagged = flagged;
+    }
+}
+3. Guided Decision Table
+Example logic:
+
+If location is not the usual country, and amount > 5000, mark flagged = true.
+If amount > 10000, flagged = true.
+Otherwise flagged = false.
+Row	location != "HOME_COUNTRY"	amount >	THEN flagged
+1	true	5000	true
+2	(any)	10000	true
+3	(blank)	(blank)	false
+Generated DRL (Excerpt)
+java
+Copy
+rule "Row 1 FraudDetectionTable"
+  when
+    $tx : Transaction(location != "HOME_COUNTRY", amount > 5000)
+    $result : FraudCheckResult()
+  then
+    $result.setFlagged(true);
+end
+
+rule "Row 2 FraudDetectionTable"
+  when
+    $tx : Transaction(amount > 10000)
+    $result : FraudCheckResult()
+  then
+    $result.setFlagged(true);
+end
+
+rule "Row 3 FraudDetectionTable"
+  when
+    $tx : Transaction()
+    $result : FraudCheckResult()
+  then
+    $result.setFlagged(false);
+end
+4. Test Driver
+FraudDetectionTest.java
+java
+Copy
+package com.mybank.fraud.test;
+
+import com.mybank.fraud.model.*;
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+
+public class FraudDetectionTest {
+    public static void main(String[] args) {
+        KieServices ks = KieServices.Factory.get();
+        KieContainer kc = ks.newKieContainer(
+            ks.newReleaseId("com.mybank","fraud-kjar","1.0.0-SNAPSHOT")
+        );
+        KieSession kSession = kc.newKieSession();
+
+        Transaction tx = new Transaction();
+        tx.setLocation("FOREIGN_COUNTRY");
+        tx.setAmount(6000.0);
+
+        FraudCheckResult result = new FraudCheckResult();
+
+        kSession.insert(tx);
+        kSession.insert(result);
+
+        int fired = kSession.fireAllRules();
+        kSession.dispose();
+
+        System.out.println("Rules fired: " + fired);
+        System.out.println("Flagged? " + result.isFlagged());
+    }
+}
+How to Use These Examples
+In KIE Workbench / RHPAM:
+
+Create a project (e.g., “fees-kjar,” “fraud-kjar,” etc.) per example.
+Add the Data Objects in the web interface.
+Add a Guided Decision Table with columns matching your data objects’ fields.
+Fill out rule rows.
+Build & Deploy each project.
+In a Java App (for testing or real usage):
+
+Reference each project’s KJAR as a Maven dependency.
+Use the standard Drools API (KieServices, KieContainer, KieSession).
+Insert facts, call fireAllRules(), read updated fields.
+By following any (or all) of these five examples, you have a complete demonstration of how to structure data objects, create Guided Decision Tables, generate DRL, and test them in a banking context. Each example is fully self-contained with an appropriate package structure, which you can adjust to your own environment.
