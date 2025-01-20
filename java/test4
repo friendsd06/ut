@@ -1,0 +1,395 @@
+Table of Contents
+Create a New Project
+Create the Data Objects (Applicant, Loan, LoanDecision)
+Create an Enumeration (Optional)
+Create a Guided Decision Table
+Preview the Generated DRL Code
+Build and Deploy
+Test the Rules from Java Code
+<a id="step1"></a>
+
+1. Create a New Project
+Log in to your KIE Workbench / Red Hat Process Automation Manager.
+Navigate to Menu → Design → Projects (the exact path can vary by version).
+Click the New Project button.
+In the New Project dialog, fill out:
+Group ID: com.mycompany
+Artifact ID: loan-approval
+Version: 1.0.0-SNAPSHOT
+Click Create & Import.
+This creates a loan-approval project. You should now see it under your Projects.
+
+<a id="step2"></a>
+
+2. Create the Data Objects
+We will create three Java classes (Data Objects) to model our loan scenario:
+
+Applicant
+Loan
+LoanDecision (to store the final decision)
+2.1 Create Applicant
+Inside the loan-approval project, click Add Asset → Data Object.
+
+Name it Applicant.
+
+In the Data Object Editor, add the following fields:
+
+name: String
+creditScore: Integer
+income: Integer
+age: Integer
+employmentStatus: String
+Click Save.
+
+The KIE Workbench will generate a file named Applicant.java with getters/setters. You can see this in the Source tab (or in the project’s file structure). It should look like:
+
+java
+Copy
+package com.mycompany;
+
+public class Applicant {
+
+    private String name;
+    private Integer creditScore;
+    private Integer income;
+    private Integer age;
+    private String employmentStatus;
+
+    public Applicant() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Integer getCreditScore() {
+        return creditScore;
+    }
+
+    public void setCreditScore(Integer creditScore) {
+        this.creditScore = creditScore;
+    }
+
+    public Integer getIncome() {
+        return income;
+    }
+
+    public void setIncome(Integer income) {
+        this.income = income;
+    }
+
+    public Integer getAge() {
+        return age;
+    }
+
+    public void setAge(Integer age) {
+        this.age = age;
+    }
+
+    public String getEmploymentStatus() {
+        return employmentStatus;
+    }
+
+    public void setEmploymentStatus(String employmentStatus) {
+        this.employmentStatus = employmentStatus;
+    }
+}
+2.2 Create Loan
+Click Add Asset → Data Object again.
+
+Name it Loan.
+
+In the Data Object Editor, add the following fields:
+
+amount: Integer
+loanType: String
+approvedAmount: Integer (optional, if we want to store the final approved amount)
+Click Save.
+
+The Workbench generates Loan.java:
+
+java
+Copy
+package com.mycompany;
+
+public class Loan {
+
+    private Integer amount;
+    private String loanType;
+    private Integer approvedAmount;
+
+    public Loan() {
+    }
+
+    public Integer getAmount() {
+        return amount;
+    }
+
+    public void setAmount(Integer amount) {
+        this.amount = amount;
+    }
+
+    public String getLoanType() {
+        return loanType;
+    }
+
+    public void setLoanType(String loanType) {
+        this.loanType = loanType;
+    }
+
+    public Integer getApprovedAmount() {
+        return approvedAmount;
+    }
+
+    public void setApprovedAmount(Integer approvedAmount) {
+        this.approvedAmount = approvedAmount;
+    }
+}
+2.3 Create LoanDecision
+Click Add Asset → Data Object again.
+
+Name it LoanDecision.
+
+In the Data Object Editor, add the following field:
+
+decision: String (possible values: "APPROVED", "CONDITIONAL", or "DENIED")
+Click Save.
+
+The Workbench generates LoanDecision.java:
+
+java
+Copy
+package com.mycompany;
+
+public class LoanDecision {
+
+    private String decision;
+
+    public LoanDecision() {
+    }
+
+    public String getDecision() {
+        return decision;
+    }
+
+    public void setDecision(String decision) {
+        this.decision = decision;
+    }
+}
+<a id="step3"></a>
+
+3. Create an Enumeration (Optional)
+If you wish to restrict certain fields to a list of allowed values (for example, Loan.loanType can be “HOME_LOAN”, “CAR_LOAN”, or “PERSONAL_LOAN”), you can create an enumeration:
+
+Click Add Asset → Enumeration.
+
+Name it, for example, loan-enum.
+
+In the Source tab, add lines such as:
+
+none
+Copy
+Applicant.employmentStatus : ['EMPLOYED','SELF_EMPLOYED','UNEMPLOYED']
+Loan.loanType : ['HOME_LOAN','CAR_LOAN','PERSONAL_LOAN']
+Click Save.
+
+Now, when you create or edit rules, any field that matches these enumerations will show a dropdown of possible values in the guided editor.
+
+<a id="step4"></a>
+
+4. Create a Guided Decision Table
+Go to Add Asset → Guided Decision Table.
+Name it LoanApprovalTable.
+Choose the type you prefer (e.g., “Spreadsheet-like” or “Extended”).
+Click OK to create it.
+4.1 Add Condition Columns (WHEN)
+We want to base decisions on:
+
+Applicant.creditScore
+Applicant.income
+Loan.amount
+Condition on Applicant:
+
+Click Insert Column → Condition.
+Fact Type: Applicant.
+Binding: $applicant (or any variable name).
+Field: creditScore.
+Operator: >= (greater than or equal).
+Click Finish.
+(Optional) Another condition on Applicant.income:
+
+Click Insert Column → Condition.
+Fact Type: Applicant.
+Binding: $applicant.
+Field: income.
+Operator: >=.
+Click Finish.
+Condition on Loan.amount:
+
+Click Insert Column → Condition.
+Fact Type: Loan.
+Binding: $loan.
+Field: amount.
+Operator: <= (less than or equal).
+Click Finish.
+4.2 Add Action Column (THEN)
+We want to set the field decision of the LoanDecision object to “APPROVED”, “CONDITIONAL”, or “DENIED.”
+
+Insert Column → Action.
+Fact Type: LoanDecision.
+Binding: $decision (we’ll assume we have a LoanDecision bound in working memory).
+Field: decision.
+We will set it to a literal value in each row of the table.
+4.3 Fill Out the Decision Table Rows
+For example, let’s define three rows:
+
+Row	creditScore ≥	income ≥	amount ≤	Then decision
+1	700	50000	200000	APPROVED
+2	600	30000	100000	CONDITIONAL
+3	(blank)	(blank)	(blank)	DENIED
+How to fill these in:
+
+Click the cell under the creditScore >= column for Row 1 → type 700.
+Under the income >= column for Row 1 → type 50000.
+Under the amount <= column for Row 1 → type 200000.
+Under the decision column, type "APPROVED" (in quotes if required by the editor).
+Repeat for Row 2 and Row 3. For Row 3, we can leave the condition cells blank (meaning “no restriction”) and simply set decision = "DENIED".
+
+When done, Save your decision table.
+
+<a id="step5"></a>
+
+5. Preview the Generated DRL Code
+Open the Source tab of your LoanApprovalTable. You’ll see something like:
+
+java
+Copy
+rule "Row 1 LoanApprovalTable"
+  when
+    $applicant : Applicant( creditScore >= 700, income >= 50000 )
+    $loan : Loan( amount <= 200000 )
+    $decision : LoanDecision()
+  then
+    $decision.setDecision("APPROVED");
+end
+
+rule "Row 2 LoanApprovalTable"
+  when
+    $applicant : Applicant( creditScore >= 600, income >= 30000 )
+    $loan : Loan( amount <= 100000 )
+    $decision : LoanDecision()
+  then
+    $decision.setDecision("CONDITIONAL");
+end
+
+rule "Row 3 LoanApprovalTable"
+  when
+    $applicant : Applicant()
+    $loan : Loan()
+    $decision : LoanDecision()
+  then
+    $decision.setDecision("DENIED");
+end
+This DRL is automatically generated by the KIE Workbench from the table.
+
+<a id="step6"></a>
+
+6. Build and Deploy
+Return to your Project Editor (or Project Settings) screen.
+Click Build & Deploy (the button might be in the top right or left, depending on version).
+Wait for the build to complete successfully.
+Now your KJAR (Knowledge JAR) containing all Data Objects and Decision Table rules is deployed to your local KIE Maven repository (or to the remote Business Central Maven repository if configured).
+
+<a id="step7"></a>
+
+7. Test the Rules from Java Code
+You can invoke these rules from a Java application by including the loan-approval KJAR as a dependency. Then:
+
+Create a KIE container and session.
+Insert the facts (Applicant, Loan, LoanDecision) into the session.
+Fire all rules.
+Inspect the updated LoanDecision.
+7.1 Sample Maven Dependency
+In your external Java project’s pom.xml, add:
+
+xml
+Copy
+<dependency>
+  <groupId>com.mycompany</groupId>
+  <artifactId>loan-approval</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+</dependency>
+(You may need to configure your settings so that Maven can find the KIE artifacts.)
+
+7.2 Sample Java Test Code
+java
+Copy
+package com.mycompany.test;
+
+import com.mycompany.Applicant;
+import com.mycompany.Loan;
+import com.mycompany.LoanDecision;
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+
+public class LoanApprovalTest {
+
+    public static void main(String[] args) {
+        // 1. Initialize KIE
+        KieServices ks = KieServices.Factory.get();
+        KieContainer kContainer = ks.newKieContainer(
+            ks.newReleaseId("com.mycompany", "loan-approval", "1.0.0-SNAPSHOT")
+        );
+        KieSession kSession = kContainer.newKieSession();
+
+        // 2. Create Test Data
+        Applicant applicant = new Applicant();
+        applicant.setName("John Doe");
+        applicant.setCreditScore(750);
+        applicant.setIncome(60000);
+        applicant.setAge(35);
+        applicant.setEmploymentStatus("EMPLOYED");
+
+        Loan loan = new Loan();
+        loan.setAmount(150000);
+        loan.setLoanType("HOME_LOAN");
+
+        LoanDecision decision = new LoanDecision();
+
+        // 3. Insert Facts
+        kSession.insert(applicant);
+        kSession.insert(loan);
+        kSession.insert(decision);
+
+        // 4. Fire Rules
+        int fired = kSession.fireAllRules();
+        System.out.println("Number of rules fired: " + fired);
+
+        // 5. Print the Decision
+        System.out.println("Decision: " + decision.getDecision());
+
+        // Cleanup
+        kSession.dispose();
+    }
+}
+Expected Output
+Because creditScore=750 >= 700, income=60000 >= 50000, and amount=150000 <= 200000, it should match Row 1 (“APPROVED” rule), so you should see:
+
+yaml
+Copy
+Number of rules fired: 1
+Decision: APPROVED
+Final Recap
+Create a new KIE Workbench project (loan-approval).
+Add three Data Objects (Applicant, Loan, LoanDecision).
+(Optional) Add an Enumeration to restrict certain fields to dropdowns.
+Create a Guided Decision Table (LoanApprovalTable) with Conditions (creditScore, income, amount) and an Action (set the decision).
+Fill the Decision Table with rows (APPROVED, CONDITIONAL, DENIED).
+Build & Deploy to compile and store your rules.
+Test from Java code by inserting facts, firing rules, and checking the LoanDecision.
+By following this step-by-step guide in order, you’ll have a complete, working example of a loan-approval decision service in KIE Workbench.
