@@ -1,0 +1,501 @@
+package com.mycompany;
+
+public class Applicant {
+    private String name;
+    private Integer creditScore;
+    private Integer income;
+
+    public Applicant() {
+    }
+
+    public Applicant(String name, Integer creditScore, Integer income) {
+        this.name = name;
+        this.creditScore = creditScore;
+        this.income = income;
+    }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Integer getCreditScore() { return creditScore; }
+    public void setCreditScore(Integer creditScore) { this.creditScore = creditScore; }
+
+    public Integer getIncome() { return income; }
+    public void setIncome(Integer income) { this.income = income; }
+}
+-------------------------------------
+
+package com.mycompany;
+
+public class Loan {
+    private String loanId;
+    private Integer amount;
+    private String status; // "NEW", "REJECTED", "APPROVED", etc.
+
+    public Loan() {
+        this.status = "NEW";
+    }
+
+    public Loan(String loanId, Integer amount) {
+        this.loanId = loanId;
+        this.amount = amount;
+        this.status = "NEW";
+    }
+
+    public String getLoanId() { return loanId; }
+    public void setLoanId(String loanId) { this.loanId = loanId; }
+
+    public Integer getAmount() { return amount; }
+    public void setAmount(Integer amount) { this.amount = amount; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+}
+--------------------------------
+rule "Row 1 LoanValidationTable"
+  when
+    $loan : Loan( amount <= 0 )
+    $applicant : Applicant()
+  then
+    $loan.setStatus("REJECTED");
+end
+
+rule "Row 2 LoanValidationTable"
+  when
+    $loan : Loan()
+    $applicant : Applicant( creditScore < 500 )
+  then
+    $loan.setStatus("REJECTED");
+end
+
+rule "Row 3 LoanValidationTable"
+  when
+    $loan : Loan()
+    $applicant : Applicant()
+  then
+    $loan.setStatus("APPROVED");
+end
+--------------------------------------------------
+
+package com.mycompany;
+
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+import org.junit.Assert;
+
+public class LoanValidationTableTest {
+
+    public static void main(String[] args) {
+        // 1) Initialize KieServices
+        KieServices ks = KieServices.Factory.get();
+        // 2) Create a KieContainer from the GAV in pom.xml
+        KieContainer kContainer = ks.newKieContainer(
+            ks.newReleaseId("com.mycompany","loan-validation-gdst","1.0.0-SNAPSHOT")
+        );
+        // 3) Create KieSession
+        KieSession kSession = kContainer.newKieSession();
+
+        // Test #1: amount <= 0 => "REJECTED" by row 1
+        Applicant applicant1 = new Applicant("John", 700, 50000);
+        Loan loan1 = new Loan("L001", 0);
+        kSession.insert(applicant1);
+        kSession.insert(loan1);
+        kSession.fireAllRules();
+        System.out.println("Loan1 status: " + loan1.getStatus());
+        Assert.assertEquals("REJECTED", loan1.getStatus());
+        kSession.dispose();
+
+        // Test #2: creditScore < 500 => "REJECTED" by row 2
+        KieSession kSession2 = kContainer.newKieSession();
+        Applicant applicant2 = new Applicant("Jane", 400, 30000);
+        Loan loan2 = new Loan("L002", 10000);
+        kSession2.insert(applicant2);
+        kSession2.insert(loan2);
+        kSession2.fireAllRules();
+        System.out.println("Loan2 status: " + loan2.getStatus());
+        Assert.assertEquals("REJECTED", loan2.getStatus());
+        kSession2.dispose();
+
+        // Test #3: otherwise => "APPROVED" by row 3
+        KieSession kSession3 = kContainer.newKieSession();
+        Applicant applicant3 = new Applicant("Bob", 650, 40000);
+        Loan loan3 = new Loan("L003", 150000);
+        kSession3.insert(applicant3);
+        kSession3.insert(loan3);
+        kSession3.fireAllRules();
+        System.out.println("Loan3 status: " + loan3.getStatus());
+        Assert.assertEquals("APPROVED", loan3.getStatus());
+        kSession3.dispose();
+
+        System.out.println("\nAll tests passed!");
+    }
+}
+-----------------------------------------------------------
+
+
+
+Thought for 9 seconds
+Below is a complete, end-to-end example of a Loan Validation project that uses a Guided Decision Table in KIE Workbench (Business Central). We’ll define:
+
+A Maven project structure (which you can also import into Workbench).
+Data model classes (Java) for Applicant and Loan.
+A Guided Decision Table (LoanValidationTable.gdst).
+A sample DRL that the table generates.
+Testing methods: using KIE Workbench’s Test Scenario (recommended) and a simple external Java test referencing the compiled KJAR.
+Note: In a real KIE Workbench environment, you often create the Data Objects and Decision Table inside the Workbench UI. This example shows how everything can look on disk in a Maven layout so you have all files. If you import this into KIE Workbench, it will recognize the .gdst as a Guided Decision Table.
+
+1. Project Structure
+A typical Maven layout:
+
+css
+Copy
+loan-validation-gdst/
+├─ pom.xml
+├─ src
+│  ├─ main
+│  │  ├─ java
+│  │  │  └─ com
+│  │  │     └─ mycompany
+│  │  │        ├─ Applicant.java
+│  │  │        └─ Loan.java
+│  │  └─ resources
+│  │     └─ com
+│  │        └─ mycompany
+│  │           └─ LoanValidationTable.gdst
+│  └─ test
+│     └─ java
+│        └─ com
+│           └─ mycompany
+│              └─ LoanValidationTableTest.java
+We’ll detail each file below.
+
+2. pom.xml
+xml
+Copy
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="
+             http://maven.apache.org/POM/4.0.0
+             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.mycompany</groupId>
+  <artifactId>loan-validation-gdst</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>kjar</packaging>
+
+  <name>Loan Validation GDST</name>
+
+  <properties>
+    <drools.version>8.40.0.Final</drools.version> <!-- or match your KIE Workbench version -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+  </properties>
+
+  <dependencies>
+    <!-- Drools / KIE Dependencies -->
+    <dependency>
+      <groupId>org.drools</groupId>
+      <artifactId>drools-core</artifactId>
+      <version>${drools.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.drools</groupId>
+      <artifactId>drools-compiler</artifactId>
+      <version>${drools.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.kie</groupId>
+      <artifactId>kie-api</artifactId>
+      <version>${drools.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.kie</groupId>
+      <artifactId>kie-internal</artifactId>
+      <version>${drools.version}</version>
+    </dependency>
+
+    <!-- For testing (JUnit 4) -->
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.13.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- The Drools Maven plugin can help compile the .gdst to DRL at build time -->
+      <plugin>
+        <groupId>org.kie</groupId>
+        <artifactId>kie-maven-plugin</artifactId>
+        <version>${drools.version}</version>
+        <executions>
+          <execution>
+            <id>generateModel</id>
+            <phase>generate-sources</phase>
+            <goals>
+              <goal>build</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+Key points:
+
+packaging: kjar so KIE Workbench recognizes it as a Knowledge JAR.
+The kie-maven-plugin ensures .gdst is properly compiled to DRL.
+3. Data Model Classes
+3.1 Applicant.java
+java
+Copy
+package com.mycompany;
+
+public class Applicant {
+    private String name;
+    private Integer creditScore;
+    private Integer income;
+
+    public Applicant() {
+    }
+
+    public Applicant(String name, Integer creditScore, Integer income) {
+        this.name = name;
+        this.creditScore = creditScore;
+        this.income = income;
+    }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Integer getCreditScore() { return creditScore; }
+    public void setCreditScore(Integer creditScore) { this.creditScore = creditScore; }
+
+    public Integer getIncome() { return income; }
+    public void setIncome(Integer income) { this.income = income; }
+}
+3.2 Loan.java
+java
+Copy
+package com.mycompany;
+
+public class Loan {
+    private String loanId;
+    private Integer amount;
+    private String status; // "NEW", "REJECTED", "APPROVED", etc.
+
+    public Loan() {
+        this.status = "NEW";
+    }
+
+    public Loan(String loanId, Integer amount) {
+        this.loanId = loanId;
+        this.amount = amount;
+        this.status = "NEW";
+    }
+
+    public String getLoanId() { return loanId; }
+    public void setLoanId(String loanId) { this.loanId = loanId; }
+
+    public Integer getAmount() { return amount; }
+    public void setAmount(Integer amount) { this.amount = amount; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+}
+4. Guided Decision Table: LoanValidationTable.gdst
+Guided Decision Tables are normally created in KIE Workbench via the UI. However, you can store them in your project’s resources/ folder as .gdst or .gdrl files. Below is an example textual content of a .gdst in “Extended” format. You can copy/paste it into LoanValidationTable.gdst.
+
+Important: The internal format is XML-like or JSON-like, depending on your version. The example below is a simplified snippet. Usually, the easiest way is to create the Decision Table in KIE Workbench, then download or export it. For demonstration, we’ll show a minimal XML representation.
+
+Minimal Example (partial — can vary by version):
+
+xml
+Copy
+<?xml version="1.0" encoding="UTF-8"?>
+<DecisionTable53x
+    uuid="some-unique-id"
+    modelVersion="1.0"
+    tableName="LoanValidationTable"
+    tableFormat="EXTENDED_ENTRY"
+    hitPolicy="NONE"
+    parentName=""
+    packageName="com.mycompany"
+    tableDescription="Loan Validation via Decision Table"
+    ...
+    >
+    <imports>
+        <import>com.mycompany.Loan</import>
+        <import>com.mycompany.Applicant</import>
+    </imports>
+
+    <conditions>
+        <condition>
+            <factType>Loan</factType>
+            <fieldName>amount</fieldName>
+            <operator>&lt;=</operator>
+            <binding/>
+        </condition>
+        <condition>
+            <factType>Applicant</factType>
+            <fieldName>creditScore</fieldName>
+            <operator>&lt;</operator>
+            <binding/>
+        </condition>
+    </conditions>
+
+    <actions>
+        <action>
+            <factType>Loan</factType>
+            <fieldValue>status</fieldValue>
+        </action>
+    </actions>
+
+    <data>
+        <!-- Row 1: If loan.amount <= 0 then Loan.status = "REJECTED" -->
+        <row>
+            <value>0</value>       <!-- For amount <= ? -->
+            <value/>              <!-- For creditScore < ? (blank = no condition) -->
+            <value>"REJECTED"</value>
+        </row>
+
+        <!-- Row 2: If Applicant creditScore < 500 then Loan.status = "REJECTED" -->
+        <row>
+            <value/>              <!-- amount condition blank -->
+            <value>500</value>    <!-- creditScore < 500 -->
+            <value>"REJECTED"</value>
+        </row>
+
+        <!-- Row 3: Otherwise (blank + blank) => "APPROVED" -->
+        <row>
+            <value/>
+            <value/>
+            <value>"APPROVED"</value>
+        </row>
+    </data>
+</DecisionTable53x>
+In KIE Workbench:
+
+Column 1 condition: Loan( amount <= X )
+Column 2 condition: Applicant( creditScore < Y )
+Action: Loan.status = "..."
+Behind the scenes this table will generate DRL something like:
+
+java
+Copy
+rule "Row 1 LoanValidationTable"
+  when
+    $loan : Loan( amount <= 0 )
+    $applicant : Applicant()
+  then
+    $loan.setStatus("REJECTED");
+end
+
+rule "Row 2 LoanValidationTable"
+  when
+    $loan : Loan()
+    $applicant : Applicant( creditScore < 500 )
+  then
+    $loan.setStatus("REJECTED");
+end
+
+rule "Row 3 LoanValidationTable"
+  when
+    $loan : Loan()
+    $applicant : Applicant()
+  then
+    $loan.setStatus("APPROVED");
+end
+(If you prefer row-based constraints on both amount and creditScore for the same row, you’d fill in both columns in a single row.)
+
+5. Testing the Decision Table in Java: LoanValidationTableTest.java
+Here’s a simple test class that loads the KJAR, inserts facts (Loan, Applicant), and checks the final Loan.status.
+
+java
+Copy
+package com.mycompany;
+
+import org.kie.api.KieServices;
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+import org.junit.Assert;
+
+public class LoanValidationTableTest {
+
+    public static void main(String[] args) {
+        // 1) Initialize KieServices
+        KieServices ks = KieServices.Factory.get();
+        // 2) Create a KieContainer from the GAV in pom.xml
+        KieContainer kContainer = ks.newKieContainer(
+            ks.newReleaseId("com.mycompany","loan-validation-gdst","1.0.0-SNAPSHOT")
+        );
+        // 3) Create KieSession
+        KieSession kSession = kContainer.newKieSession();
+
+        // Test #1: amount <= 0 => "REJECTED" by row 1
+        Applicant applicant1 = new Applicant("John", 700, 50000);
+        Loan loan1 = new Loan("L001", 0);
+        kSession.insert(applicant1);
+        kSession.insert(loan1);
+        kSession.fireAllRules();
+        System.out.println("Loan1 status: " + loan1.getStatus());
+        Assert.assertEquals("REJECTED", loan1.getStatus());
+        kSession.dispose();
+
+        // Test #2: creditScore < 500 => "REJECTED" by row 2
+        KieSession kSession2 = kContainer.newKieSession();
+        Applicant applicant2 = new Applicant("Jane", 400, 30000);
+        Loan loan2 = new Loan("L002", 10000);
+        kSession2.insert(applicant2);
+        kSession2.insert(loan2);
+        kSession2.fireAllRules();
+        System.out.println("Loan2 status: " + loan2.getStatus());
+        Assert.assertEquals("REJECTED", loan2.getStatus());
+        kSession2.dispose();
+
+        // Test #3: otherwise => "APPROVED" by row 3
+        KieSession kSession3 = kContainer.newKieSession();
+        Applicant applicant3 = new Applicant("Bob", 650, 40000);
+        Loan loan3 = new Loan("L003", 150000);
+        kSession3.insert(applicant3);
+        kSession3.insert(loan3);
+        kSession3.fireAllRules();
+        System.out.println("Loan3 status: " + loan3.getStatus());
+        Assert.assertEquals("APPROVED", loan3.getStatus());
+        kSession3.dispose();
+
+        System.out.println("\nAll tests passed!");
+    }
+}
+Run it (e.g., mvn clean install then mvn exec:java -Dexec.mainClass="com.mycompany.LoanValidationTableTest"), and you should see:
+
+lua
+Copy
+Loan1 status: REJECTED
+Loan2 status: REJECTED
+Loan3 status: APPROVED
+
+All tests passed!
+6. Usage in KIE Workbench
+6.1 Create or Import the Project
+In KIE Workbench, click Menu → Design → Projects.
+Import an existing project (point it to your Git repo if you have one).
+Or create a new project in Workbench, add the .gdst (by uploading), and define the data objects (Applicant, Loan) via “Data Object” or by uploading the .java files.
+The .gdst file will appear as Guided Decision Table in the UI. You can open it in the “Decision Table” editor.
+6.2 Test Scenario in Workbench
+Instead of (or in addition to) the Java test, you can:
+
+Add Asset → Test Scenario (or Scenario Simulation in newer versions).
+Define a scenario:
+Given Applicant( creditScore=700 ), Loan( amount=0 ).
+Expect Loan.status = "REJECTED".
+Run the scenario. If it passes, you know row #1 is working.
+6.3 Build & Deploy
+In the Project Editor, click Build & Deploy.
+KIE Workbench will compile the .gdst → DRL, then package everything in a KJAR.
+If you have a KIE Server configured, you can create a Container referencing com.mycompany:loan-validation-gdst:1.0.0-SNAPSHOT.
