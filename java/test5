@@ -1,0 +1,24 @@
+from pyspark.sql import SparkSession
+
+spark = (
+    SparkSession.builder
+    .appName("PySparkS3AccessPointExample")
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+            "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
+    # (Optional) If needed to override endpoint
+    # .config("spark.hadoop.fs.s3a.endpoint", "s3.us-east-1.amazonaws.com")
+    # .config("spark.hadoop.fs.s3a.path.style.access", "false")
+    .getOrCreate()
+)
+
+# Create a sample DataFrame
+data = [("Alice", 34), ("Bob", 36), ("Cathy", 23)]
+df = spark.createDataFrame(data, ["name", "age"])
+
+# The Access Point ARN (replace <region>, <account-id>, <access-point-name>)
+output_arn = "s3a://arn:aws:s3:us-east-1:123456789012:accesspoint/my-accesspoint-name/demo-data"
+
+# Write the data to Parquet via the S3 Access Point
+df.write.mode("overwrite").parquet(output_arn)
+
+spark.stop()
