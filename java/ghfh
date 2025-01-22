@@ -41,14 +41,12 @@ case class Loan(var loanId: String, var amount: Int) {
   def setStatus(s: String): Unit = { status = s }
 }
 ------------------------------------
-
 package com.myorg
 
 import org.apache.spark.sql.SparkSession
 import org.kie.api.KieServices
-import org.kie.api.builder.{KieFileSystem, Results}
+import org.kie.api.builder.{KieFileSystem, Results, Message}
 import org.kie.internal.io.ResourceFactory
-import scala.collection.JavaConverters._
 
 object DroolsSparkExample {
   def main(args: Array[String]): Unit = {
@@ -68,10 +66,14 @@ object DroolsSparkExample {
     kfs.write(drlResource)
 
     val kb = ks.newKieBuilder(kfs).buildAll()
-    val results: Results = kb.getResults()
-    if (results.hasMessages(org.kie.api.builder.Message.Level.ERROR)) {
-      println("!!! Drools Error !!! " + results.getMessages)
-      throw new RuntimeException("Failed to build KieBase from DRL")
+    val buildResults: Results = kb.getResults
+
+    // If older Drools version lacks hasMessages(...), check the returned list:
+    val errorMessages = buildResults.getMessages(Message.Level.ERROR)
+    if (!errorMessages.isEmpty) {
+      println("!!! Drools Build Errors !!!")
+      errorMessages.forEach(msg => println(s"Error: ${msg.getText}"))
+      throw new RuntimeException("Failed to build KieBase from DRL due to errors.")
     }
 
     val kContainer = ks.newKieContainer(ks.getRepository.getDefaultReleaseId)
@@ -88,17 +90,13 @@ object DroolsSparkExample {
       Loan("L004", 500)
     ))
 
-    // 5) Apply Drools rules
-    // We'll map each partition, building a new KieSession per partition
+    // 5) Apply Drools rules using mapPartitions
     val resultRDD = loansRDD.mapPartitions { partitionIter =>
-      // For each partition, create a KieSession
       val localKieBase = broadcastKBase.value
       val kSession = localKieBase.newKieSession()
 
-      // apply the rules to each Loan
       val updatedLoans = partitionIter.map { loan =>
         kSession.insert(loan)
-        // We can fireAllRules after each insert or after collecting them all
         kSession.fireAllRules()
         loan
       }.toList
@@ -108,11 +106,12 @@ object DroolsSparkExample {
     }
 
     // Collect or show the results
-    val results = resultRDD.collect()
-    results.foreach { l =>
+    val finalLoans = resultRDD.collect()
+    finalLoans.foreach { l =>
       println(s"LoanId=${l.loanId}, Amount=${l.amount}, Status=${l.status}")
     }
 
     spark.stop()
   }
 }
+
