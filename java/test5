@@ -22,3 +22,9 @@ output_arn = "s3a://arn:aws:s3:us-east-1:123456789012:accesspoint/my-accesspoint
 df.write.mode("overwrite").parquet(output_arn)
 
 spark.stop()
+
+
+s3a://<access-point-name>-<account-id>.s3-accesspoint.<region>.amazonaws.com/some/folder/
+s3a://myaccesspoint-123456789012.s3-accesspoint.us-east-1.amazonaws.com/data/
+s3a://<access-point-name>-<account-id>.s3-accesspoint.<region>.amazonaws.com/<optional_subfolder>/
+
