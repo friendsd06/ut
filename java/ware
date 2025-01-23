@@ -1,0 +1,85 @@
+class WarehouseError(Exception):
+    pass
+
+class WarehouseReader:
+    """Manages Databricks JDBC connections and query execution"""
+
+    def __init__(
+        self,
+        config: Dict[str, str],
+        token_service: TokenFetcherService
+    ):
+        """
+        Initialize warehouse reader
+
+        Args:
+            config: Connection configuration dictionary
+            token_service: Service for token management
+        """
+        self.config = config
+        self.token_service = token_service
+        self.jdbc_url = self._build_jdbc_url()
+        logger.info("[WAREHOUSE] Initialized warehouse reader")
+
+    def _build_jdbc_url(self) -> str:
+        """
+        Builds JDBC URL with configuration parameters
+        Returns formatted JDBC URL string
+        """
+        try:
+            base = f"jdbc:databricks://{self.config['hostname']}:{self.config['port']}"
+
+            # Add required parameters
+            params = []
+            for key, value in self.config.items():
+                if key not in ['hostname', 'port'] and value:
+                    params.append(f"{key}={value}")
+
+            return f"{base};{';'.join(params)}" if params else base
+
+        except Exception as e:
+            error_msg = f"[ERROR] Failed to build JDBC URL: {str(e)}"
+            logger.error(error_msg)
+            raise WarehouseError(error_msg)
+
+    def execute_query(
+        self,
+        spark: SparkSession,
+        query: str,
+        options: Optional[Dict[str, Any]] = None
+    ) -> DataFrame:
+        """
+        Executes query against Databricks warehouse
+
+        Args:
+            spark: Active SparkSession
+            query: SQL query to execute
+            options: Additional reader options
+
+        Returns:
+            Spark DataFrame with query results
+        """
+        try:
+            logger.info("[WAREHOUSE] Getting authentication token")
+            token = self.token_service.get_token()
+
+            logger.info("[WAREHOUSE] Executing query")
+            reader = (spark.read
+                .format("jdbc")
+                .option("url", self.jdbc_url)
+                .option("AuthMech", "3")
+                .option("AuthAccessToken", token)
+                .option("driver", "com.databricks.client.jdbc.Driver"))
+
+            if options:
+                for key, value in options.items():
+                    reader = reader.option(key, value)
+
+            return (reader
+                .option("query", query)
+                .load())
+
+        except Exception as e:
+            error_msg = f"[ERROR] Query execution failed: {str(e)}"
+            logger.error(error_msg)
+            raise WarehouseError(error_msg)
