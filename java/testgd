@@ -1,0 +1,42 @@
+def main():
+    spark = None
+    try:
+        logger.info("[START] Initializing ETL process")
+
+        logger.info("[SPARK] Creating Spark session")
+        spark = (SparkSession.builder
+            .appName("ReferenceDataLoader")
+            .config("spark.driver.extraClassPath", "/opt/spark/jars/databricks-jdbc-2.6.29.jar")
+            .config("spark.executor.extraClassPath", "/opt/spark/jars/databricks-jdbc-2.6.29.jar")
+            .getOrCreate())
+        logger.info("[SPARK] Spark session created successfully")
+
+        env = "dev"
+        logger.info(f"[CONFIG] Loading configuration files for environment: {env}")
+        loader = ReferenceDataLoader(
+            spark=spark,
+            warehouse_config="/path/to/warehouse_config.yaml",
+            etl_config="/path/to/etl_config.yaml",
+            environment=env
+        )
+        logger.info("[CONFIG] Configuration loaded successfully")
+
+        tables = ["rdr_cis_index_xref"]
+        logger.info(f"[PROCESS] Starting data load for tables: {', '.join(tables)}")
+        loader.load_tables(table_names=tables)
+
+        logger.info("[SUCCESS] ETL process completed successfully")
+
+    except FileNotFoundError as e:
+        logger.error(f"[ERROR] Configuration file not found: {str(e)}")
+        raise SystemExit(1)
+    except Exception as e:
+        logger.error(f"[ERROR] ETL process failed: {str(e)}")
+        raise SystemExit(1)
+    finally:
+        if spark:
+            logger.info("[CLEANUP] Stopping Spark session")
+            spark.stop()
+
+if __name__ == "__main__":
+    main()
