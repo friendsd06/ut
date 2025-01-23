@@ -1,0 +1,36 @@
+class S3Error(Exception):
+    pass
+
+class S3Writer:
+    def __init__(self, base_path: str):
+        self.base_path = base_path
+        logger.info(f"[S3] Initialized writer with base path: {base_path}")
+
+    def _get_full_path(self, relative_path: str) -> str:
+        return str(Path(self.base_path.rstrip("/")) / relative_path.lstrip("/"))
+
+    def write_dataframe(
+        self,
+        df: DataFrame,
+        relative_path: str,
+        format: str = "parquet",
+        mode: str = "overwrite",
+        options: Optional[Dict[str, Any]] = None
+    ) -> None:
+        try:
+            full_path = self._get_full_path(relative_path)
+            logger.info(f"[S3] Writing {format} data to: {full_path}")
+
+            writer = df.write.format(format).mode(mode)
+
+            if options:
+                writer = writer.options(**options)
+                logger.info(f"[S3] Using write options: {options}")
+
+            writer.save(full_path)
+            logger.info(f"[S3] Successfully wrote data to {full_path}")
+
+        except Exception as e:
+            error_msg = f"[ERROR] Failed to write to S3: {str(e)}"
+            logger.error(error_msg)
+            raise S3Error(error_msg)
