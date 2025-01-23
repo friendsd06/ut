@@ -3,11 +3,18 @@ class S3Error(Exception):
 
 class S3Writer:
     def __init__(self, base_path: str):
+        if not base_path.startswith('s3a://'):
+            raise S3Error("Base path must start with s3a://")
         self.base_path = base_path
-        logger.info(f"[S3] Initialized writer with base path: {base_path}")
+        logger.info(f"[S3] Initialized with base path: {base_path}")
 
     def _get_full_path(self, relative_path: str) -> str:
-        return str(Path(self.base_path.rstrip("/")) / relative_path.lstrip("/"))
+        try:
+            base_clean = self.base_path.rstrip('/')
+            rel_clean = relative_path.strip('/')
+            return f"{base_clean}/{rel_clean}"
+        except Exception as e:
+            raise S3Error(f"Failed to build S3 path: {str(e)}")
 
     def write_dataframe(
         self,
@@ -22,15 +29,10 @@ class S3Writer:
             logger.info(f"[S3] Writing {format} data to: {full_path}")
 
             writer = df.write.format(format).mode(mode)
-
             if options:
                 writer = writer.options(**options)
-                logger.info(f"[S3] Using write options: {options}")
 
             writer.save(full_path)
-            logger.info(f"[S3] Successfully wrote data to {full_path}")
-
+            logger.info(f"[S3] Write completed: {full_path}")
         except Exception as e:
-            error_msg = f"[ERROR] Failed to write to S3: {str(e)}"
-            logger.error(error_msg)
-            raise S3Error(error_msg)
+            raise S3Error(f"Write failed: {str(e)}")
