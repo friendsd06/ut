@@ -1,0 +1,37 @@
+Here's a breakdown of each component's core responsibilities:
+
+main.py
+Entry point for ETL process
+Creates SparkSession
+Initializes ReferenceDataLoader
+Handles high-level error handling and cleanup
+ReferenceDataLoader
+Orchestrates entire ETL process
+Manages component lifecycle
+Coordinates data flow from source to destination
+Handles table-level operations
+ConfigurationManager
+Reads and validates configuration files
+Manages environment-specific settings
+Creates connection objects
+Validates table configurations
+WarehouseReader
+Manages Databricks JDBC connections
+Builds JDBC URLs
+Executes queries with authentication
+Returns query results as DataFrames
+S3Writer
+Handles S3 path construction
+Manages DataFrame writing operations
+Handles write modes and options
+Ensures data consistency
+TokenService
+Manages authentication tokens
+Handles token refresh
+Provides secure access to Databricks
+Configuration Files
+warehouse_config.yaml: Databricks connection settings
+etl_config.yaml: Table definitions and S3 paths
+This architecture ensures separation of concerns and maintainable code structure.
+
+ Copy
