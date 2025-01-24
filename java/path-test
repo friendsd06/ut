@@ -21,5 +21,10 @@ def create_spark_session():
 
         .config("spark.driver.extraJavaOptions", "-Dhadoop.home.dir=/path/to/hadoop") \
                 .config("spark.executor.extraJavaOptions", "-Dhadoop.home.dir=/path/to/hadoop") \
+                   .config("spark.driver.extraJavaOptions", "-Dhadoop.home.dir=C:\\hadoop") \
+                        .config("spark.executor.extraJavaOptions", "-Dhadoop.home.dir=C:\\hadoop") \
+                        .config("spark.hadoop.hadoop.home.dir", "C:\\hadoop") \
+                        .config("spark.driver.extraJavaOptions", "-Dhadoop.home.dir=/path/to/hadoop") \
+                        .config("spark.executor.extraJavaOptions", "-Dhadoop.home.dir=/path/to/hadoop") \
 
     return spark
