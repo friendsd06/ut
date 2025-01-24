@@ -1,0 +1,54 @@
+import pytest
+from unittest.mock import Mock, patch
+from pyspark.sql import DataFrame
+from s3_writer import S3Writer, S3Error
+
+@pytest.fixture
+def mock_dataframe():
+   return Mock(spec=DataFrame)
+
+class TestS3Writer:
+   def test_init_valid_path(self):
+       writer = S3Writer("s3a://bucket/path")
+       assert writer.base_path == "s3a://bucket/path"
+
+   def test_init_invalid_path(self):
+       with pytest.raises(S3Error, match="Base path must start with s3a://"):
+           S3Writer("invalid://path")
+
+   @pytest.mark.parametrize("base,relative,expected", [
+       ("s3a://bucket/", "data/", "s3a://bucket/data"),
+       ("s3a://bucket", "/data/", "s3a://bucket/data"),
+       ("s3a://bucket///", "//data///", "s3a://bucket/data"),
+   ])
+   def test_get_full_path(self, base, relative, expected):
+       writer = S3Writer(base)
+       assert writer._get_full_path(relative) == expected
+
+   def test_write_dataframe_basic(self, mock_dataframe):
+       writer = S3Writer("s3a://bucket")
+       mock_writer = Mock()
+       mock_dataframe.write.format.return_value.mode.return_value = mock_writer
+
+       writer.write_dataframe(mock_dataframe, "data", "parquet", "overwrite")
+
+       mock_dataframe.write.format.assert_called_with("parquet")
+       mock_writer.save.assert_called_with("s3a://bucket/data")
+
+   def test_write_dataframe_with_options(self, mock_dataframe):
+       writer = S3Writer("s3a://bucket")
+       mock_writer = Mock()
+       mock_dataframe.write.format.return_value.mode.return_value = mock_writer
+       options = {"compression": "snappy"}
+
+       writer.write_dataframe(mock_dataframe, "data", options=options)
+
+       mock_writer.options.assert_called_with(**options)
+       mock_writer.save.assert_called_with("s3a://bucket/data")
+
+   def test_write_dataframe_error(self, mock_dataframe):
+       writer = S3Writer("s3a://bucket")
+       mock_dataframe.write.format.side_effect = Exception("Write failed")
+
+       with pytest.raises(S3Error, match="Write failed"):
+           writer.write_dataframe(mock_dataframe, "data")

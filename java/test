@@ -1,0 +1,105 @@
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from pyspark.sql import SparkSession, DataFrame
+from datetime import datetime
+from reference_data_loader import ReferenceDataLoader, ReferenceLoadError
+
+@pytest.fixture
+def mock_spark():
+   return Mock(spec=SparkSession)
+
+@pytest.fixture
+def mock_df():
+   df = Mock(spec=DataFrame)
+   df.count.return_value = 100
+   return df
+
+@pytest.fixture
+def mock_components():
+   return {
+       'config_manager': Mock(),
+       'token_service': Mock(),
+       'warehouse_reader': Mock(),
+       's3_writer': Mock()
+   }
+
+class TestReferenceDataLoader:
+   @pytest.fixture
+   def loader(self, mock_spark, mock_components):
+       with patch('reference_data_loader.create_configuration_manager') as mock_create_config:
+           mock_create_config.return_value = mock_components['config_manager']
+           with patch('reference_data_loader.TokenFetcherService') as mock_token:
+               mock_token.return_value = mock_components['token_service']
+               with patch('reference_data_loader.WarehouseReader') as mock_warehouse:
+                   mock_warehouse.return_value = mock_components['warehouse_reader']
+                   with patch('reference_data_loader.S3Writer') as mock_s3:
+                       mock_s3.return_value = mock_components['s3_writer']
+
+                       loader = ReferenceDataLoader(
+                           spark=mock_spark,
+                           warehouse_config="warehouse.yaml",
+                           etl_config="etl.yaml",
+                           environment="dev"
+                       )
+                       return loader
+
+   def test_init_success(self, loader, mock_components):
+       assert loader.spark is not None
+       assert loader.config_manager == mock_components['config_manager']
+       assert loader.warehouse_reader == mock_components['warehouse_reader']
+       assert loader.s3_writer == mock_components['s3_writer']
+
+   def test_init_failure(self, mock_spark):
+       with patch('reference_data_loader.create_configuration_manager', side_effect=Exception("Config error")):
+           with pytest.raises(ReferenceLoadError, match="Config error"):
+               ReferenceDataLoader(mock_spark, "warehouse.yaml", "etl.yaml", "dev")
+
+   def test_load_table_success(self, loader, mock_components, mock_df):
+       mock_components['warehouse_reader'].execute_query.return_value = mock_df
+       mock_components['config_manager'].get_table_config.return_value = MagicMock(
+           file_format="parquet",
+           write_mode="overwrite",
+           reader_options={},
+           writer_options={}
+       )
+
+       loader.load_table("test_table")
+
+       mock_components['warehouse_reader'].execute_query.assert_called_once()
+       mock_components['s3_writer'].write_dataframe.assert_called_once()
+
+   def test_load_table_no_data(self, loader, mock_components, mock_df):
+       mock_df.count.return_value = 0
+       mock_components['warehouse_reader'].execute_query.return_value = mock_df
+
+       loader.load_table("test_table")
+
+       mock_components['warehouse_reader'].execute_query.assert_called_once()
+       mock_components['s3_writer'].write_dataframe.assert_not_called()
+
+   def test_load_table_failure(self, loader, mock_components):
+       mock_components['warehouse_reader'].execute_query.side_effect = Exception("Query failed")
+
+       with pytest.raises(ReferenceLoadError, match="Query failed"):
+           loader.load_table("test_table")
+
+   def test_load_tables_success(self, loader, mock_components, mock_df):
+       mock_components['warehouse_reader'].execute_query.return_value = mock_df
+
+       loader.load_tables(["table1", "table2"])
+
+       assert mock_components['warehouse_reader'].execute_query.call_count == 2
+       assert mock_components['s3_writer'].write_dataframe.call_count == 2
+
+   def test_load_tables_partial_failure(self, loader, mock_components, mock_df):
+       mock_components['warehouse_reader'].execute_query.side_effect = [
+           mock_df,
+           Exception("Failed")
+       ]
+
+       with pytest.raises(ReferenceLoadError) as exc:
+           loader.load_tables(["table1", "table2"])
+
+       assert "table2: Failed" in str(exc.value)
+       assert mock_components['warehouse_reader'].execute_query.call_count == 2
+       assert mock_components['s3_writer'].write_dataframe.call_count == 1
