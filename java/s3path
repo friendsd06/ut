@@ -1,3 +1,0 @@
-    def get_destination_path(self, relative_path: str) -> str:
-        """Build full S3 path"""
-        return f"{self.base_path.rstrip('/')}/{relative_path.strip('/')}"
