@@ -19,4 +19,7 @@ def create_spark_session():
                 "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
         .getOrCreate()
 
+        .config("spark.driver.extraJavaOptions", "-Dhadoop.home.dir=/path/to/hadoop") \
+                .config("spark.executor.extraJavaOptions", "-Dhadoop.home.dir=/path/to/hadoop") \
+
     return spark
