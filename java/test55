@@ -1,0 +1,174 @@
+What the validatePositionCode method does, one tiny step at a time
+Below the picture is written out in plain English—no framework jargon, just what happens and why.
+
+1. Method header
+java
+Copy
+Edit
+public boolean validatePositionCode(NewRecordRequest request,
+                                    String validationColumn,
+                                    String validationTable)
+It receives
+
+the incoming request (a list of new-record rows),
+
+the column whose value has to be checked, and
+
+the table name that those rows belong to.
+
+It returns true when every value is valid, false (or an exception) otherwise.
+
+2. Start a tracing span
+java
+Copy
+Edit
+otelService.createOtelPayload(..., VALIDATION, STARTED);
+Opens a “validation started” trace so Ops can later see how long the check took.
+
+3. Quick objects and an early success flag
+java
+Copy
+Edit
+boolean validationStatus = true;
+QueryUtil util = new QueryUtil();
+validationStatus is the answer we’ll eventually return.
+
+QueryUtil is a helper with tiny validation/query methods.
+
+4. Early-exit for “AMU” requests
+java
+Copy
+Edit
+if (request.getRequestType().equals("AMU")) {
+    return true;
+}
+Certain request types (labelled AMU) never need this check, so the method leaves immediately.
+
+5. Decide if we are dealing with one column or a multi-column key
+java
+Copy
+Edit
+if (validationColumn.contains("|")) {              // MULTI-column branch
+    ...
+} else {                                           // SINGLE-column branch
+    ...
+}
+A pipe symbol (|) inside validationColumn means “this value is actually made from two or more real columns joined together.”
+
+A. MULTI-column branch
+a-1 Look at every record that belongs to the right table
+java
+Copy
+Edit
+request.getData()
+       .stream()
+       .filter(record -> validationTable.equalsIgnoreCase(record.getEntity()))
+       .collect(Collectors.toList())   // ← pick only rows of that table
+       .get(0)
+       .getAttributeData()             // ← list of column-name → value maps
+       .forEach(attr -> { ... });
+a-2 For each attribute map
+java
+Copy
+Edit
+if (util.multiColumnValuesValidation(attr, validationColumn)) {
+    attr.put("FRM_MULTI_COLUMN_KEY",
+             util.concatenateMulticolumnValues(attr, validationColumn));
+}
+Check that each part of the composite key is present and non-empty.
+
+Join the pieces together (e.g. "REGION|COUNTRY" → "NA-US") and store that joined value under a temporary key.
+
+a-3 Duplicate check
+java
+Copy
+Edit
+return validateMultipleColumnsForDuplicates(request,
+                                            validationTable,
+                                            validationColumn);
+Calls another helper that scans all joined keys and fails if the same key appears twice.
+
+The helper itself returns true or false, so the method ends here for the multi-column case.
+
+B. SINGLE-column branch
+b-1 Build a Set of valid codes from storage
+java
+Copy
+Edit
+List<String> loanPstnCds =
+      getLoanPstnCdFromRequest(request, validationTable, validationColumn);
+
+if (loanPstnCds.isEmpty()) {
+    return true;          // nothing to validate ► accept
+}
+If no valid codes are found, there is nothing to check—accept the request.
+
+b-2 Walk through every value in every record
+java
+Copy
+Edit
+Set<Boolean> validationSet = new HashSet<>();
+
+request.getData().forEach(rec -> {
+    rec.getAttributeData().forEach(attr -> {
+        if (loanPstnCds.contains(attr.get(validationColumn))) {
+            // Value is **invalid**
+            String msg = attr.get(validationColumn) +
+                         "|" + "LOAN_VALIDATION_ERROR";
+            attr.put(validationColumn, msg);  // overwrite with error text
+            validationSet.add(false);
+        } else {
+            validationSet.add(true);
+        }
+    });
+});
+If a value is in the list of invalid codes,
+prepend an error message and mark the record as failed.
+
+Store true/false for each check in validationSet.
+
+b-3 Decide final status
+java
+Copy
+Edit
+validationStatus = !validationSet.contains(false);
+If we ever added a false, the whole set is invalid.
+
+6. Error catch
+java
+Copy
+Edit
+catch (Exception ex) {
+    log.error("Exception ...", ex);
+    throw new RuntimeException(ex);
+}
+Any unexpected error is logged and re-thrown so the controller can send an HTTP 500.
+
+7. Close the tracing span
+java
+Copy
+Edit
+finally {
+    otelService.createOtelPayload(..., validationStatus ? SUCCESS : FAILED);
+}
+Marks the span as SUCCESS or FAILED—guaranteed to run even after exceptions.
+
+8. Return the answer
+java
+Copy
+Edit
+return validationStatus;
+true → everything passed
+
+false → at least one invalid value (or duplicate) was found.
+
+Quick mental picture
+pgsql
+Copy
+Edit
+AMU ?  ──► accept
+         │
+multi-col?──► validate each piece ► build key ► duplicate-check ► accept/deny
+         │
+single    ─► fetch valid list ► loop rows ► mark errors ► accept/deny
+That’s the entire flow—early shortcut, decide branch, check values, update status, finish tracing, return result.
