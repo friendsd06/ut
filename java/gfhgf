@@ -176,3 +176,100 @@ flowchart LR
     ValidatePieces -->|OK| Join[join values -> "FRM_MULTI_COLUMN_KEY"]
     Join --> DuplicateCheck[validateMultipleColumnsForDuplicates]
     DuplicateCheck --> Result((true/false))
+
+ =====================================
+ Understanding validateMultiColumn Method
+ Method Purpose
+ This method validates records that require checking for uniqueness across multiple columns. It:
+
+ Prepares the data by creating concatenated values from multiple columns
+ Calls another method to check for duplicates
+
+ Sample Input Data
+ Let's assume we have a NewRecordRequest with this structure:
+ json{
+   "data": [
+     {
+       "entity": "EMPLOYEES",
+       "attributeData": [
+         {
+           "EMPLOYEE_ID": "EMP001",
+           "FIRST_NAME": "John",
+           "LAST_NAME": "Doe",
+           "DEPARTMENT": "IT",
+           "OFFICE_LOCATION": "Seattle"
+         },
+         {
+           "EMPLOYEE_ID": "EMP002",
+           "FIRST_NAME": "Jane",
+           "LAST_NAME": "Smith",
+           "DEPARTMENT": "HR",
+           "OFFICE_LOCATION": "Seattle"
+         }
+       ]
+     },
+     {
+       "entity": "DEPARTMENTS",
+       "attributeData": [
+         {
+           "DEPT_ID": "IT001",
+           "DEPT_NAME": "Information Technology"
+         }
+       ]
+     }
+   ]
+ }
+ Method Execution Example
+ If we call:
+ javavalidateMultiColumn(request, "FIRST_NAME,LAST_NAME", "EMPLOYEES")
+ Step-by-Step Execution:
+
+ Filter by Entity:
+
+ Only the "EMPLOYEES" entity record is selected
+
+
+ FlatMap to Attributes:
+
+ Creates a stream of the two employee attribute maps
+
+
+ For Each Attribute:
+
+ Check if multi-column validation applies using queryUtil.multiColumnValuesValidation
+ If yes, concatenate the values specified in columnSpec ("FIRST_NAME,LAST_NAME")
+
+
+ Store Concatenated Values:
+
+ For Employee 1: Stores "John,Doe" with key FRM_MULTI_COLUMN_KEY
+ For Employee 2: Stores "Jane,Smith" with key FRM_MULTI_COLUMN_KEY
+
+
+ Check for Duplicates:
+
+ Call validateMultipleColumnsForDuplicates to see if any concatenated values appear multiple times
+ In our example, there are no duplicates, so the method would return true
+
+
+
+ Duplicate Example
+ If we had a third employee with the same name:
+ json{
+   "EMPLOYEE_ID": "EMP003",
+   "FIRST_NAME": "John",
+   "LAST_NAME": "Doe",
+   "DEPARTMENT": "Finance",
+   "OFFICE_LOCATION": "New York"
+ }
+ Then the method would:
+
+ Find a duplicate concatenated value "John,Doe"
+ Return false from validateMultipleColumnsForDuplicates
+
+ Notes
+
+ The method handles detecting duplicate combinations across multiple columns to enforce business rules that require uniqueness across column groupings.
+ The FRM_MULTI_COLUMN_KEY is a special key used to store the concatenated values temporarily for duplicate checking.
+ The actual duplicate checking logic happens in the validateMultipleColumnsForDuplicates method, which is called at the end.
+ This implementation supports dynamic column specifications through the columnSpec parameter, allowing validation against different column combinations.
