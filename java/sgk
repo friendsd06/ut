@@ -1,0 +1,1592 @@
+package com.example.s3upload.config;
+
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
+import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.services.s3.S3Configuration;
+import java.net.URI;
+import java.time.Duration;
+
+/**
+ * Configuration for S3 clients
+ * Creates both real AWS and LocalStack clients
+ */
+@Configuration
+public class S3ClientConfig {
+    private static final Logger log = LoggerFactory.getLogger(S3ClientConfig.class);
+
+    private SdkAsyncHttpClient httpClient;
+    private S3AsyncClient localstackS3Client;
+    private S3AsyncClient awsS3Client;
+
+    @Value("${app.localstack.url:http://localhost:4566}")
+    private String localstackUrl;
+
+    @Value("${app.aws.region:us-east-1}")
+    private String region;
+
+    @Value("${app.aws.connection.timeout:30}")
+    private int connectionTimeoutSeconds;
+
+    /**
+     * Create and configure HTTP client for S3
+     *
+     * @return Configured SDK Async HTTP Client
+     */
+    private SdkAsyncHttpClient createHttpClient() {
+        if (httpClient == null) {
+            httpClient = NettyNioAsyncHttpClient.builder()
+                    .connectionTimeout(Duration.ofSeconds(connectionTimeoutSeconds))
+                    .connectionAcquisitionTimeout(Duration.ofMinutes(1))
+                    .build();
+            log.info("Created S3 HTTP client with {}s connection timeout", connectionTimeoutSeconds);
+        }
+        return httpClient;
+    }
+
+    /**
+     * Create and configure S3 service configuration
+     *
+     * @return S3 configuration
+     */
+    private S3Configuration s3Config() {
+        return S3Configuration.builder()
+                .pathStyleAccessEnabled(true)  // For LocalStack & easier testing
+                .checksumValidationEnabled(true)  // Validate data integrity
+                .build();
+    }
+
+    /**
+     * S3AsyncClient for LocalStack (for testing)
+     *
+     * @return S3AsyncClient configured for LocalStack
+     */
+    @Bean("localstackS3")
+    public S3AsyncClient localstackClient() {
+        log.info("Creating LocalStack S3 client with endpoint: {}", localstackUrl);
+        localstackS3Client = S3AsyncClient.builder()
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create("test", "test")))
+                .endpointOverride(URI.create(localstackUrl))
+                .region(Region.of(region))
+                .httpClient(createHttpClient())
+                .serviceConfiguration(s3Config())
+                .build();
+        return localstackS3Client;
+    }
+
+    /**
+     * Primary S3AsyncClient for real AWS
+     * Uses default credentials chain
+     *
+     * @return S3AsyncClient configured for AWS
+     */
+    @Bean("awsS3")
+    @Primary
+    public S3AsyncClient awsClient() {
+        log.info("Creating AWS S3 client for region: {}", region);
+        awsS3Client = S3AsyncClient.builder()
+                .credentialsProvider(DefaultCredentialsProvider.create())
+                .region(Region.of(region))
+                .httpClient(createHttpClient())
+                .serviceConfiguration(s3Config())
+                .build();
+        return awsS3Client;
+    }
+
+    /**
+     * Clean up resources on shutdown
+     */
+    @PreDestroy
+    public void cleanUp() {
+        log.info("Shutting down S3 clients and resources");
+        try {
+            if (localstackS3Client != null) {
+                localstackS3Client.close();
+                log.debug("Closed LocalStack S3 client");
+            }
+
+            if (awsS3Client != null) {
+                awsS3Client.close();
+                log.debug("Closed AWS S3 client");
+            }
+
+            if (httpClient != null) {
+                httpClient.close();
+                log.debug("Closed HTTP client");
+            }
+        } catch (Exception e) {
+            log.warn("Error during S3 client cleanup", e);
+        }
+    }
+}
+---------------------------------------------------------------
+package com.example.s3upload.model;
+
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Data model representing an entity to be uploaded with its associated data
+ */
+public record EntityPayload(String entityName, List<String> data) {
+
+    /**
+     * Generate a unique transfer ID for this entity payload
+     *
+     * @return A unique ID combining entity name and a random suffix
+     */
+    public String generateTransferId() {
+        return entityName + "-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+}
+
+-------------------------
+package com.example.s3upload.model;
+
+/**
+ * Enum representing the different states of a file transfer
+ */
+public enum TransferState {
+    PENDING,
+    IN_PROGRESS,
+    MULTIPART_INITIATED,
+    UPLOADING_PARTS,
+    COMPLETING,
+    SUCCESS,
+    FAILED,
+    ABORTED
+}
+--------------
+package com.example.s3upload.model;
+
+import java.time.LocalDateTime;
+
+/**
+ * Record that holds the status information for a file transfer
+ */
+public record TransferStatus(
+        TransferState state,
+        String entityName,
+        String transferId,
+        String bucket,
+        String objectKey,
+        LocalDateTime lastUpdated,
+        String errorMessage) {
+
+    /**
+     * Factory method to create a pending status
+     */
+    public static TransferStatus pending(String entityName, String transferId, String bucket, String objectKey) {
+        return new TransferStatus(
+                TransferState.PENDING,
+                entityName,
+                transferId,
+                bucket,
+                objectKey,
+                LocalDateTime.now(),
+                null
+        );
+    }
+
+    /**
+     * Create a new TransferStatus with an updated state
+     */
+    public TransferStatus withState(TransferState newState) {
+        return new TransferStatus(
+                newState,
+                this.entityName,
+                this.transferId,
+                this.bucket,
+                this.objectKey,
+                LocalDateTime.now(),
+                null
+        );
+    }
+
+    /**
+     * Create a new TransferStatus with an error state and message
+     */
+    public TransferStatus withError(String errorMessage) {
+        return new TransferStatus(
+                TransferState.FAILED,
+                this.entityName,
+                this.transferId,
+                this.bucket,
+                this.objectKey,
+                LocalDateTime.now(),
+                errorMessage
+        );
+    }
+}
+-------------------------
+package com.example.s3upload.service;
+
+import com.example.s3upload.model.EntityPayload;
+import com.example.s3upload.model.TransferState;
+import com.example.s3upload.model.TransferStatus;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+import software.amazon.awssdk.core.async.AsyncRequestBody;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.services.s3.model.*;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
+
+/**
+ * Service responsible for uploading files to S3 using multipart upload
+ * Includes both simple and advanced parallel multipart uploads
+ */
+@Service
+public class FileUploadService {
+    private static final Logger log = LoggerFactory.getLogger(FileUploadService.class);
+
+    // --- Constants for S3 multipart upload ---
+
+    // S3 multipart upload minimum part size (5MB)
+    private static final long MIN_PART_SIZE = 5 * 1024 * 1024;
+    // Maximum number of parts in S3 multipart upload
+    private static final int MAX_PARTS = 10000;
+    // Number of retries for failed part uploads
+    private static final int MAX_RETRIES = 3;
+
+    // --- Configurable properties ---
+
+    @Value("${app.upload.directory:/tmp/s3uploads}")
+    private String uploadDirectoryPath;
+
+    @Value("${app.upload.max-threads:10}")
+    private int maxUploadThreads;
+
+    @Value("${app.upload.part-size-mb:5}")
+    private int partSizeMb;
+
+    @Value("${app.upload.timeout-minutes:30}")
+    private int uploadTimeoutMinutes;
+
+    // --- Service dependencies ---
+
+    private final S3AsyncClient s3Client;
+    private final TransferTrackingService transferTracker;
+    private ExecutorService uploadThreadPool;
+
+    // Map to track upload IDs for potential cleanup
+    private final Map<String, String> uploadIdsByTransferId = new ConcurrentHashMap<>();
+
+    /**
+     * Constructor with dependency injection
+     *
+     * @param s3Client Configured S3 client for AWS or LocalStack
+     * @param transferTracker Service to track transfer status
+     */
+    public FileUploadService(@Qualifier("localstackS3") S3AsyncClient s3Client,
+                             TransferTrackingService transferTracker) {
+        this.s3Client = s3Client;
+        this.transferTracker = transferTracker;
+
+        // Create thread pool for parallel uploads
+        this.uploadThreadPool = Executors.newFixedThreadPool(10);
+        log.info("Created upload thread pool with {} threads", maxUploadThreads);
+    }
+
+    /**
+     * Initialize service after construction
+     * Creates upload directory if it doesn't exist
+     */
+    @PostConstruct
+    public void initialize() {
+        try {
+            // Create upload directory if it doesn't exist
+            Path uploadDir = Paths.get(uploadDirectoryPath);
+            Files.createDirectories(uploadDir);
+            log.info("Upload directory ensured at: {}", uploadDirectoryPath);
+        } catch (IOException e) {
+            log.warn("Failed to create upload directory: {}. Will attempt to create when needed.",
+                    uploadDirectoryPath, e);
+        }
+    }
+
+    /**
+     * Process and upload all entity payloads asynchronously
+     *
+     * @param payloads List of entity payloads to upload
+     * @param bucketName Target S3 bucket name
+     * @return List of transfer IDs for tracking
+     */
+    public List<String> uploadEntities(List<EntityPayload> payloads, String bucketName) {
+        List<String> transferIds = new ArrayList<>();
+
+        // Input validation
+        if (bucketName == null || bucketName.isEmpty()) {
+            log.error("Bucket name cannot be null or empty");
+            throw new IllegalArgumentException("Bucket name cannot be null or empty");
+        }
+
+        if (payloads == null || payloads.isEmpty()) {
+            log.warn("No payloads to upload to bucket: {}", bucketName);
+            return transferIds;
+        }
+
+        log.info("Processing {} entity payloads for upload to bucket: {}", payloads.size(), bucketName);
+
+        // Start uploads with timeouts for each entity
+        for (EntityPayload payload : payloads) {
+            if (payload == null || !StringUtils.hasText(payload.entityName()) ||
+                    payload.data() == null || payload.data().isEmpty()) {
+                log.warn("Skipping invalid payload: {}", payload);
+                continue;
+            }
+
+            String transferId = payload.generateTransferId();
+            String objectKey = payload.entityName() + ".txt";
+
+            // Register and get transfer ID
+            transferTracker.registerTransfer(payload.entityName(), transferId, bucketName, objectKey);
+            transferIds.add(transferId);
+
+            // Execute upload with timeout handling
+            CompletableFuture.runAsync(() -> processEntityUpload(transferId, payload, bucketName), uploadThreadPool)
+                    .orTimeout(uploadTimeoutMinutes, TimeUnit.MINUTES)
+                    .exceptionally(ex -> {
+                        String errorMsg = "Upload timed out or failed after " + uploadTimeoutMinutes + " minutes";
+                        if (ex.getCause() != null) {
+                            errorMsg = ex.getCause().getMessage();
+                        }
+                        log.error("Entity [{}] upload failed: {}", payload.entityName(), errorMsg, ex);
+                        transferTracker.setTransferError(transferId, errorMsg);
+                        abortMultipartUploadIfNeeded(transferId, bucketName, objectKey);
+                        return null;
+                    });
+        }
+
+        return transferIds;
+    }
+
+    /**
+     * Process a single entity upload
+     * Writes data to a temporary file and then uploads it
+     *
+     * @param transferId Unique ID for this transfer
+     * @param payload Entity payload with data to upload
+     * @param bucketName Target S3 bucket
+     */
+    private void processEntityUpload(String transferId, EntityPayload payload, String bucketName) {
+        String entityName = payload.entityName();
+        String objectKey = entityName + ".txt";
+
+        log.info("Starting upload for entity [{}] with transfer ID [{}]", entityName, transferId);
+        transferTracker.updateEntityStatus(entityName, TransferState.IN_PROGRESS);
+
+        try {
+            // Ensure directory exists before writing
+            Path uploadDir = Paths.get(uploadDirectoryPath);
+            Files.createDirectories(uploadDir);
+
+            // Write data to local file
+            Path tempFile = writeEntityToFile(transferId, payload);
+            long fileSize = Files.size(tempFile);
+
+            // Choose upload method based on file size
+            if (fileSize < 10 * 1024 * 1024) { // Less than 10MB
+                // Use simple upload for small files
+                uploadSimpleFile(transferId, bucketName, objectKey, tempFile, fileSize);
+            } else {
+                // Use parallel multipart upload for larger files
+                uploadFileParallel(transferId, bucketName, objectKey, tempFile);
+            }
+
+            // Update final status
+            transferTracker.updateEntityStatus(entityName, TransferState.SUCCESS);
+
+            // Clean up temp file
+            try {
+                Files.deleteIfExists(tempFile);
+                log.debug("Deleted temporary file for entity [{}]: {}", entityName, tempFile);
+            } catch (IOException e) {
+                log.warn("Could not delete temporary file: {}", tempFile, e);
+            }
+
+        } catch (Exception ex) {
+            log.error("Failed to process entity [{}] upload: {}", entityName, ex.getMessage(), ex);
+            transferTracker.updateEntityStatus(entityName, TransferState.FAILED);
+            abortMultipartUploadIfNeeded(transferId, bucketName, objectKey);
+        }
+    }
+
+    /**
+     * Write entity data to a temporary file
+     *
+     * @param transferId Unique ID for this transfer
+     * @param payload Entity payload with data to write
+     * @return Path to the temporary file
+     * @throws IOException If file writing fails
+     */
+    private Path writeEntityToFile(String transferId, EntityPayload payload) throws IOException {
+        Path uploadDir = Paths.get(uploadDirectoryPath);
+        Path tempFile = uploadDir.resolve(transferId + ".tmp");
+
+        log.debug("Writing entity [{}] data to temporary file: {}", payload.entityName(), tempFile);
+
+        try {
+            Files.write(tempFile, payload.data(), StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+
+            log.debug("Successfully wrote entity [{}] data to file: {} ({} bytes)",
+                    payload.entityName(), tempFile, Files.size(tempFile));
+            return tempFile;
+
+        } catch (IOException e) {
+            log.error("Failed to write entity [{}] data to file: {}", payload.entityName(), tempFile, e);
+            throw e;
+        }
+    }
+
+    /**
+     * Simple upload for small files (not using multipart)
+     *
+     * @param transferId Unique ID for this transfer
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @param filePath Path to local file
+     * @param fileSize Size of the file
+     * @throws IOException If upload fails
+     */
+    private void uploadSimpleFile(String transferId, String bucketName, String objectKey, Path filePath, long fileSize) throws IOException {
+        log.info("Using simple upload for small file: {}", filePath);
+
+        try {
+            log.info("Uploading {} ({} bytes) to {}/{}",
+                    filePath, fileSize, bucketName, objectKey);
+
+            // Create the PutObject request
+            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .build();
+
+            // Upload the file
+            s3Client.putObject(putObjectRequest,
+                    AsyncRequestBody.fromFile(filePath)).get(uploadTimeoutMinutes, TimeUnit.MINUTES);
+
+            log.info("Simple upload completed successfully for {}", objectKey);
+
+        } catch (Exception e) {
+            log.error("ERROR: Upload failed: {}", e.getMessage());
+            throw new IOException("Simple upload failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Upload a file with parallel part uploads for better performance
+     * Uses the optimized multipart upload implementation
+     *
+     * @param transferId Unique ID for this transfer
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @param filePath Path to local file
+     * @throws Exception If upload fails
+     */
+    private void uploadFileParallel(String transferId, String bucketName, String objectKey, Path filePath) throws Exception {
+        log.info("Starting parallel multipart upload...");
+        Instant startTime = Instant.now();
+
+        // Step 1: Calculate optimal part size and count
+        long fileSize = Files.size(filePath);
+        long[] partDetails = calculatePartDetails(fileSize);
+        long partSize = partDetails[0];
+        long numParts = partDetails[1];
+
+        log.info("File size: {} bytes", fileSize);
+        log.info("Part size: {} bytes", partSize);
+        log.info("Number of parts: {}", numParts);
+        log.info("Thread pool size: {}", maxUploadThreads);
+
+        // Step 2: Initiate multipart upload
+        String uploadId = initiateMultipartUpload(transferId, bucketName, objectKey);
+        log.info("Upload initiated with ID: {}", uploadId);
+
+        // Store upload ID for potential cleanup
+        uploadIdsByTransferId.put(transferId, uploadId);
+
+        try {
+            log.debug("Creating upload tasks for all parts...");
+            List<CompletableFuture<CompletedPart>> uploadFutures = new ArrayList<>();
+
+            // Create futures for each part upload
+            for (int partNumber = 1; partNumber <= numParts; partNumber++) {
+                final long position = (partNumber - 1) * partSize;
+                final long size = Math.min(partSize, fileSize - position);
+                final int finalPartNumber = partNumber;
+
+                log.debug("Creating upload task for part {} (bytes {} to {})",
+                        finalPartNumber, position, position + size - 1);
+
+                // Create future for this part
+                CompletableFuture<CompletedPart> future = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        log.debug("Thread {}: Starting upload of part {} (bytes {} to {})",
+                                Thread.currentThread().getName(), finalPartNumber,
+                                position, position + size - 1);
+
+                        // Upload with retries
+                        CompletedPart part = uploadSinglePartWithRetry(
+                                bucketName, objectKey, uploadId, filePath,
+                                finalPartNumber, position, size, MAX_RETRIES);
+
+                        log.debug("Thread {}: Completed upload of part {}, ETag: {}",
+                                Thread.currentThread().getName(), finalPartNumber, part.eTag());
+
+                        return part;
+                    } catch (Exception e) {
+                        log.error("ERROR in part {}: {}", finalPartNumber, e.getMessage());
+                        throw new RuntimeException(e);
+                    }
+                }, uploadThreadPool);
+
+                uploadFutures.add(future);
+            }
+
+            log.info("All upload tasks created. Waiting for completion...");
+
+            // Wait for all uploads to complete
+            CompletableFuture<Void> allUploadsFuture = CompletableFuture.allOf(
+                    uploadFutures.toArray(new CompletableFuture[0]));
+
+            // This will block until all uploads are done
+            allUploadsFuture.get(uploadTimeoutMinutes, TimeUnit.MINUTES);
+            log.info("All part uploads completed successfully");
+
+            // Collect all completed parts
+            List<CompletedPart> completedParts = uploadFutures.stream()
+                    .map(CompletableFuture::join)
+                    .collect(Collectors.toList());
+
+            log.info("Collected ETags from all {} parts", completedParts.size());
+
+            // Step 4: Complete multipart upload
+            completeMultipartUpload(bucketName, objectKey, uploadId, completedParts);
+
+            // Remove from tracking map as upload is complete
+            uploadIdsByTransferId.remove(transferId);
+
+            // Calculate and log total time
+            Duration totalTime = Duration.between(startTime, Instant.now());
+            log.info("Parallel upload complete! Total time: {}.{} seconds",
+                    totalTime.getSeconds(), totalTime.getNano() / 1000000);
+
+        } catch (Exception e) {
+            // If anything goes wrong, abort the upload
+            log.error("ERROR: Upload failed: {}", e.getMessage());
+            abortMultipartUpload(bucketName, objectKey, uploadId);
+            throw e;
+        }
+    }
+
+    /**
+     * Calculate optimal part size and part count based on file size
+     * Ensures part size is at least 5MB and total parts don't exceed 10,000
+     *
+     * @param fileSize Total size of the file in bytes
+     * @return Array with [partSize, partCount]
+     */
+    private long[] calculatePartDetails(long fileSize) {
+        log.debug("Calculating optimal part size");
+
+        // Start with minimum part size
+        long partSize = MIN_PART_SIZE;
+
+        // If file is large enough to exceed max parts limit, increase part size
+        if (fileSize > MIN_PART_SIZE * MAX_PARTS) {
+            // Calculate minimum required part size to stay under part count limit
+            partSize = (fileSize + MAX_PARTS - 1) / MAX_PARTS; // Ceiling division
+
+            // Round up to nearest MB for cleaner numbers
+            long MB = 1024 * 1024;
+            partSize = ((partSize + MB - 1) / MB) * MB; // Round up to nearest MB
+
+            log.debug("File too large for minimum part size, adjusted to: {} bytes", partSize);
+        }
+
+        // Calculate part count based on part size
+        long partCount = (fileSize + partSize - 1) / partSize; // Ceiling division
+
+        log.debug("Optimal part size calculated: {} bytes, resulting in {} parts", partSize, partCount);
+
+        return new long[] { partSize, partCount };
+    }
+
+    /**
+     * Initiate a multipart upload
+     *
+     * @param transferId Unique ID for this transfer
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @return Upload ID from S3
+     */
+    private String initiateMultipartUpload(String transferId, String bucketName, String objectKey) {
+        log.debug("Initiating multipart upload for {}", objectKey);
+
+        try {
+            // Build the request
+            log.debug("Creating CreateMultipartUploadRequest");
+            CreateMultipartUploadRequest createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .contentType("text/plain")
+                    .build();
+
+            // Send the request
+            log.debug("Sending CreateMultipartUploadRequest to S3");
+            CreateMultipartUploadResponse response = s3Client.createMultipartUpload(createMultipartUploadRequest)
+                    .get(2, TimeUnit.MINUTES);
+
+            String uploadId = response.uploadId();
+            log.debug("Multipart upload initiated, Upload ID: {}", uploadId);
+
+            return uploadId;
+        } catch (Exception e) {
+            log.error("ERROR: Failed to initiate multipart upload: {}", e.getMessage());
+            throw new RuntimeException("Failed to initiate multipart upload", e);
+        }
+    }
+
+    /**
+     * Upload a single part of the file
+     *
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @param uploadId Multipart upload ID
+     * @param filePath Path to local file
+     * @param partNumber Part number (1-based)
+     * @param position Start position in file
+     * @param size Size of this part in bytes
+     * @return Completed part with ETag
+     */
+    private CompletedPart uploadSinglePart(
+            String bucketName, String objectKey, String uploadId,
+            Path filePath, int partNumber, long position, long size) throws IOException {
+
+        log.debug("Reading part {} data from file (position={}, size={})",
+                partNumber, position, size);
+
+        // Read this part from the file
+        ByteBuffer partData = readFileSegment(filePath, position, size);
+
+        log.debug("Creating UploadPartRequest for part {}", partNumber);
+        UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
+                .bucket(bucketName)
+                .key(objectKey)
+                .uploadId(uploadId)
+                .partNumber(partNumber)
+                .contentLength(size)
+                .build();
+
+        log.debug("Sending UploadPartRequest to S3");
+        UploadPartResponse response;
+        try {
+            response = s3Client.uploadPart(
+                            uploadPartRequest, AsyncRequestBody.fromByteBuffer(partData))
+                    .get(uploadTimeoutMinutes, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            throw new IOException("Failed to upload part " + partNumber + ": " + e.getMessage(), e);
+        }
+
+        String eTag = response.eTag();
+        log.debug("Received ETag for part {}: {}", partNumber, eTag);
+
+        return CompletedPart.builder()
+                .partNumber(partNumber)
+                .eTag(eTag)
+                .build();
+    }
+
+    /**
+     * Upload a single part with retry logic
+     *
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @param uploadId Multipart upload ID
+     * @param filePath Path to local file
+     * @param partNumber Part number (1-based)
+     * @param position Start position in file
+     * @param size Size of this part in bytes
+     * @param maxRetries Maximum number of retries
+     * @return Completed part with ETag
+     */
+    private CompletedPart uploadSinglePartWithRetry(
+            String bucketName, String objectKey, String uploadId,
+            Path filePath, int partNumber, long position, long size,
+            int maxRetries) throws IOException {
+
+        int retryCount = 0;
+
+        while (true) {
+            try {
+                if (retryCount > 0) {
+                    log.debug("Retry #{} for part {}", retryCount, partNumber);
+                }
+
+                return uploadSinglePart(bucketName, objectKey, uploadId,
+                        filePath, partNumber, position, size);
+
+            } catch (IOException e) {
+                retryCount++;
+
+                if (retryCount >= maxRetries) {
+                    log.error("ERROR: Part {} failed after {} retries: {}",
+                            partNumber, retryCount, e.getMessage());
+                    throw e;
+                }
+
+                // Calculate exponential backoff time
+                long backoffMillis = (long) (Math.pow(2, retryCount) * 100);
+                log.debug("Part {} upload failed, retrying in {} ms. Error: {}",
+                        partNumber, backoffMillis, e.getMessage());
+
+                try {
+                    Thread.sleep(backoffMillis);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Thread interrupted during backoff", ie);
+                }
+            }
+        }
+    }
+
+    /**
+     * Complete the multipart upload
+     *
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @param uploadId Multipart upload ID
+     * @param parts List of completed parts with ETags
+     */
+    private void completeMultipartUpload(
+            String bucketName, String objectKey, String uploadId, List<CompletedPart> parts) {
+
+        log.debug("Completing multipart upload");
+
+        try {
+            // Sort parts by part number
+            List<CompletedPart> sortedParts = parts.stream()
+                    .sorted((p1, p2) -> Integer.compare(p1.partNumber(), p2.partNumber()))
+                    .collect(Collectors.toList());
+
+            // Log parts for verification
+            if (log.isDebugEnabled()) {
+                log.debug("Parts to be combined:");
+                for (CompletedPart part : sortedParts) {
+                    log.debug("  Part {}: ETag {}", part.partNumber(), part.eTag());
+                }
+            }
+
+            log.debug("Creating CompleteMultipartUploadRequest");
+            CompleteMultipartUploadRequest completeRequest = CompleteMultipartUploadRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .uploadId(uploadId)
+                    .multipartUpload(CompletedMultipartUpload.builder()
+                            .parts(sortedParts)
+                            .build())
+                    .build();
+
+            log.debug("Sending CompleteMultipartUploadRequest to S3");
+            CompleteMultipartUploadResponse response = s3Client.completeMultipartUpload(completeRequest)
+                    .get(5, TimeUnit.MINUTES);
+
+            log.info("Multipart upload completed successfully! Object: {}, ETag: {}",
+                    response.key(), response.eTag());
+
+        } catch (Exception e) {
+            log.error("ERROR: Failed to complete multipart upload: {}", e.getMessage());
+            throw new RuntimeException("Failed to complete multipart upload: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Abort a multipart upload if one is in progress for the given transfer
+     *
+     * @param transferId Unique ID for this transfer
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     */
+    private void abortMultipartUploadIfNeeded(String transferId, String bucketName, String objectKey) {
+        String uploadId = uploadIdsByTransferId.get(transferId);
+        if (uploadId != null) {
+            abortMultipartUpload(bucketName, objectKey, uploadId);
+        }
+    }
+
+    /**
+     * Abort a multipart upload with the given ID
+     *
+     * @param bucketName Target S3 bucket
+     * @param objectKey Object key in S3
+     * @param uploadId Multipart upload ID
+     */
+    private void abortMultipartUpload(String bucketName, String objectKey, String uploadId) {
+        log.debug("Aborting multipart upload");
+
+        try {
+            log.debug("Creating AbortMultipartUploadRequest");
+            AbortMultipartUploadRequest abortRequest = AbortMultipartUploadRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .uploadId(uploadId)
+                    .build();
+
+            log.debug("Sending AbortMultipartUploadRequest to S3");
+            s3Client.abortMultipartUpload(abortRequest).get(2, TimeUnit.MINUTES);
+
+            log.info("Multipart upload aborted successfully");
+
+            // Remove from tracking map
+            uploadIdsByTransferId.values().removeIf(id -> id.equals(uploadId));
+
+        } catch (Exception e) {
+            log.error("ERROR: Failed to abort multipart upload: {}", e.getMessage());
+            // Just log and continue, don't throw - this is already in an error path
+        }
+    }
+
+    /**
+     * Read a specific segment from the file
+     *
+     * @param filePath Path to local file
+     * @param position Start position in file
+     * @param size Size of the segment in bytes
+     * @return ByteBuffer containing the file segment
+     * @throws IOException If file reading fails
+     */
+    private ByteBuffer readFileSegment(Path filePath, long position, long size) throws IOException {
+        log.debug("Reading {} bytes from file at position {}", size, position);
+
+        // Allocate buffer for this part
+        ByteBuffer buffer = ByteBuffer.allocate((int) size);
+
+        // Open file channel and read the part
+        try (FileChannel channel = FileChannel.open(filePath, StandardOpenOption.READ)) {
+            // Position channel at the start position for this part
+            channel.position(position);
+
+            // Read data into buffer
+            int bytesRead = 0;
+            int totalRead = 0;
+
+            // Read until buffer is full or EOF
+            while (totalRead < size && bytesRead != -1) {
+                bytesRead = channel.read(buffer);
+                if (bytesRead > 0) {
+                    totalRead += bytesRead;
+                }
+            }
+
+            if (totalRead != size) {
+                log.warn("WARNING: Read {} bytes but expected {} bytes",
+                        totalRead, size);
+            }
+
+            // Flip buffer to prepare for reading
+            buffer.flip();
+
+            log.debug("Successfully read {} bytes from file", totalRead);
+            return buffer;
+        }
+    }
+
+    /**
+     * Get transfer status by ID
+     *
+     * @param transferId Unique ID for the transfer
+     * @return Transfer status or empty if not found
+     */
+    public Optional<TransferStatus> getTransferStatus(String transferId) {
+        return transferTracker.getTransferStatus(transferId);
+    }
+
+    /**
+     * Get all entity status
+     *
+     * @return Map of all entity statuses
+     */
+    public Map<String, TransferState> getAllEntityStatuses() {
+        return transferTracker.getEntityStatusSnapshot();
+    }
+
+    /**
+     * Clean up resources on service shutdown
+     */
+    @PreDestroy
+    public void cleanup() {
+        log.info("Shutting down FileUploadService resources");
+
+        // Shutdown executor properly
+        try {
+            uploadThreadPool.shutdown();
+            if (!uploadThreadPool.awaitTermination(30, TimeUnit.SECONDS)) {
+                log.warn("Upload thread pool did not terminate in the allowed time - forcing shutdown");
+                uploadThreadPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Upload thread pool shutdown interrupted", e);
+            uploadThreadPool.shutdownNow();
+        }
+
+        // Abort any in-progress uploads
+        if (!uploadIdsByTransferId.isEmpty()) {
+            log.warn("Found {} in-progress uploads during shutdown - attempting to abort them",
+                    uploadIdsByTransferId.size());
+
+            // Create a copy to avoid concurrent modification
+            Map<String, String> uploadIdsToAbort = new HashMap<>(uploadIdsByTransferId);
+
+            uploadIdsToAbort.forEach((transferId, uploadId) -> {
+                Optional<TransferStatus> status = transferTracker.getTransferStatus(transferId);
+                if (status.isPresent()) {
+                    TransferStatus transferStatus = status.get();
+                    abortMultipartUpload(transferStatus.bucket(), transferStatus.objectKey(), uploadId);
+                }
+            });
+        }
+    }
+}
+-------------------
+package com.example.s3upload.service;
+
+import com.example.s3upload.model.TransferState;
+import com.example.s3upload.model.TransferStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+/**
+ * Service responsible for tracking the status of file transfers
+ */
+@Service
+public class TransferTrackingService {
+    private static final Logger log = LoggerFactory.getLogger(TransferTrackingService.class);
+
+    private final Map<String, TransferStatus> statusByTransferId = new ConcurrentHashMap<>();
+    private final Map<String, String> transferIdsByEntityName = new ConcurrentHashMap<>();
+
+    /**
+     * Register a new upload transfer and return its ID
+     *
+     * @param entityName Name of the entity being uploaded
+     * @param transferId Unique ID for this transfer
+     * @param bucket Target S3 bucket
+     * @param objectKey Object key in S3
+     * @return The transfer ID
+     */
+    public String registerTransfer(String entityName, String transferId, String bucket, String objectKey) {
+        // Create the initial status
+        TransferStatus status = new TransferStatus(
+                TransferState.PENDING,
+                entityName,
+                transferId,
+                bucket,
+                objectKey,
+                LocalDateTime.now(),
+                null
+        );
+
+        statusByTransferId.put(transferId, status);
+        transferIdsByEntityName.put(entityName, transferId);
+
+        log.info("Registered transfer [{}] for entity [{}] to bucket [{}] with key [{}]",
+                transferId, entityName, bucket, objectKey);
+
+        return transferId;
+    }
+
+    /**
+     * Update status for a specific transfer
+     *
+     * @param transferId Unique ID for the transfer
+     * @param newStatus New status to set
+     */
+    public void updateTransferStatus(String transferId, TransferStatus newStatus) {
+        if (statusByTransferId.containsKey(transferId)) {
+            statusByTransferId.put(transferId, newStatus);
+            log.info("Updated transfer [{}] status to [{}]", transferId, newStatus.state());
+
+            if (newStatus.state() == TransferState.FAILED && newStatus.errorMessage() != null) {
+                log.error("Transfer [{}] failed: {}", transferId, newStatus.errorMessage());
+            }
+        } else {
+            log.warn("Attempted to update non-existent transfer: {}", transferId);
+        }
+    }
+
+    /**
+     * Update status by entity name
+     *
+     * @param entityName Name of the entity
+     * @param state New state to set
+     */
+    public void updateEntityStatus(String entityName, TransferState state) {
+        String transferId = transferIdsByEntityName.get(entityName);
+        if (transferId != null) {
+            TransferStatus current = statusByTransferId.get(transferId);
+            if (current != null) {
+                TransferStatus updated = new TransferStatus(
+                        state,
+                        current.entityName(),
+                        current.transferId(),
+                        current.bucket(),
+                        current.objectKey(),
+                        LocalDateTime.now(),
+                        null
+                );
+
+                statusByTransferId.put(transferId, updated);
+                log.info("Updated entity [{}] transfer [{}] status to [{}]",
+                        entityName, transferId, state);
+            }
+        } else {
+            log.warn("Attempted to update non-existent entity: {}", entityName);
+        }
+    }
+
+    /**
+     * Set error status with message
+     *
+     * @param transferId Unique ID for the transfer
+     * @param errorMessage Error message
+     */
+    public void setTransferError(String transferId, String errorMessage) {
+        TransferStatus current = statusByTransferId.get(transferId);
+        if (current != null) {
+            TransferStatus errorStatus = new TransferStatus(
+                    TransferState.FAILED,
+                    current.entityName(),
+                    current.transferId(),
+                    current.bucket(),
+                    current.objectKey(),
+                    LocalDateTime.now(),
+                    errorMessage
+            );
+
+            statusByTransferId.put(transferId, errorStatus);
+            log.error("Transfer [{}] failed: {}", transferId, errorMessage);
+        } else {
+            log.warn("Attempted to set error for non-existent transfer: {}", transferId);
+        }
+    }
+
+    /**
+     * Get status for a specific transfer
+     *
+     * @param transferId Unique ID for the transfer
+     * @return Transfer status or empty if not found
+     */
+    public Optional<TransferStatus> getTransferStatus(String transferId) {
+        return Optional.ofNullable(statusByTransferId.get(transferId));
+    }
+
+    /**
+     * Get status by entity name
+     *
+     * @param entityName Name of the entity
+     * @return Transfer status or empty if not found
+     */
+    public Optional<TransferStatus> getEntityStatus(String entityName) {
+        String transferId = transferIdsByEntityName.get(entityName);
+        if (transferId != null) {
+            return Optional.ofNullable(statusByTransferId.get(transferId));
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Get all current statuses
+     *
+     * @return Map of all transfer statuses by ID
+     */
+    public Map<String, TransferStatus> getAllTransferStatuses() {
+        return Map.copyOf(statusByTransferId);
+    }
+
+    /**
+     * Get all statuses by entity name
+     *
+     * @return Map of entity names to their transfer states
+     */
+    public Map<String, TransferState> getEntityStatusSnapshot() {
+        return transferIdsByEntityName.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> {
+                            TransferStatus status = statusByTransferId.get(entry.getValue());
+                            return status != null ? status.state() : TransferState.FAILED;
+                        }
+                ));
+    }
+
+    /**
+     * Clean up completed transfers older than the specified hours
+     * @param olderThanHours Hours threshold for cleanup
+     */
+    public void cleanupOldTransfers(int olderThanHours) {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(olderThanHours);
+
+        statusByTransferId.entrySet().removeIf(entry -> {
+            TransferStatus status = entry.getValue();
+            boolean isComplete = status.state() == TransferState.SUCCESS ||
+                    status.state() == TransferState.FAILED ||
+                    status.state() == TransferState.ABORTED;
+            boolean isOld = status.lastUpdated().isBefore(cutoff);
+
+            if (isComplete && isOld) {
+                // Also remove from entity mapping
+                transferIdsByEntityName.remove(status.entityName());
+                log.debug("Cleaned up old transfer [{}] for entity [{}]", entry.getKey(), status.entityName());
+                return true;
+            }
+            return false;
+        });
+    }
+}
+------------------------
+package com.example.s3upload.web;
+import com.example.s3upload.model.EntityPayload;
+import com.example.s3upload.model.TransferState;
+import com.example.s3upload.service.FileUploadService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * REST Controller for file upload operations
+ */
+@RestController
+@RequestMapping("/files")
+public class UploadController {
+    private static final Logger log = LoggerFactory.getLogger(UploadController.class);
+
+    @Value("${app.s3.default-bucket:uploads}")
+    private String defaultBucket;
+
+    private final FileUploadService uploadService;
+
+    public UploadController(FileUploadService uploadService) {
+        this.uploadService = uploadService;
+    }
+
+    /**
+     * Upload files based on entity data
+     *
+     * @param payloads List of entity payloads containing the data to upload
+     * @param bucket S3 bucket name (optional, uses default if not specified)
+     * @return List of transfer IDs that can be used to check status
+     */
+    @PostMapping(value = "/upload", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Map<String, Object>> upload(
+            @RequestBody List<EntityPayload> payloads,
+            @RequestParam(required = false) String bucket) {
+
+        String targetBucket = bucket != null ? bucket : defaultBucket;
+        log.info("Received upload request for {} entities to bucket: {}", payloads.size(), targetBucket);
+
+        List<String> transferIds = uploadService.uploadEntities(payloads, targetBucket);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("message", "Upload started for " + payloads.size() + " entities");
+        response.put("transferIds", transferIds);
+        response.put("bucket", targetBucket);
+
+        return ResponseEntity.accepted().body(response);
+    }
+
+    /**
+     * Get status for all entity transfers
+     *
+     * @return Map of entity names to their transfer status
+     */
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, TransferState>> getAllEntityStatuses() {
+        return ResponseEntity.ok(uploadService.getAllEntityStatuses());
+    }
+}
+---------------------
+package com.example.s3upload;
+
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
+
+/**
+ * Test program to generate a 500MB file with 5 entities (100MB each)
+ * and call the upload endpoint
+ */
+public class LargeFileUploadTest {
+
+    // Configuration
+    private static final int ENTITY_COUNT = 5;
+    private static final long ENTITY_SIZE_MB = 100;
+    private static final String UPLOAD_URL = "http://localhost:8080/files/upload";
+    private static final String OUTPUT_DIR = "D:\\data";
+    private static final String UPLOAD_BUCKET = "demo"; // Optional bucket name
+
+    // Entity names
+    private static final String[] ENTITY_NAMES = {
+            "customer-records",
+            "transaction-history",
+            "product-catalog",
+            "inventory-tracking",
+            "analytics-data"
+    };
+
+    public static void main(String[] args) {
+        try {
+            System.out.println("Starting Large File Upload Test");
+            System.out.println("Generating " + ENTITY_COUNT + " entities with " + ENTITY_SIZE_MB + "MB each");
+
+            // Create output directory if it doesn't exist
+            Path outputDir = Paths.get(OUTPUT_DIR);
+            Files.createDirectories(outputDir);
+
+            // Generate entities and prepare payload
+            List<Map<String, Object>> entityPayloads = generateEntities(outputDir);
+
+            // Convert payload to JSON
+            String jsonPayload = convertToJson(entityPayloads);
+
+            // Save payload to file for inspection
+            Path payloadFile = outputDir.resolve("payload.json");
+            Files.writeString(payloadFile, jsonPayload);
+            System.out.println("Payload saved to: " + payloadFile);
+
+            // Call upload endpoint
+            System.out.println("Calling upload endpoint: " + UPLOAD_URL);
+            String response = callUploadEndpoint(jsonPayload);
+
+            System.out.println("Upload response:");
+            System.out.println(response);
+
+            System.out.println("Test completed successfully");
+
+        } catch (Exception e) {
+            System.err.println("Error during test: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Generate entities with large data
+     */
+    private static List<Map<String, Object>> generateEntities(Path outputDir) throws IOException {
+        List<Map<String, Object>> entityPayloads = new ArrayList<>();
+
+        for (int i = 0; i < ENTITY_COUNT; i++) {
+            String entityName = ENTITY_NAMES[i];
+            System.out.println("Generating entity: " + entityName);
+
+            // Generate data for this entity
+            List<String> data = generateLargeEntityData(ENTITY_SIZE_MB);
+
+            // Create entity payload
+            Map<String, Object> entityPayload = new HashMap<>();
+            entityPayload.put("entityName", entityName);
+            entityPayload.put("data", data);
+
+            entityPayloads.add(entityPayload);
+
+            // Log progress
+            System.out.println("Entity " + entityName + " generated with " +
+                    data.size() + " lines (" + (i+1) + "/" + ENTITY_COUNT + ")");
+        }
+
+        return entityPayloads;
+    }
+
+    /**
+     * Generate large data for an entity
+     */
+    private static List<String> generateLargeEntityData(long sizeMB) {
+        List<String> data = new ArrayList<>();
+
+        // Add header row
+        data.add(generateHeader());
+
+        // Track size
+        long totalSize = data.get(0).length();
+        long targetSize = sizeMB * 1024 * 1024; // Convert to bytes
+
+        int rowCounter = 0;
+        int progressInterval = 1000;
+
+        // Generate rows until we reach target size
+        while (totalSize < targetSize) {
+            String row = generateDataRow();
+            data.add(row);
+            totalSize += row.length();
+
+            rowCounter++;
+            if (rowCounter % progressInterval == 0) {
+                double percentComplete = (double) totalSize / targetSize * 100;
+                System.out.printf("  Progress: %.2f%% (%d KB / %d MB)%n",
+                        percentComplete, totalSize / 1024, sizeMB);
+            }
+        }
+
+        System.out.println("  Generated " + rowCounter + " rows, total size: " +
+                (totalSize / (1024 * 1024)) + "MB");
+
+        return data;
+    }
+
+    /**
+     * Generate a header row for CSV data
+     */
+    private static String generateHeader() {
+        return "id,timestamp,customer_id,product_id,transaction_type,amount,status,region,category,subcategory," +
+                "payment_method,shipping_method,discount_code,tax_amount,item_count,description";
+    }
+
+    /**
+     * Generate a random data row
+     */
+    private static String generateDataRow() {
+        StringBuilder row = new StringBuilder();
+
+        // id
+        row.append(UUID.randomUUID()).append(",");
+
+        // timestamp
+        LocalDateTime timestamp = LocalDateTime.now().minusDays(ThreadLocalRandom.current().nextInt(365));
+        row.append(timestamp.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)).append(",");
+
+        // customer_id
+        row.append("CUST-").append(ThreadLocalRandom.current().nextInt(1, 100000)).append(",");
+
+        // product_id
+        row.append("PROD-").append(ThreadLocalRandom.current().nextInt(1, 50000)).append(",");
+
+        // transaction_type
+        String[] transactionTypes = {"PURCHASE", "REFUND", "EXCHANGE", "RETURN", "ADJUSTMENT"};
+        row.append(transactionTypes[ThreadLocalRandom.current().nextInt(transactionTypes.length)]).append(",");
+
+        // amount
+        double amount = ThreadLocalRandom.current().nextDouble(1.0, 1000.0);
+        row.append(String.format("%.2f", amount)).append(",");
+
+        // status
+        String[] statuses = {"COMPLETED", "PENDING", "CANCELLED", "FAILED", "IN_PROGRESS"};
+        row.append(statuses[ThreadLocalRandom.current().nextInt(statuses.length)]).append(",");
+
+        // region
+        String[] regions = {"NORTH", "SOUTH", "EAST", "WEST", "CENTRAL", "NORTHEAST", "NORTHWEST", "SOUTHEAST", "SOUTHWEST"};
+        row.append(regions[ThreadLocalRandom.current().nextInt(regions.length)]).append(",");
+
+        // category
+        String[] categories = {"ELECTRONICS", "CLOTHING", "FOOD", "BOOKS", "HOME", "BEAUTY", "SPORTS", "TOYS", "AUTOMOTIVE"};
+        row.append(categories[ThreadLocalRandom.current().nextInt(categories.length)]).append(",");
+
+        // subcategory
+        String[] subcategories = {"PREMIUM", "STANDARD", "ECONOMY", "CLEARANCE", "NEW", "USED", "REFURBISHED"};
+        row.append(subcategories[ThreadLocalRandom.current().nextInt(subcategories.length)]).append(",");
+
+        // payment_method
+        String[] paymentMethods = {"CREDIT", "DEBIT", "PAYPAL", "APPLE_PAY", "GOOGLE_PAY", "BANK_TRANSFER", "GIFT_CARD"};
+        row.append(paymentMethods[ThreadLocalRandom.current().nextInt(paymentMethods.length)]).append(",");
+
+        // shipping_method
+        String[] shippingMethods = {"STANDARD", "EXPRESS", "NEXT_DAY", "TWO_DAY", "INTERNATIONAL", "PICKUP"};
+        row.append(shippingMethods[ThreadLocalRandom.current().nextInt(shippingMethods.length)]).append(",");
+
+        // discount_code
+        boolean hasDiscount = ThreadLocalRandom.current().nextBoolean();
+        if (hasDiscount) {
+            row.append("DISC-").append(ThreadLocalRandom.current().nextInt(1, 100)).append(",");
+        } else {
+            row.append(",");
+        }
+
+        // tax_amount
+        double taxAmount = amount * 0.08; // Assume 8% tax
+        row.append(String.format("%.2f", taxAmount)).append(",");
+
+        // item_count
+        row.append(ThreadLocalRandom.current().nextInt(1, 11)).append(",");
+
+        // description
+        row.append("\"Transaction details with additional information for analysis purposes. ");
+        row.append("This includes extended metadata about the transaction that can be used for ");
+        row.append("various business intelligence reports and dashboards. The data can also be ");
+        row.append("used for customer trend analysis and marketing campaign effectiveness measurement.\"");
+
+        return row.toString();
+    }
+
+    /**
+     * Convert entity payloads to JSON
+     */
+    private static String convertToJson(List<Map<String, Object>> entityPayloads) {
+        StringBuilder json = new StringBuilder();
+        json.append("[\n");
+
+        for (int i = 0; i < entityPayloads.size(); i++) {
+            Map<String, Object> entity = entityPayloads.get(i);
+            json.append("  {\n");
+            json.append("    \"entityName\": \"").append(entity.get("entityName")).append("\",\n");
+            json.append("    \"data\": [\n");
+
+            @SuppressWarnings("unchecked")
+            List<String> data = (List<String>) entity.get("data");
+
+            for (int j = 0; j < data.size(); j++) {
+                json.append("      \"").append(escapeJson(data.get(j))).append("\"");
+                if (j < data.size() - 1) {
+                    json.append(",");
+                }
+                json.append("\n");
+            }
+
+            json.append("    ]\n");
+            json.append("  }");
+            if (i < entityPayloads.size() - 1) {
+                json.append(",");
+            }
+            json.append("\n");
+        }
+
+        json.append("]\n");
+        return json.toString();
+    }
+
+    /**
+     * Escape special characters in JSON
+     */
+    private static String escapeJson(String input) {
+        return input.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    /**
+     * Call upload endpoint with JSON payload
+     */
+    private static String callUploadEndpoint(String jsonPayload) throws IOException {
+        URL url = new URL(UPLOAD_URL + (UPLOAD_BUCKET != null ? "?bucket=" + UPLOAD_BUCKET : ""));
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setDoOutput(true);
+
+        // Set longer timeouts for large data
+        connection.setConnectTimeout(30000); // 30 seconds
+        connection.setReadTimeout(300000);   // 5 minutes
+
+        // Send payload
+        try (OutputStream os = connection.getOutputStream()) {
+            byte[] input = jsonPayload.getBytes(StandardCharsets.UTF_8);
+            os.write(input, 0, input.length);
+        }
+
+        // Read response
+        StringBuilder response = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+            String responseLine;
+            while ((responseLine = br.readLine()) != null) {
+                response.append(responseLine.trim());
+            }
+        }
+
+        return response.toString();
+    }
+}
+-----------------------
+package com.example.s3upload;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+@SpringBootApplication
+@EnableScheduling
+public class S3UploadApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(S3UploadApplication.class, args);
+    }
+}
+---
+# Server configuration
+server.port=8080
+
+# AWS S3 Configuration
+app.aws.region=us-east-1
+app.aws.connection.timeout=30
+
+# LocalStack Configuration
+app.localstack.url=https://localhost.localstack.cloud:4566
+
+# Upload configuration
+app.upload.directory=D:\\data
+app.upload.max-threads=10
+app.upload.part-size-mb=5
+app.upload.timeout-minutes=30
+
+# S3 bucket configuration
+app.s3.default-bucket=demo
+
+# Logging configuration
+logging.level.root=INFO
+logging.level.com.example.s3upload=DEBUG
+logging.level.software.amazon.awssdk=WARN
+
+# Spring configuration
+spring.main.allow-circular-references=true
+spring.servlet.multipart.max-file-size=100MB
+spring.servlet.multipart.max-request-size=100MB
