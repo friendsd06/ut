@@ -1590,3 +1590,36 @@ logging.level.software.amazon.awssdk=WARN
 spring.main.allow-circular-references=true
 spring.servlet.multipart.max-file-size=100MB
 spring.servlet.multipart.max-request-size=100MB
+
+----------------
+
+http://localhost:8080/files/upload
+
+[
+  {
+    "entityName": "customer-data",
+    "data": [
+      "id,name,email,purchase_amount",
+      "1001,John Smith,john.smith@example.com,249.99",
+      "1002,Emma Johnson,emma.j@example.com,174.50",
+      "1003,Michael Brown,mbrown@example.com,325.75",
+      "1004,Sarah Davis,sarah.davis@example.com,89.99",
+      "1005,David Wilson,dwilson@example.com,412.35"
+    ]
+  },
+  {
+    "entityName": "product-catalog",
+    "data": [
+      "product_id,name,category,price,stock",
+      "P001,Smartphone XL,Electronics,599.99,45",
+      "P002,Wireless Headphones,Electronics,129.99,78",
+      "P003,Coffee Maker,Home Appliances,89.99,23",
+      "P004,Running Shoes,Footwear,79.99,34",
+      "P005,Smart Watch,Electronics,199.99,12",
+      "P006,Laptop Pro,Electronics,1299.99,8",
+      "P007,Desk Lamp,Home Decor,39.99,56"
+    ]
+  }
+]
+
+http://localhost:8080/files/status
