@@ -3309,3 +3309,742 @@ app.upload.timeout-minutes=30
 logging.level.root=INFO
 logging.level.com.example.s3upload=DEBUG
 logging.level.org.mybatis=INFO
+
+==================================
+package com.example.s3upload.util;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.Properties;
+
+/**
+ * Simple utility class for Databricks SQL Warehouse connections.
+ * This is a minimal implementation that can be used for quick testing
+ * or simple applications without Spring dependencies.
+ */
+public class DatabricksJdbcUtil {
+    private static final Logger log = LoggerFactory.getLogger(DatabricksJdbcUtil.class);
+
+    /**
+     * Create a JDBC connection to Databricks SQL Warehouse
+     *
+     * @param host Databricks workspace host (e.g., adb-123456789.0.azuredatabricks.net)
+     * @param httpPath HTTP path to the SQL warehouse
+     * @param token Personal access token
+     * @return JDBC Connection
+     */
+    public static Connection createConnection(String host, String httpPath, String token) {
+        try {
+            // Load JDBC driver
+            Class.forName("com.databricks.client.jdbc.Driver");
+
+            // Create connection URL
+            String jdbcUrl = String.format("jdbc:databricks://%s:443", host);
+
+            // Set up connection properties
+            Properties properties = new Properties();
+            properties.setProperty("HttpPath", httpPath);
+            properties.setProperty("AuthType", "bearer");
+            properties.setProperty("token", token);
+            properties.setProperty("SSL", "1");
+            properties.setProperty("TransportType", "http");
+
+            // Create and return connection
+            log.info("Connecting to Databricks SQL Warehouse at {}", host);
+            return DriverManager.getConnection(jdbcUrl, properties);
+
+        } catch (Exception e) {
+            log.error("Error creating Databricks connection: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to create Databricks connection", e);
+        }
+    }
+
+    /**
+     * Execute a basic test query to verify connection
+     *
+     * @param connection JDBC Connection to test
+     * @return true if connection is valid
+     */
+    public static boolean testConnection(Connection connection) {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT 1 AS test")) {
+
+            if (resultSet.next()) {
+                int result = resultSet.getInt("test");
+                log.info("Connection test successful: {}", result);
+                return result == 1;
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.error("Connection test failed: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Main method for testing the connection directly
+     */
+    public static void main(String[] args) {
+        if (args.length < 3) {
+            System.out.println("Usage: DatabricksJdbcUtil <host> <httpPath> <token>");
+            return;
+        }
+
+        String host = args[0];
+        String httpPath = args[1];
+        String token = args[2];
+
+        try (Connection connection = createConnection(host, httpPath, token)) {
+            boolean testResult = testConnection(connection);
+            System.out.println("Connection test result: " + (testResult ? "SUCCESS" : "FAILED"));
+
+            if (testResult) {
+                // Execute a simple catalog query
+                try (Statement statement = connection.createStatement();
+                     ResultSet resultSet = statement.executeQuery("SHOW CATALOGS")) {
+
+                    System.out.println("Available catalogs:");
+                    while (resultSet.next()) {
+                        System.out.println("  - " + resultSet.getString(1));
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}
+
+====================================
+
+package com.example.s3upload.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Service for connecting to Databricks SQL Warehouse and executing queries
+ */
+@Service
+public class DatabricksSqlService {
+    private static final Logger log = LoggerFactory.getLogger(DatabricksSqlService.class);
+
+    private final DataSource databricksDataSource;
+
+    public DatabricksSqlService(DataSource databricksDataSource) {
+        this.databricksDataSource = databricksDataSource;
+    }
+
+    /**
+     * Execute a SQL query and return results as a list of maps
+     *
+     * @param sql SQL query to execute
+     * @param params Parameters to bind to the query
+     * @return List of result rows as maps
+     */
+    public List<Map<String, Object>> executeQuery(String sql, Map<String, Object> params) {
+        log.info("Executing SQL query: {}", sql);
+        List<Map<String, Object>> results = new ArrayList<>();
+
+        try (Connection connection = databricksDataSource.getConnection();
+             PreparedStatement statement = createPreparedStatement(connection, sql, params);
+             ResultSet resultSet = statement.executeQuery()) {
+
+            int columnCount = resultSet.getMetaData().getColumnCount();
+
+            // Process each row
+            while (resultSet.next()) {
+                Map<String, Object> row = new HashMap<>();
+
+                // Extract all columns
+                for (int i = 1; i <= columnCount; i++) {
+                    String columnName = resultSet.getMetaData().getColumnName(i);
+                    Object value = resultSet.getObject(i);
+                    row.put(columnName, value);
+                }
+
+                results.add(row);
+            }
+
+            log.info("Query returned {} rows", results.size());
+            return results;
+
+        } catch (SQLException e) {
+            log.error("Error executing SQL query: {}", e.getMessage(), e);
+            throw new RuntimeException("Error executing SQL query", e);
+        }
+    }
+
+    /**
+     * Execute a SQL query and transform results to a list of strings (CSV format)
+     *
+     * @param sql SQL query to execute
+     * @param params Parameters to bind to the query
+     * @return List of CSV formatted strings
+     */
+    public List<String> executeQueryAsCsv(String sql, Map<String, Object> params) {
+        List<Map<String, Object>> results = executeQuery(sql, params);
+        List<String> csvRows = new ArrayList<>();
+
+        if (results.isEmpty()) {
+            return csvRows;
+        }
+
+        // Add header row if needed
+        // String headerRow = String.join(",", results.get(0).keySet());
+        // csvRows.add(headerRow);
+
+        // Add data rows
+        for (Map<String, Object> row : results) {
+            String csvRow = convertRowToCsv(row);
+            csvRows.add(csvRow);
+        }
+
+        return csvRows;
+    }
+
+    /**
+     * Execute an update SQL statement (INSERT, UPDATE, DELETE)
+     *
+     * @param sql SQL statement to execute
+     * @param params Parameters to bind to the statement
+     * @return Number of rows affected
+     */
+    public int executeUpdate(String sql, Map<String, Object> params) {
+        log.info("Executing SQL update: {}", sql);
+
+        try (Connection connection = databricksDataSource.getConnection();
+             PreparedStatement statement = createPreparedStatement(connection, sql, params)) {
+
+            int rowsAffected = statement.executeUpdate();
+            log.info("Update affected {} rows", rowsAffected);
+            return rowsAffected;
+
+        } catch (SQLException e) {
+            log.error("Error executing SQL update: {}", e.getMessage(), e);
+            throw new RuntimeException("Error executing SQL update", e);
+        }
+    }
+
+    /**
+     * Create a prepared statement with bound parameters
+     */
+    private PreparedStatement createPreparedStatement(
+            Connection connection, String sql, Map<String, Object> params) throws SQLException {
+
+        PreparedStatement statement = connection.prepareStatement(sql);
+
+        if (params != null) {
+            for (Map.Entry<String, Object> entry : params.entrySet()) {
+                String paramName = entry.getKey();
+                Object paramValue = entry.getValue();
+
+                // Find parameter index in SQL (assuming named parameters like :paramName)
+                int paramIndex = findParameterIndex(sql, paramName);
+                if (paramIndex > 0) {
+                    statement.setObject(paramIndex, paramValue);
+                } else {
+                    log.warn("Parameter not found in SQL: {}", paramName);
+                }
+            }
+        }
+
+        return statement;
+    }
+
+    /**
+     * Find the index of a named parameter in the SQL statement
+     * This is a simple implementation; in production, consider using NamedParameterJdbcTemplate
+     */
+    private int findParameterIndex(String sql, String paramName) {
+        String paramMarker = ":" + paramName;
+        int paramIndex = 1;
+        int currentIndex = 0;
+
+        while ((currentIndex = sql.indexOf("?", currentIndex)) != -1) {
+            if (paramIndex == Integer.parseInt(paramName)) {
+                return paramIndex;
+            }
+            currentIndex++;
+            paramIndex++;
+        }
+
+        return -1; // Parameter not found
+    }
+
+    /**
+     * Convert a row map to CSV format
+     */
+    private String convertRowToCsv(Map<String, Object> row) {
+        StringBuilder csvBuilder = new StringBuilder();
+        boolean first = true;
+
+        for (Object value : row.values()) {
+            if (!first) {
+                csvBuilder.append(",");
+            }
+
+            if (value != null) {
+                String strValue = value.toString().replace("\"", "\"\"");
+
+                if (strValue.contains(",") || strValue.contains("\"") || strValue.contains("\n")) {
+                    csvBuilder.append("\"").append(strValue).append("\"");
+                } else {
+                    csvBuilder.append(strValue);
+                }
+            }
+
+            first = false;
+        }
+
+        return csvBuilder.toString();
+    }
+}
+
+================
+
+
+# Databricks SQL Warehouse Connection Properties
+databricks.jdbc.url=jdbc:databricks://<workspace-instance>.cloud.databricks.com:443
+databricks.jdbc.token=dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+databricks.jdbc.warehouse-id=xxxxxxxxxxxxxxxxx
+databricks.jdbc.catalog=hive_metastore
+databricks.jdbc.schema=default
+
+# Connection Pool Settings
+databricks.jdbc.pool.max-size=10
+databricks.jdbc.pool.min-idle=2
+databricks.jdbc.pool.idle-timeout=60000
+
+# Query Settings
+databricks.default-limit=1000
+
+========================
+package com.example.s3upload.util;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Command-line utility to test and validate Databricks catalogs and tables.
+ * Provides a simple way to verify database connectivity and table structure.
+ */
+public class DatabricksTableTester {
+    private static final Logger log = LoggerFactory.getLogger(DatabricksTableTester.class);
+
+    /**
+     * Main method to run the tester from command line
+     */
+    public static void main(String[] args) {
+        // Parse command line arguments
+        if (args.length < 5) {
+            printUsage();
+            return;
+        }
+
+        String host = args[0];
+        String httpPath = args[1];
+        String token = args[2];
+        String catalog = args[3];
+        String schema = args[4];
+        String table = args.length > 5 ? args[5] : null;
+
+        // Run the tests
+        try {
+            runTests(host, httpPath, token, catalog, schema, table);
+        } catch (Exception e) {
+            System.err.println("Error running tests: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Print usage instructions
+     */
+    private static void printUsage() {
+        System.out.println("Usage: java -cp <classpath> " +
+                           "com.example.s3upload.util.DatabricksTableTester " +
+                           "<host> <httpPath> <token> <catalog> <schema> [<table>]");
+        System.out.println();
+        System.out.println("Arguments:");
+        System.out.println("  host     - Databricks workspace host (e.g., adb-123456789.0.azuredatabricks.net)");
+        System.out.println("  httpPath - HTTP path to SQL warehouse (e.g., /sql/1.0/warehouses/abcdef1234567890)");
+        System.out.println("  token    - Personal access token for authentication");
+        System.out.println("  catalog  - Catalog name to test");
+        System.out.println("  schema   - Schema name to test");
+        System.out.println("  table    - (Optional) Table name to test");
+        System.out.println();
+        System.out.println("Example:");
+        System.out.println("  java -cp app.jar com.example.s3upload.util.DatabricksTableTester " +
+                           "adb-1234567890.1.azuredatabricks.net " +
+                           "/sql/1.0/warehouses/abcdef1234567890 " +
+                           "dapi_xxxxxxxxxxxx " +
+                           "hive_metastore default my_table");
+    }
+
+    /**
+     * Run all tests
+     */
+    public static void runTests(String host, String httpPath, String token,
+                               String catalog, String schema, String table) throws Exception {
+
+        System.out.println("\n====== DATABRICKS CONNECTION TEST ======\n");
+        System.out.println("Host:     " + host);
+        System.out.println("HTTP Path: " + httpPath);
+        System.out.println("Catalog:  " + catalog);
+        System.out.println("Schema:   " + schema);
+        if (table != null) {
+            System.out.println("Table:    " + table);
+        }
+        System.out.println();
+
+        // Create connection
+        try (Connection connection = DatabricksJdbcUtil.createConnection(host, httpPath, token)) {
+            System.out.println("✓ Successfully connected to Databricks");
+
+            // Test connection with basic query
+            boolean basicConnectionTest = DatabricksJdbcUtil.testConnection(connection);
+            if (basicConnectionTest) {
+                System.out.println("✓ Basic connection test passed");
+            } else {
+                System.out.println("✗ Basic connection test failed");
+                return;
+            }
+
+            // Test catalog existence
+            boolean catalogExists = testCatalogExists(connection, catalog);
+            if (catalogExists) {
+                System.out.println("✓ Catalog '" + catalog + "' exists");
+
+                // List schemas
+                List<String> schemas = listSchemas(connection, catalog);
+                System.out.println("\nSchemas in catalog '" + catalog + "':");
+                for (String s : schemas) {
+                    System.out.println("  - " + s);
+                }
+
+                boolean schemaExists = schemas.stream()
+                    .anyMatch(s -> s.equalsIgnoreCase(schema));
+
+                if (schemaExists) {
+                    System.out.println("✓ Schema '" + schema + "' exists");
+
+                    // Test table if provided
+                    if (table != null) {
+                        boolean tableExists = testTableExists(connection, catalog, schema, table);
+                        if (tableExists) {
+                            System.out.println("✓ Table '" + table + "' exists");
+
+                            // Show table schema
+                            System.out.println("\nTable schema:");
+                            List<ColumnInfo> columns = getTableSchema(connection, catalog, schema, table);
+                            printTableSchema(columns);
+
+                            // Show row count
+                            long rowCount = getTableRowCount(connection, catalog, schema, table);
+                            System.out.println("\nRow count: " + rowCount);
+
+                            // Show sample data
+                            if (rowCount > 0) {
+                                System.out.println("\nSample data (first 5 rows):");
+                                List<List<String>> sampleData = getSampleData(connection, catalog, schema, table, 5);
+                                printSampleData(columns, sampleData);
+                            }
+                        } else {
+                            System.out.println("✗ Table '" + table + "' does not exist");
+                        }
+                    }
+                } else {
+                    System.out.println("✗ Schema '" + schema + "' does not exist");
+                }
+            } else {
+                System.out.println("✗ Catalog '" + catalog + "' does not exist");
+            }
+        }
+
+        System.out.println("\n====== TEST COMPLETE ======\n");
+    }
+
+    /**
+     * Test if a catalog exists
+     */
+    private static boolean testCatalogExists(Connection connection, String catalogName) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SHOW CATALOGS")) {
+
+            while (resultSet.next()) {
+                String catalog = resultSet.getString(1);
+                if (catalog.equalsIgnoreCase(catalogName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * List all schemas in a catalog
+     */
+    private static List<String> listSchemas(Connection connection, String catalogName) throws Exception {
+        List<String> schemas = new ArrayList<>();
+
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SHOW SCHEMAS IN " + catalogName)) {
+
+            while (resultSet.next()) {
+                schemas.add(resultSet.getString(1));
+            }
+        }
+
+        return schemas;
+    }
+
+    /**
+     * Test if a table exists in a catalog and schema
+     */
+    private static boolean testTableExists(Connection connection, String catalogName,
+                                          String schemaName, String tableName) throws Exception {
+        // Use the catalog and schema
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("USE CATALOG " + catalogName);
+            statement.execute("USE SCHEMA " + schemaName);
+        }
+
+        // Check if table exists
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "SHOW TABLES IN " + catalogName + "." + schemaName +
+                     " LIKE '" + tableName.replace("'", "''") + "'")) {
+
+            return resultSet.next();
+        }
+    }
+
+    /**
+     * Get the schema information for a table
+     */
+    private static List<ColumnInfo> getTableSchema(Connection connection, String catalogName,
+                                                  String schemaName, String tableName) throws Exception {
+        List<ColumnInfo> columns = new ArrayList<>();
+
+        // Use the catalog and schema
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("USE CATALOG " + catalogName);
+            statement.execute("USE SCHEMA " + schemaName);
+        }
+
+        // Get column information
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("DESCRIBE TABLE " + tableName)) {
+
+            while (resultSet.next()) {
+                String columnName = resultSet.getString("col_name");
+                String dataType = resultSet.getString("data_type");
+                String comment = resultSet.getString("comment");
+
+                columns.add(new ColumnInfo(columnName, dataType, comment));
+            }
+        }
+
+        return columns;
+    }
+
+    /**
+     * Get the row count for a table
+     */
+    private static long getTableRowCount(Connection connection, String catalogName,
+                                        String schemaName, String tableName) throws Exception {
+        // Use the catalog and schema
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("USE CATALOG " + catalogName);
+            statement.execute("USE SCHEMA " + schemaName);
+        }
+
+        // Count rows
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT COUNT(*) FROM " + tableName)) {
+
+            if (resultSet.next()) {
+                return resultSet.getLong(1);
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Get sample data from a table
+     */
+    private static List<List<String>> getSampleData(Connection connection, String catalogName,
+                                                  String schemaName, String tableName,
+                                                  int limit) throws Exception {
+        List<List<String>> rows = new ArrayList<>();
+
+        // Use the catalog and schema
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("USE CATALOG " + catalogName);
+            statement.execute("USE SCHEMA " + schemaName);
+        }
+
+        // Get sample data
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT * FROM " + tableName + " LIMIT " + limit)) {
+
+            int columnCount = resultSet.getMetaData().getColumnCount();
+
+            while (resultSet.next()) {
+                List<String> row = new ArrayList<>();
+
+                for (int i = 1; i <= columnCount; i++) {
+                    String value = resultSet.getString(i);
+                    row.add(value != null ? value : "NULL");
+                }
+
+                rows.add(row);
+            }
+        }
+
+        return rows;
+    }
+
+    /**
+     * Print table schema in a formatted way
+     */
+    private static void printTableSchema(List<ColumnInfo> columns) {
+        // Find the maximum lengths for formatting
+        int maxNameLength = 0;
+        int maxTypeLength = 0;
+
+        for (ColumnInfo column : columns) {
+            maxNameLength = Math.max(maxNameLength, column.getName().length());
+            maxTypeLength = Math.max(maxTypeLength, column.getDataType().length());
+        }
+
+        // Print header
+        String headerFormat = "  %-" + (maxNameLength + 2) + "s %-" + (maxTypeLength + 2) + "s %s%n";
+        System.out.printf(headerFormat, "Column", "Type", "Comment");
+
+        // Print separator
+        System.out.print("  ");
+        System.out.print("-".repeat(maxNameLength + 2));
+        System.out.print(" ");
+        System.out.print("-".repeat(maxTypeLength + 2));
+        System.out.print(" ");
+        System.out.println("-".repeat(20));
+
+        // Print each column
+        String rowFormat = "  %-" + (maxNameLength + 2) + "s %-" + (maxTypeLength + 2) + "s %s%n";
+        for (ColumnInfo column : columns) {
+            System.out.printf(rowFormat,
+                             column.getName(),
+                             column.getDataType(),
+                             column.getComment() != null ? column.getComment() : "");
+        }
+    }
+
+    /**
+     * Print sample data in a formatted way
+     */
+    private static void printSampleData(List<ColumnInfo> columns, List<List<String>> rows) {
+        if (rows.isEmpty()) {
+            System.out.println("  (no data)");
+            return;
+        }
+
+        // Find maximum width for each column
+        int[] maxWidths = new int[columns.size()];
+
+        for (int i = 0; i < columns.size(); i++) {
+            maxWidths[i] = columns.get(i).getName().length();
+        }
+
+        for (List<String> row : rows) {
+            for (int i = 0; i < Math.min(row.size(), maxWidths.length); i++) {
+                if (row.get(i) != null) {
+                    maxWidths[i] = Math.max(maxWidths[i], row.get(i).length());
+                }
+            }
+        }
+
+        // Print header
+        System.out.print("  ");
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) System.out.print(" | ");
+            System.out.printf("%-" + maxWidths[i] + "s", columns.get(i).getName());
+        }
+        System.out.println();
+
+        // Print separator
+        System.out.print("  ");
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) System.out.print("-+-");
+            System.out.print("-".repeat(maxWidths[i]));
+        }
+        System.out.println();
+
+        // Print data rows
+        for (List<String> row : rows) {
+            System.out.print("  ");
+            for (int i = 0; i < Math.min(row.size(), columns.size()); i++) {
+                if (i > 0) System.out.print(" | ");
+                System.out.printf("%-" + maxWidths[i] + "s", row.get(i));
+            }
+            System.out.println();
+        }
+    }
+
+    /**
+     * Class to hold column information
+     */
+    private static class ColumnInfo {
+        private final String name;
+        private final String dataType;
+        private final String comment;
+
+        public ColumnInfo(String name, String dataType, String comment) {
+            this.name = name;
+            this.dataType = dataType;
+            this.comment = comment;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getDataType() {
+            return dataType;
+        }
+
+        public String getComment() {
+            return comment;
+        }
+    }
+}
