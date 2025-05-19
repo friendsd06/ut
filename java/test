@@ -2247,3 +2247,1065 @@ Buffer parts efficiently to balance memory usage
 
 Conclusion
 Optimized multipart uploads are essential for reliable, high-performance file transfers to Amazon S3. By implementing the recommendations in this guide, organizations can achieve maximum throughput, reduced costs, and improved reliability for large file uploads. Regular monitoring and dynamic adjustment of part sizes and thread counts based on file characteristics and network conditions will ensure optimal performance across diverse
+
+
+
+==================
+
+package com.example.s3upload.web;
+
+import com.example.s3upload.model.FileCompletionRequest;
+import com.example.s3upload.model.FileCreationDetails;
+import com.example.s3upload.service.DatabricksService;
+import com.example.s3upload.service.FileService;
+import com.example.s3upload.service.KeyPersistenceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * REST Controller for file operations
+ */
+@RestController
+@RequestMapping("/api/files")
+public class FileController {
+    private static final Logger log = LoggerFactory.getLogger(FileController.class);
+
+    private final FileService fileService;
+    private final DatabricksService databricksService;
+    private final KeyPersistenceService keyPersistenceService;
+
+    public FileController(FileService fileService,
+                         DatabricksService databricksService,
+                         KeyPersistenceService keyPersistenceService) {
+        this.fileService = fileService;
+        this.databricksService = databricksService;
+        this.keyPersistenceService = keyPersistenceService;
+    }
+
+    /**
+     * Endpoint to process file creation requests
+     *
+     * @param request File creation details
+     * @return FileCompletionRequest with upload status
+     */
+    @PostMapping("/process")
+    public CompletableFuture<ResponseEntity<FileCompletionRequest>> processFile(
+            @RequestBody FileCreationDetails request) {
+
+        log.info("Received file processing request with ID: {}", request.requestId());
+
+        return fileService.processFileRequest(request)
+                .thenApply(response -> {
+                    log.info("Completed processing request ID: {}", request.requestId());
+                    return ResponseEntity.ok(response);
+                })
+                .exceptionally(ex -> {
+                    log.error("Error processing request ID: {}", request.requestId(), ex);
+                    return ResponseEntity.internalServerError().body(
+                            new FileCompletionRequest(
+                                    request.requestId(),
+                                    request.requestType(),
+                                    request.cobDate(),
+                                    request.freq(),
+                                    false,
+                                    false,
+                                    false,
+                                    request.adjustData() != null && !request.adjustData().isEmpty(),
+                                    false,
+                                    request.keysData() != null && !request.keysData().isEmpty()
+                            )
+                    );
+                });
+    }
+
+    /**
+     * Endpoint to persist distinct keys from the request
+     *
+     * @param request File creation details containing keys to persist
+     * @return FileCompletionRequest with key persistence status
+     */
+    @PostMapping("/persist-keys")
+    public CompletableFuture<ResponseEntity<FileCompletionRequest>> persistKeys(
+            @RequestBody FileCreationDetails request) {
+
+        log.info("Received request to persist keys for request ID: {}", request.requestId());
+
+        // Validate request has keys
+        if (request.keysData() == null || request.keysData().isEmpty()) {
+            log.warn("No keys to persist for request ID: {}", request.requestId());
+            return CompletableFuture.completedFuture(
+                ResponseEntity.badRequest().body(
+                    new FileCompletionRequest(
+                        request.requestId(),
+                        request.requestType(),
+                        request.cobDate(),
+                        request.freq(),
+                        false, // base file status
+                        false, // is base file
+                        false, // adj file status
+                        false, // is adj file
+                        false, // key file status
+                        true   // is key file (requested but failed)
+                    )
+                )
+            );
+        }
+
+        // Process the keys asynchronously
+        return keyPersistenceService.persistKeys(request.requestId(), request.keysData())
+            .thenApply(success -> {
+                log.info("Completed persisting keys for request ID: {}, success: {}",
+                         request.requestId(), success);
+
+                return ResponseEntity.ok(
+                    new FileCompletionRequest(
+                        request.requestId(),
+                        request.requestType(),
+                        request.cobDate(),
+                        request.freq(),
+                        false, // base file status
+                        false, // is base file
+                        false, // adj file status
+                        false, // is adj file
+                        success, // key file status
+                        true    // is key file
+                    )
+                );
+            })
+            .exceptionally(ex -> {
+                log.error("Error persisting keys for request ID: {}", request.requestId(), ex);
+                return ResponseEntity.internalServerError().body(
+                    new FileCompletionRequest(
+                        request.requestId(),
+                        request.requestType(),
+                        request.cobDate(),
+                        request.freq(),
+                        false, // base file status
+                        false, // is base file
+                        false, // adj file status
+                        false, // is adj file
+                        false, // key file status (failed)
+                        true   // is key file
+                    )
+                );
+            });
+    }
+
+    /**
+     * Endpoint to create base files using data fetched from Databricks
+     *
+     * @param request File creation details with parameters for data retrieval
+     * @return FileCompletionRequest with base file creation status
+     */
+    @PostMapping("/create-base-file")
+    public CompletableFuture<ResponseEntity<FileCompletionRequest>> createBaseFile(
+            @RequestBody FileCreationDetails request) {
+
+        log.info("Received request to create base file for request ID: {}", request.requestId());
+
+        // First fetch data from Databricks
+        return databricksService.fetchData(request)
+            .thenCompose(databricksData -> {
+                // Create a modified request with the fetched data
+                FileCreationDetails modifiedRequest = new FileCreationDetails(
+                    request.requestId(),
+                    request.sliceNames(),
+                    request.distinctIds(),
+                    request.idFilePath(),
+                    request.parentTableName(),
+                    request.requestType(),
+                    request.cobDate(),
+                    request.freq(),
+                    request.tableList(),
+                    null, // No adjustment data needed for base file only
+                    request.keysData() // Keep original keys if any
+                );
+
+                // Process only the base file using the existing service
+                return fileService.processBaseFileOnly(modifiedRequest, databricksData);
+            })
+            .thenApply(success -> {
+                log.info("Completed base file creation for request ID: {}, success: {}",
+                         request.requestId(), success);
+
+                return ResponseEntity.ok(
+                    new FileCompletionRequest(
+                        request.requestId(),
+                        request.requestType(),
+                        request.cobDate(),
+                        request.freq(),
+                        success, // base file status
+                        true,    // is base file
+                        false,   // adj file status
+                        false,   // is adj file
+                        false,   // key file status
+                        false    // is key file
+                    )
+                );
+            })
+            .exceptionally(ex -> {
+                log.error("Error creating base file for request ID: {}", request.requestId(), ex);
+                return ResponseEntity.internalServerError().body(
+                    new FileCompletionRequest(
+                        request.requestId(),
+                        request.requestType(),
+                        request.cobDate(),
+                        request.freq(),
+                        false, // base file status (failed)
+                        true,  // is base file
+                        false, // adj file status
+                        false, // is adj file
+                        false, // key file status
+                        false  // is key file
+                    )
+                );
+            });
+    }
+}
+
+====================
+
+package com.example.s3upload.service;
+
+import com.example.s3upload.mapper.BaseFileMapper;
+import com.example.s3upload.model.FileCreationDetails;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+/**
+ * Service responsible for fetching data from Databricks or database
+ * for base file generation
+ */
+@Service
+public class DatabricksService {
+    private static final Logger log = LoggerFactory.getLogger(DatabricksService.class);
+
+    @Value("${app.databricks.enabled:false}")
+    private boolean databricksEnabled;
+
+    private final BaseFileMapper baseFileMapper;
+
+    public DatabricksService(BaseFileMapper baseFileMapper) {
+        this.baseFileMapper = baseFileMapper;
+    }
+
+    /**
+     * Fetches data for base file generation based on request parameters
+     *
+     * @param request File creation details with parameters for data retrieval
+     * @return CompletableFuture with the fetched data
+     */
+    public CompletableFuture<List<String>> fetchData(FileCreationDetails request) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                log.info("Fetching data for base file creation, request ID: {}", request.requestId());
+
+                List<String> data;
+                if (databricksEnabled) {
+                    // When Databricks is enabled, fetch from Databricks
+                    data = fetchDataFromDatabricks(request);
+                } else {
+                    // Otherwise, use MyBatis to fetch from database
+                    data = fetchDataFromDatabase(request);
+                }
+
+                log.info("Successfully fetched {} records for request ID: {}",
+                        data.size(), request.requestId());
+                return data;
+            } catch (Exception e) {
+                log.error("Error fetching data for request ID {}: {}",
+                        request.requestId(), e.getMessage(), e);
+                throw new RuntimeException("Failed to fetch data for base file", e);
+            }
+        });
+    }
+
+    /**
+     * Fetches data from database using MyBatis
+     */
+    private List<String> fetchDataFromDatabase(FileCreationDetails request) {
+        log.info("Fetching data from database for request ID: {}", request.requestId());
+
+        // Validate parent table name
+        String tableName = request.parentTableName();
+        if (tableName == null || tableName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Parent table name is required");
+        }
+
+        // Prepare parameters
+        Map<String, Object> params = new HashMap<>();
+        params.put("tableName", sanitizeTableName(tableName));
+        params.put("requestId", request.requestId());
+        params.put("distinctIds", request.distinctIds());
+        params.put("cobDate", request.cobDate());
+
+        try {
+            // Fetch data from database
+            List<Map<String, Object>> resultMaps = baseFileMapper.fetchBaseFileData(params);
+
+            // Convert result maps to CSV strings
+            return resultMaps.stream()
+                    .map(this::mapToCsvString)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Database query failed for request {}: {}", request.requestId(), e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * Fetch data from Databricks (placeholder for actual implementation)
+     */
+    private List<String> fetchDataFromDatabricks(FileCreationDetails request) {
+        log.info("Databricks integration is enabled, but not fully implemented");
+
+        // Placeholder implementation - would be replaced with actual Databricks API calls
+        // For now, we'll just return some dummy data
+        List<String> dummyData = new ArrayList<>();
+        dummyData.add("DATABRICKS_ID001," + request.requestId() + ",COLUMN1_VALUE,COLUMN2_VALUE");
+        dummyData.add("DATABRICKS_ID002," + request.requestId() + ",COLUMN1_VALUE,COLUMN2_VALUE");
+        dummyData.add("DATABRICKS_ID003," + request.requestId() + ",COLUMN1_VALUE,COLUMN2_VALUE");
+
+        return dummyData;
+    }
+
+    /**
+     * Converts a map of column names and values to a CSV string
+     */
+    private String mapToCsvString(Map<String, Object> row) {
+        StringBuilder csvBuilder = new StringBuilder();
+        boolean first = true;
+
+        // Get column names in sorted order for consistency
+        List<String> columns = new ArrayList<>(row.keySet());
+        Collections.sort(columns);
+
+        for (String column : columns) {
+            if (!first) {
+                csvBuilder.append(",");
+            }
+
+            Object value = row.get(column);
+            if (value != null) {
+                // Escape values if needed
+                String strValue = value.toString().replace("\"", "\"\"");
+
+                if (strValue.contains(",") || strValue.contains("\"") || strValue.contains("\n")) {
+                    csvBuilder.append("\"").append(strValue).append("\"");
+                } else {
+                    csvBuilder.append(strValue);
+                }
+            }
+
+            first = false;
+        }
+
+        return csvBuilder.toString();
+    }
+
+    /**
+     * Sanitizes a table name to prevent SQL injection
+     * Only allows alphanumeric characters and underscores
+     */
+    private String sanitizeTableName(String tableName) {
+        // Remove any potentially harmful characters
+        String sanitized = tableName.replaceAll("[^a-zA-Z0-9_]", "");
+
+        if (sanitized.isEmpty()) {
+            throw new IllegalArgumentException("Invalid table name after sanitization");
+        }
+
+        return sanitized;
+    }
+}
+
+=============================
+package com.example.s3upload.mapper;
+
+import com.example.s3upload.model.BaseFileData;
+import org.apache.ibatis.annotations.*;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * MyBatis mapper interface for fetching data from database for base file generation
+ */
+@Mapper
+public interface BaseFileMapper {
+
+    /**
+     * Fetch data for base file generation based on request parameters
+     *
+     * @param params Map of parameters including requestId, distinctIds, and cobDate
+     * @return List of BaseFileData records
+     */
+    @Select("<script>" +
+            "SELECT * FROM ${tableName} " +
+            "<where>" +
+            "  <if test='distinctIds != null and distinctIds.size() > 0'>" +
+            "    id IN " +
+            "    <foreach item='item' collection='distinctIds' open='(' separator=',' close=')'>" +
+            "      #{item}" +
+            "    </foreach>" +
+            "  </if>" +
+            "  <if test='cobDate != null and cobDate != \"\"'>" +
+            "    <if test='distinctIds != null and distinctIds.size() > 0'> AND </if>" +
+            "    date = #{cobDate}" +
+            "  </if>" +
+            "</where>" +
+            "</script>")
+    List<Map<String, Object>> fetchBaseFileData(Map<String, Object> params);
+
+    /**
+     * Fetch data from specific table with SQL injection protection
+     *
+     * @param tableName The table name
+     * @param requestId The request ID
+     * @param cobDate The COB date
+     * @return List of generic data records
+     */
+    @Select("<script>" +
+            "SELECT * FROM ${tableName} " +
+            "<where>" +
+            "  <if test='cobDate != null and cobDate != \"\"'>" +
+            "    date = #{cobDate}" +
+            "  </if>" +
+            "</where>" +
+            "LIMIT 1000" +  // Add limit for safety
+            "</script>")
+    List<Map<String, Object>> fetchDataFromTable(
+            @Param("tableName") String tableName,
+            @Param("requestId") String requestId,
+            @Param("cobDate") String cobDate);
+
+    /**
+     * Fetch data using raw SQL query with parameter binding for safety
+     * This can be used for complex queries that can't be easily represented in annotations
+     *
+     * @param sqlQuery The SQL query to execute
+     * @param params Map of parameters to bind to the query
+     * @return List of data records
+     */
+    @Select("${sqlQuery}")
+    List<Map<String, Object>> executeRawQuery(
+            @Param("sqlQuery") String sqlQuery,
+            @Param("params") Map<String, Object> params);
+}
+
+=================================
+
+package com.example.s3upload.service;
+
+import com.amazonaws.services.sqs.AmazonSQS;
+import com.amazonaws.services.sqs.model.DeleteMessageRequest;
+import com.amazonaws.services.sqs.model.Message;
+import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
+import com.amazonaws.services.sqs.model.ReceiveMessageResult;
+import com.example.s3upload.model.FileCreationDetails;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * Service to consume messages from AWS SQS queue and process file requests
+ */
+@Service
+public class SqsMessageConsumer {
+    private static final Logger log = LoggerFactory.getLogger(SqsMessageConsumer.class);
+
+    @Value("${aws.sqs.queue-url}")
+    private String queueUrl;
+
+    @Value("${aws.sqs.max-messages:10}")
+    private int maxMessages;
+
+    @Value("${aws.sqs.wait-time-seconds:20}")
+    private int waitTimeSeconds;
+
+    @Value("${aws.sqs.visibility-timeout-seconds:30}")
+    private int visibilityTimeoutSeconds;
+
+    @Value("${aws.sqs.polling-enabled:true}")
+    private boolean pollingEnabled;
+
+    private final AmazonSQS sqsClient;
+    private final ObjectMapper objectMapper;
+    private final FileService fileService;
+
+    public SqsMessageConsumer(AmazonSQS sqsClient, ObjectMapper objectMapper, FileService fileService) {
+        this.sqsClient = sqsClient;
+        this.objectMapper = objectMapper;
+        this.fileService = fileService;
+    }
+
+    /**
+     * Poll the SQS queue at a fixed rate and process any received messages
+     */
+    @Scheduled(fixedDelayString = "${aws.sqs.polling-interval-ms:60000}")
+    public void pollAndProcessMessages() {
+        if (!pollingEnabled) {
+            return;
+        }
+
+        try {
+            log.debug("Polling SQS queue: {}", queueUrl);
+
+            // Build receive message request
+            ReceiveMessageRequest receiveRequest = new ReceiveMessageRequest()
+                    .withQueueUrl(queueUrl)
+                    .withMaxNumberOfMessages(maxMessages)
+                    .withWaitTimeSeconds(waitTimeSeconds)
+                    .withVisibilityTimeout(visibilityTimeoutSeconds);
+
+            // Receive messages from the queue
+            ReceiveMessageResult result = sqsClient.receiveMessage(receiveRequest);
+            List<Message> messages = result.getMessages();
+
+            if (messages.isEmpty()) {
+                log.debug("No messages received from queue");
+                return;
+            }
+
+            log.info("Received {} messages from SQS queue", messages.size());
+
+            // Process each message
+            for (Message message : messages) {
+                processMessage(message);
+            }
+
+        } catch (Exception e) {
+            log.error("Error polling SQS queue: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Process a single SQS message
+     */
+    private void processMessage(Message message) {
+        String messageId = message.getMessageId();
+        String receiptHandle = message.getReceiptHandle();
+
+        log.info("Processing message with ID: {}", messageId);
+
+        try {
+            // Parse message body to FileCreationDetails
+            String messageBody = message.getBody();
+            FileCreationDetails request = objectMapper.readValue(messageBody, FileCreationDetails.class);
+
+            // Process the file request
+            CompletableFuture<Void> processingFuture = fileService.processFileRequest(request)
+                .thenAccept(result -> {
+                    log.info("Successfully processed file request from SQS message: {}, requestId: {}",
+                            messageId, request.requestId());
+                })
+                .exceptionally(ex -> {
+                    log.error("Error processing file request from SQS message: {}, requestId: {}",
+                            messageId, request.requestId(), ex);
+                    return null;
+                });
+
+            // Delete the message from the queue after processing starts
+            // Note: In production, you might want to delete only after processing completes
+            deleteMessageFromQueue(receiptHandle);
+
+        } catch (Exception e) {
+            log.error("Error processing SQS message {}: {}", messageId, e.getMessage(), e);
+
+            // Handle message parsing errors by deleting the message
+            // You might want a dead letter queue for this in production
+            deleteMessageFromQueue(receiptHandle);
+        }
+    }
+
+    /**
+     * Delete a message from the SQS queue
+     */
+    private void deleteMessageFromQueue(String receiptHandle) {
+        try {
+            DeleteMessageRequest deleteRequest = new DeleteMessageRequest(queueUrl, receiptHandle);
+            sqsClient.deleteMessage(deleteRequest);
+            log.debug("Deleted message with receipt handle: {}", receiptHandle);
+        } catch (Exception e) {
+            log.error("Error deleting message from queue: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Manually poll and process messages (can be called from a controller endpoint)
+     *
+     * @return Number of messages processed
+     */
+    public int manuallyPollAndProcessMessages() {
+        try {
+            ReceiveMessageRequest receiveRequest = new ReceiveMessageRequest()
+                    .withQueueUrl(queueUrl)
+                    .withMaxNumberOfMessages(maxMessages)
+                    .withWaitTimeSeconds(waitTimeSeconds)
+                    .withVisibilityTimeout(visibilityTimeoutSeconds);
+
+            ReceiveMessageResult result = sqsClient.receiveMessage(receiveRequest);
+            List<Message> messages = result.getMessages();
+
+            for (Message message : messages) {
+                processMessage(message);
+            }
+
+            return messages.size();
+        } catch (Exception e) {
+            log.error("Error manually polling SQS queue: {}", e.getMessage(), e);
+            return 0;
+        }
+    }
+}
+
+===========================
+
+package com.example.s3upload.web;
+
+import com.example.s3upload.service.AdvancedSqsConsumer;
+import com.example.s3upload.service.SqsMessageConsumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Controller for SQS-related operations
+ */
+@RestController
+@RequestMapping("/api/sqs")
+public class SqsController {
+    private static final Logger log = LoggerFactory.getLogger(SqsController.class);
+
+    private final SqsMessageConsumer sqsMessageConsumer;
+    private final AdvancedSqsConsumer advancedSqsConsumer;
+
+    public SqsController(SqsMessageConsumer sqsMessageConsumer,
+                         AdvancedSqsConsumer advancedSqsConsumer) {
+        this.sqsMessageConsumer = sqsMessageConsumer;
+        this.advancedSqsConsumer = advancedSqsConsumer;
+    }
+
+    /**
+     * Manually trigger SQS message polling
+     *
+     * @return Response with number of messages processed
+     */
+    @PostMapping("/poll")
+    public ResponseEntity<Map<String, Object>> pollMessages() {
+        log.info("Manual SQS polling requested");
+
+        try {
+            int processedCount = sqsMessageConsumer.manuallyPollAndProcessMessages();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("messagesProcessed", processedCount);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error during manual polling: {}", e.getMessage(), e);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * Start the advanced SQS consumer
+     */
+    @PostMapping("/start")
+    public ResponseEntity<Map<String, Object>> startConsumer() {
+        log.info("Starting SQS consumer");
+
+        try {
+            advancedSqsConsumer.start();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "SQS consumer started successfully");
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error starting SQS consumer: {}", e.getMessage(), e);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * Stop the advanced SQS consumer
+     */
+    @PostMapping("/stop")
+    public ResponseEntity<Map<String, Object>> stopConsumer() {
+        log.info("Stopping SQS consumer");
+
+        try {
+            advancedSqsConsumer.stop();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "SQS consumer stopped successfully");
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error stopping SQS consumer: {}", e.getMessage(), e);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+}
+
+=================================
+
+package com.example.s3upload.service;
+
+import com.amazonaws.services.sqs.AmazonSQS;
+import com.amazonaws.services.sqs.model.Message;
+import com.example.s3upload.model.FileCreationDetails;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+
+/**
+ * Alternative implementation of SQS message consumer using more flexible
+ * notification pattern
+ */
+@Service
+public class AdvancedSqsConsumer {
+    private static final Logger log = LoggerFactory.getLogger(AdvancedSqsConsumer.class);
+
+    @Value("${aws.sqs.queue-url}")
+    private String queueUrl;
+
+    @Value("${aws.sqs.max-messages:10}")
+    private int maxMessages;
+
+    @Value("${aws.sqs.wait-time-seconds:20}")
+    private int waitTimeSeconds;
+
+    @Value("${aws.sqs.visibility-timeout-seconds:30}")
+    private int visibilityTimeoutSeconds;
+
+    @Value("${aws.sqs.consumer-threads:2}")
+    private int consumerThreads;
+
+    private final AmazonSQS sqsClient;
+    private final ObjectMapper objectMapper;
+    private final FileService fileService;
+    private final List<Consumer<FileCreationDetails>> messageHandlers = new ArrayList<>();
+    private ScheduledExecutorService executorService;
+    private volatile boolean running = false;
+
+    public AdvancedSqsConsumer(AmazonSQS sqsClient, ObjectMapper objectMapper, FileService fileService) {
+        this.sqsClient = sqsClient;
+        this.objectMapper = objectMapper;
+        this.fileService = fileService;
+
+        // Register the default file processing handler
+        registerHandler(this::processFileRequest);
+    }
+
+    /**
+     * Start consuming messages from the queue using multiple threads
+     */
+    public synchronized void start() {
+        if (running) {
+            return;
+        }
+
+        running = true;
+        executorService = Executors.newScheduledThreadPool(consumerThreads);
+
+        // Start consumer threads
+        for (int i = 0; i < consumerThreads; i++) {
+            final int threadId = i;
+            executorService.scheduleWithFixedDelay(
+                () -> consumeMessages(threadId),
+                0,
+                1000, // 1 second delay between polling attempts
+                TimeUnit.MILLISECONDS
+            );
+        }
+
+        log.info("Started SQS message consumer with {} threads", consumerThreads);
+    }
+
+    /**
+     * Stop consuming messages
+     */
+    public synchronized void stop() {
+        if (!running) {
+            return;
+        }
+
+        running = false;
+
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        log.info("Stopped SQS message consumer");
+    }
+
+    /**
+     * Register a custom message handler
+     *
+     * @param handler Consumer function that processes FileCreationDetails
+     */
+    public void registerHandler(Consumer<FileCreationDetails> handler) {
+        messageHandlers.add(handler);
+    }
+
+    /**
+     * Default file processing handler
+     */
+    private void processFileRequest(FileCreationDetails request) {
+        fileService.processFileRequest(request)
+            .thenAccept(result -> {
+                log.info("Successfully processed file request: {}", request.requestId());
+            })
+            .exceptionally(ex -> {
+                log.error("Error processing file request: {}", request.requestId(), ex);
+                return null;
+            });
+    }
+
+    /**
+     * Consume messages from the queue
+     */
+    private void consumeMessages(int threadId) {
+        try {
+            log.debug("Consumer thread {} polling SQS queue: {}", threadId, queueUrl);
+
+            // Receive messages from the queue
+            List<Message> messages = sqsClient.receiveMessage(req -> req
+                .queueUrl(queueUrl)
+                .maxNumberOfMessages(maxMessages)
+                .waitTimeSeconds(waitTimeSeconds)
+                .visibilityTimeout(visibilityTimeoutSeconds))
+                .messages();
+
+            if (messages.isEmpty()) {
+                return;
+            }
+
+            log.info("Consumer thread {} received {} messages", threadId, messages.size());
+
+            // Process each message
+            for (Message message : messages) {
+                processMessageWithHandlers(message);
+            }
+
+        } catch (Exception e) {
+            log.error("Error in consumer thread {}: {}", threadId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Process a message with all registered handlers
+     */
+    private void processMessageWithHandlers(Message message) {
+        String messageId = message.messageId();
+        String receiptHandle = message.receiptHandle();
+
+        try {
+            // Parse message body
+            String messageBody = message.body();
+            FileCreationDetails request = objectMapper.readValue(messageBody, FileCreationDetails.class);
+
+            log.info("Processing message {} with request ID: {}", messageId, request.requestId());
+
+            // Notify all handlers
+            for (Consumer<FileCreationDetails> handler : messageHandlers) {
+                try {
+                    handler.accept(request);
+                } catch (Exception e) {
+                    log.error("Handler error for message {}: {}", messageId, e.getMessage(), e);
+                }
+            }
+
+            // Delete the message after notifying all handlers
+            deleteMessage(receiptHandle);
+
+        } catch (Exception e) {
+            log.error("Error processing message {}: {}", messageId, e.getMessage(), e);
+            deleteMessage(receiptHandle);
+        }
+    }
+
+    /**
+     * Delete a message from the queue
+     */
+    private void deleteMessage(String receiptHandle) {
+        try {
+            sqsClient.deleteMessage(req -> req
+                .queueUrl(queueUrl)
+                .receiptHandle(receiptHandle));
+
+            log.debug("Deleted message with receipt handle: {}", receiptHandle);
+        } catch (Exception e) {
+            log.error("Error deleting message: {}", e.getMessage(), e);
+        }
+    }
+}
+===============================
+
+package com.example.s3upload.config;
+
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.client.builder.AwsClientBuilder;
+import com.amazonaws.services.sqs.AmazonSQS;
+import com.amazonaws.services.sqs.AmazonSQSClientBuilder;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+/**
+ * Configuration for AWS SQS client and related services
+ */
+@Configuration
+@EnableScheduling
+public class AwsConfig {
+
+    @Value("${aws.accessKey}")
+    private String accessKey;
+
+    @Value("${aws.secretKey}")
+    private String secretKey;
+
+    @Value("${aws.region}")
+    private String region;
+
+    @Value("${aws.sqs.endpoint:#{null}}")
+    private String sqsEndpoint;
+
+    /**
+     * Creates the AmazonSQS client
+     *
+     * @return Configured AmazonSQS client
+     */
+    @Bean
+    public AmazonSQS amazonSQS() {
+        BasicAWSCredentials credentials = new BasicAWSCredentials(accessKey, secretKey);
+
+        AmazonSQSClientBuilder builder = AmazonSQSClientBuilder.standard()
+                .withCredentials(new AWSStaticCredentialsProvider(credentials));
+
+        // If a custom endpoint is provided, use it (useful for local testing with LocalStack, etc.)
+        if (sqsEndpoint != null && !sqsEndpoint.isEmpty()) {
+            builder.withEndpointConfiguration(
+                    new AwsClientBuilder.EndpointConfiguration(sqsEndpoint, region));
+        } else {
+            builder.withRegion(region);
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * Object mapper for JSON serialization/deserialization
+     */
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
+    }
+}
+
+============================
+# AWS SQS Properties
+aws.accessKey=your-access-key
+aws.secretKey=your-secret-key
+aws.region=us-east-1
+
+# SQS Queue Configuration
+aws.sqs.queue-url=https://sqs.us-east-1.amazonaws.com/123456789012/file-processing-queue
+aws.sqs.max-messages=10
+aws.sqs.wait-time-seconds=20
+aws.sqs.visibility-timeout-seconds=300
+aws.sqs.polling-interval-ms=60000
+aws.sqs.polling-enabled=true
+aws.sqs.consumer-threads=2
+
+# For local testing with LocalStack
+# aws.sqs.endpoint=http://localhost:4566
+
+# Application Configuration
+spring.application.name=file-processing-service
+server.port=8080
+
+# Database Configuration for MyBatis
+spring.datasource.url=jdbc:mysql://localhost:3306/file_db
+spring.datasource.username=root
+spring.datasource.password=secret
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+# MyBatis Configuration
+mybatis.mapper-locations=classpath:mapper/*.xml
+mybatis.type-aliases-package=com.example.s3upload.model
+mybatis.configuration.map-underscore-to-camel-case=true
+
+# S3 Configuration
+app.s3.bucket-name=my-data-bucket
+app.upload.directory=D://data
+app.upload.max-threads=10
+app.upload.part-size-mb=8
+app.upload.timeout-minutes=30
+
+# Logging Configuration
+logging.level.root=INFO
+logging.level.com.example.s3upload=DEBUG
+logging.level.org.mybatis=INFO
