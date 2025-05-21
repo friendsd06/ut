@@ -1416,3 +1416,187 @@ public class FileService {
     }
 }
 ====================
+
+package com.example.s3upload.config;
+
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.mybatis.spring.SqlSessionFactoryBean;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.mybatis.spring.annotation.MapperScan;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.SimpleDriverDataSource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import javax.sql.DataSource;
+import jakarta.annotation.PostConstruct;
+import java.util.Properties;
+
+/**
+ * Configuration class for Databricks SQL Warehouse connections using token-based authentication
+ * Configured for MyBatis integration without connection pooling
+ */
+@Configuration
+@EnableTransactionManagement
+@MapperScan(basePackages = "com.example.s3upload.mapper")
+public class DatabricksConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(DatabricksConfig.class);
+
+    @Value("${databricks.sql.hostname}")
+    private String hostname;
+
+    @Value("${databricks.sql.http-path}")
+    private String httpPath;
+
+    @Value("${databricks.sql.access-token}")
+    private String accessToken;
+
+    @Value("${databricks.sql.catalog:hive_metastore}")
+    private String catalog;
+
+    @Value("${databricks.sql.schema:default}")
+    private String schema;
+
+    @Value("${mybatis.mapper-locations:classpath:mapper/**/*.xml}")
+    private String mapperLocations;
+
+    @Value("${mybatis.type-aliases-package:com.example.s3upload.model}")
+    private String typeAliasesPackage;
+
+    @Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
+    @PostConstruct
+    public void logConfiguration() {
+        log.info("Initializing Databricks SQL configuration with MyBatis for environment: {}", activeProfile);
+        log.info("Databricks Hostname: {}", hostname);
+        log.info("Databricks HTTP Path: {}", httpPath);
+        log.info("Databricks Catalog: {}", catalog);
+        log.info("Databricks Schema: {}", schema);
+        log.info("MyBatis Mapper Locations: {}", mapperLocations);
+        log.info("MyBatis Type Aliases Package: {}", typeAliasesPackage);
+    }
+
+    /**
+     * Creates and configures a simple Databricks SQL DataSource
+     * with token-based authentication (no connection pooling)
+     * @return Configured DataSource for Databricks SQL connections
+     */
+    @Bean
+    @Primary
+    public DataSource dataSource() {
+        SimpleDriverDataSource dataSource = new SimpleDriverDataSource();
+
+        try {
+            // Set JDBC driver
+            dataSource.setDriverClass(
+                (Class<? extends java.sql.Driver>) Class.forName("com.databricks.client.jdbc.Driver")
+            );
+
+            // Build the JDBC URL
+            String jdbcUrl = String.format("jdbc:databricks://%s:443/default", hostname);
+            dataSource.setUrl(jdbcUrl);
+
+            // Set connection properties for token auth
+            Properties props = new Properties();
+            props.setProperty("httpPath", httpPath);
+            props.setProperty("AuthMech", "3"); // 3 = Username/Password auth mechanism
+            props.setProperty("SSL", "1"); // 1 = Enable SSL
+            props.setProperty("ConnCatalog", catalog);
+            props.setProperty("ConnSchema", schema);
+            props.setProperty("personalAccessToken", accessToken); // Use token
+            props.setProperty("RowsFetchedPerBlock", "10000"); // Performance tuning
+            props.setProperty("EnableArrow", "1"); // Enable Arrow for better performance
+
+            dataSource.setConnectionProperties(props);
+
+            log.info("Databricks SQL DataSource configured successfully with token authentication (no connection pooling)");
+
+        } catch (ClassNotFoundException e) {
+            log.error("Failed to load Databricks JDBC driver: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to initialize Databricks DataSource", e);
+        }
+
+        return dataSource;
+    }
+
+    /**
+     * Creates and configures the MyBatis SqlSessionFactory
+     * @param dataSource The configured Databricks SQL DataSource
+     * @return SqlSessionFactory for MyBatis operations
+     * @throws Exception If an error occurs during setup
+     */
+    @Bean
+    public SqlSessionFactory sqlSessionFactory(DataSource dataSource) throws Exception {
+        SqlSessionFactoryBean sqlSessionFactoryBean = new SqlSessionFactoryBean();
+        sqlSessionFactoryBean.setDataSource(dataSource);
+
+        // Configure MyBatis
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        sqlSessionFactoryBean.setMapperLocations(resolver.getResources(mapperLocations));
+        sqlSessionFactoryBean.setTypeAliasesPackage(typeAliasesPackage);
+
+        // Optional MyBatis configuration
+        org.apache.ibatis.session.Configuration configuration = new org.apache.ibatis.session.Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        configuration.setCacheEnabled(false);
+
+        // Add catalog and schema as variables for use in mapper files
+        Properties variables = new Properties();
+        variables.setProperty("catalog", catalog);
+        variables.setProperty("schema", schema);
+        configuration.setVariables(variables);
+
+        sqlSessionFactoryBean.setConfiguration(configuration);
+
+        return sqlSessionFactoryBean.getObject();
+    }
+
+    /**
+     * Creates the SqlSessionTemplate for MyBatis
+     * @param sqlSessionFactory The configured SqlSessionFactory
+     * @return SqlSessionTemplate for MyBatis operations
+     */
+    @Bean
+    public SqlSessionTemplate sqlSessionTemplate(SqlSessionFactory sqlSessionFactory) {
+        return new SqlSessionTemplate(sqlSessionFactory);
+    }
+
+    /**
+     * Configures the transaction manager for the Databricks DataSource
+     * @param dataSource The configured Databricks SQL DataSource
+     * @return PlatformTransactionManager for transaction management
+     */
+    @Bean
+    public PlatformTransactionManager transactionManager(DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+}
+
+
+======================
+
+# Databricks SQL Warehouse Configuration with Token-based Authentication
+databricks:
+  sql:
+    hostname: your-workspace.cloud.databricks.com
+    http-path: /sql/1.0/warehouses/your-warehouse-id
+    access-token: ${DATABRICKS_TOKEN}  # Using environment variable for security
+    catalog: hive_metastore
+    schema: default
+
+# MyBatis Configuration
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.example.s3upload.model
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: false
