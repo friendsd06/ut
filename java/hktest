@@ -1600,3 +1600,313 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: false
+
+
+--------------------
+package com.example.s3upload.config;
+
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.mybatis.spring.SqlSessionFactoryBean;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.mybatis.spring.annotation.MapperScan;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.SimpleDriverDataSource;
+import org.springframework.transaction.PlatformTransactionManager;
+
+import javax.sql.DataSource;
+import jakarta.annotation.PostConstruct;
+import java.util.Properties;
+
+/**
+ * Configuration class for Databricks SQL Warehouse connections
+ * Isolated configuration to avoid conflicts with other DataSource configurations
+ */
+@Configuration
+// Use a specific namespace for your Databricks mappers
+@MapperScan(
+    basePackages = "com.example.s3upload.mapper.databricks",
+    sqlSessionFactoryRef = "databricksSqlSessionFactory"
+)
+public class DatabricksConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(DatabricksConfig.class);
+
+    @Value("${databricks.sql.hostname}")
+    private String hostname;
+
+    @Value("${databricks.sql.http-path}")
+    private String httpPath;
+
+    @Value("${databricks.sql.access-token}")
+    private String accessToken;
+
+    @Value("${databricks.sql.catalog:hive_metastore}")
+    private String catalog;
+
+    @Value("${databricks.sql.schema:default}")
+    private String schema;
+
+    @Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
+    @PostConstruct
+    public void logConfiguration() {
+        log.info("Initializing Databricks SQL configuration for environment: {}", activeProfile);
+        log.info("Databricks Hostname: {}", hostname);
+        log.info("Databricks HTTP Path: {}", httpPath);
+        log.info("Databricks Catalog: {}", catalog);
+        log.info("Databricks Schema: {}", schema);
+    }
+
+    /**
+     * Creates and configures a Databricks SQL DataSource with token-based authentication
+     * Uses specific bean name to avoid conflicts
+     */
+    @Bean(name = "databricksDataSource")
+    public DataSource databricksDataSource() {
+        SimpleDriverDataSource dataSource = new SimpleDriverDataSource();
+
+        try {
+            // Set JDBC driver
+            dataSource.setDriverClass(
+                (Class<? extends java.sql.Driver>) Class.forName("com.databricks.client.jdbc.Driver")
+            );
+
+            // Build the JDBC URL
+            String jdbcUrl = String.format("jdbc:databricks://%s:443/default", hostname);
+            dataSource.setUrl(jdbcUrl);
+
+            // Set connection properties for token auth
+            Properties props = new Properties();
+            props.setProperty("httpPath", httpPath);
+            props.setProperty("AuthMech", "3"); // 3 = Username/Password auth mechanism
+            props.setProperty("SSL", "1"); // 1 = Enable SSL
+            props.setProperty("ConnCatalog", catalog);
+            props.setProperty("ConnSchema", schema);
+            props.setProperty("personalAccessToken", accessToken); // Use token
+            props.setProperty("RowsFetchedPerBlock", "10000"); // Performance tuning
+            props.setProperty("EnableArrow", "1"); // Enable Arrow for better performance
+
+            dataSource.setConnectionProperties(props);
+
+            log.info("Databricks SQL DataSource configured successfully with token authentication");
+
+        } catch (ClassNotFoundException e) {
+            log.error("Failed to load Databricks JDBC driver: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to initialize Databricks DataSource", e);
+        }
+
+        return dataSource;
+    }
+
+    /**
+     * Creates and configures the MyBatis SqlSessionFactory specifically for Databricks
+     * Uses specific bean name to avoid conflicts
+     */
+    @Bean(name = "databricksSqlSessionFactory")
+    public SqlSessionFactory databricksSqlSessionFactory(
+            @Qualifier("databricksDataSource") DataSource databricksDataSource) throws Exception {
+
+        SqlSessionFactoryBean sqlSessionFactoryBean = new SqlSessionFactoryBean();
+        sqlSessionFactoryBean.setDataSource(databricksDataSource);
+
+        // Configure MyBatis
+        org.apache.ibatis.session.Configuration configuration = new org.apache.ibatis.session.Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        configuration.setCacheEnabled(false);
+
+        // Add catalog and schema as variables for use in mappers
+        Properties variables = new Properties();
+        variables.setProperty("catalog", catalog);
+        variables.setProperty("schema", schema);
+        configuration.setVariables(variables);
+
+        sqlSessionFactoryBean.setConfiguration(configuration);
+
+        return sqlSessionFactoryBean.getObject();
+    }
+
+    /**
+     * Creates the SqlSessionTemplate for MyBatis with Databricks
+     * Uses specific bean name to avoid conflicts
+     */
+    @Bean(name = "databricksSqlSessionTemplate")
+    public SqlSessionTemplate databricksSqlSessionTemplate(
+            @Qualifier("databricksSqlSessionFactory") SqlSessionFactory databricksSqlSessionFactory) {
+        return new SqlSessionTemplate(databricksSqlSessionFactory);
+    }
+
+    /**
+     * Configures the transaction manager for the Databricks DataSource
+     * Uses specific bean name to avoid conflicts
+     */
+    @Bean(name = "databricksTransactionManager")
+    public PlatformTransactionManager databricksTransactionManager(
+            @Qualifier("databricksDataSource") DataSource databricksDataSource) {
+        return new DataSourceTransactionManager(databricksDataSource);
+    }
+}
+
+===================
+
+package com.example.s3upload.service;
+
+import com.example.s3upload.mapper.databricks.KeyMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Service for interacting with Databricks SQL Warehouse via MyBatis
+ */
+@Service
+public class DatabricksSqlService {
+
+    private static final Logger log = LoggerFactory.getLogger(DatabricksSqlService.class);
+
+    @Value("${databricks.sql.catalog:hive_metastore}")
+    private String catalog;
+
+    @Value("${databricks.sql.schema:default}")
+    private String schema;
+
+    private final KeyMapper keyMapper;
+
+    /**
+     * Constructor with KeyMapper injection
+     * @param keyMapper MyBatis mapper for key operations
+     */
+    @Autowired
+    public DatabricksSqlService(KeyMapper keyMapper) {
+        this.keyMapper = keyMapper;
+    }
+
+    /**
+     * Persist a key to the database
+     * Explicitly specifies the Databricks transaction manager
+     */
+    @Transactional(transactionManager = "databricksTransactionManager")
+    public boolean persistKey(String requestId, String keyName, String keyValue) {
+        try {
+            int result = keyMapper.insertKey(requestId, keyName, keyValue);
+            return result > 0;
+        } catch (Exception e) {
+            log.error("Error persisting key {} for request {}: {}",
+                    keyName, requestId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Persist multiple keys in a batch
+     * Explicitly specifies the Databricks transaction manager
+     */
+    @Transactional(transactionManager = "databricksTransactionManager")
+    public int persistKeys(String requestId, List<String> keyValuePairs) {
+        if (keyValuePairs == null || keyValuePairs.isEmpty()) {
+            log.warn("No keys to persist for request {}", requestId);
+            return 0;
+        }
+
+        int successCount = 0;
+
+        for (String keyValuePair : keyValuePairs) {
+            String[] parts = keyValuePair.split("=", 2);
+            if (parts.length != 2) {
+                log.warn("Invalid key format: {} for request {}", keyValuePair, requestId);
+                continue;
+            }
+
+            String keyName = parts[0].trim();
+            String keyValue = parts[1].trim();
+
+            if (persistKey(requestId, keyName, keyValue)) {
+                successCount++;
+            }
+        }
+
+        log.info("Persisted {}/{} keys for request {}",
+                successCount, keyValuePairs.size(), requestId);
+
+        return successCount;
+    }
+
+    /**
+     * Check if a key exists
+     */
+    public boolean keyExists(String requestId, String keyName) {
+        try {
+            return keyMapper.keyExists(requestId, keyName);
+        } catch (Exception e) {
+            log.error("Error checking if key {} exists for request {}: {}",
+                    keyName, requestId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Get all keys for a request
+     */
+    public List<String> getKeysByRequestId(String requestId) {
+        try {
+            List<Map<String, Object>> results = keyMapper.getKeysByRequestId(requestId);
+            List<String> formattedKeys = new ArrayList<>();
+
+            for (Map<String, Object> row : results) {
+                String keyName = (String) row.get("keyName");
+                String keyValue = (String) row.get("keyValue");
+                formattedKeys.add(keyName + "=" + keyValue);
+            }
+
+            return formattedKeys;
+        } catch (Exception e) {
+            log.error("Error getting keys for request {}: {}",
+                    requestId, e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Count keys for a request
+     */
+    public int countKeysByRequestId(String requestId) {
+        try {
+            return keyMapper.countKeysByRequestId(requestId);
+        } catch (Exception e) {
+            log.error("Error counting keys for request {}: {}",
+                    requestId, e.getMessage(), e);
+            return 0;
+        }
+    }
+
+    /**
+     * Delete all keys for a request
+     * Explicitly specifies the Databricks transaction manager
+     */
+    @Transactional(transactionManager = "databricksTransactionManager")
+    public boolean deleteKeysByRequestId(String requestId) {
+        try {
+            int count = keyMapper.deleteKeysByRequestId(requestId);
+            log.info("Deleted {} keys for request {}", count, requestId);
+            return count > 0;
+        } catch (Exception e) {
+            log.error("Error deleting keys for request {}: {}",
+                    requestId, e.getMessage(), e);
+            return false;
+        }
+    }
+}
