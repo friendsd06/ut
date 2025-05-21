@@ -1910,3 +1910,68 @@ public class DatabricksSqlService {
         }
     }
 }
+
+--------------------
+
+package com.example.s3upload.mapper.databricks;
+
+import org.apache.ibatis.annotations.*;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * MyBatis mapper for key operations using annotations
+ * Specifically for Databricks database
+ */
+@Mapper
+public interface KeyMapper {
+
+    /**
+     * Insert a key record
+     */
+    @Insert("INSERT INTO ${catalog}.${schema}.keys " +
+            "(request_id, key_name, key_value, created_at) " +
+            "VALUES (#{requestId}, #{keyName}, #{keyValue}, CURRENT_TIMESTAMP())")
+    int insertKey(@Param("requestId") String requestId,
+                 @Param("keyName") String keyName,
+                 @Param("keyValue") String keyValue);
+
+    /**
+     * Check if a key exists
+     */
+    @Select("SELECT COUNT(*) > 0 " +
+            "FROM ${catalog}.${schema}.keys " +
+            "WHERE request_id = #{requestId} " +
+            "AND key_name = #{keyName}")
+    boolean keyExists(@Param("requestId") String requestId,
+                     @Param("keyName") String keyName);
+
+    /**
+     * Get all keys for a request
+     */
+    @Select("SELECT " +
+            "  request_id AS requestId, " +
+            "  key_name AS keyName, " +
+            "  key_value AS keyValue, " +
+            "  created_at AS createdAt " +
+            "FROM ${catalog}.${schema}.keys " +
+            "WHERE request_id = #{requestId} " +
+            "ORDER BY created_at")
+    List<Map<String, Object>> getKeysByRequestId(@Param("requestId") String requestId);
+
+    /**
+     * Count keys for a request
+     */
+    @Select("SELECT COUNT(*) " +
+            "FROM ${catalog}.${schema}.keys " +
+            "WHERE request_id = #{requestId}")
+    int countKeysByRequestId(@Param("requestId") String requestId);
+
+    /**
+     * Delete keys for a request
+     */
+    @Delete("DELETE FROM ${catalog}.${schema}.keys " +
+            "WHERE request_id = #{requestId}")
+    int deleteKeysByRequestId(@Param("requestId") String requestId);
+}
