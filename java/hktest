@@ -2102,3 +2102,69 @@ databricks:
      log.info("Converted {} distinct IDs to CSV format", distinctIds.size());
      return csvData;
  }
+
+ ---------------------
+
+ /**
+  * Asynchronously processes a base file for the given request, handling all specified tables.
+  *
+  * @param request The file creation details containing request ID and table list
+  * @return CompletableFuture containing the file completion response
+  */
+ public CompletableFuture<FileCompletionRequest> processBaseFileAsync(FileCreationDetails request) {
+     log.info("Processing base file asynchronously for request ID: {}", request.requestId());
+
+     return CompletableFuture.supplyAsync(() -> {
+         List<String> tableList = request.tableList();
+         if (tableList == null || tableList.isEmpty()) {
+             log.warn("No tables specified for request ID: {}", request.requestId());
+             return createErrorResponse(request, true, false, false);
+         }
+
+         boolean allTablesSuccess = tableList.stream()
+                 .map(tableName -> processTable(request, tableName))
+                 .reduce(true, Boolean::logicalAnd);
+
+         log.info("Base file processing result for request {}: {}",
+                 request.requestId(), allTablesSuccess ? "SUCCESS" : "FAILED");
+
+         return createCompletionResponse(
+                 request,
+                 allTablesSuccess, true,  // base file
+                 false, false,           // adjusted files
+                 false, false            // key file
+         );
+     }, fileProcessingExecutor)
+     .exceptionally(throwable -> {
+         log.error("Error creating base file for request {}: {}",
+                 request.requestId(), throwable.getMessage(), throwable);
+         return createErrorResponse(request, true, false, false);
+     });
+ }
+
+ /**
+  * Processes a single table for the given request and converts its data to CSV.
+  *
+  * @param request   The file creation details containing all necessary data
+  * @param tableName The name of the table to process
+  * @return true if the table was processed successfully, false otherwise
+  */
+ private boolean processTable(FileCreationDetails request, String tableName) {
+     try {
+         List<Map<String, Object>> tableData = fetchDataForTable(request, tableName);
+         List<String> csvData = toCsv(tableData.stream()
+                 .map(row -> row.get("id") != null ? row.get("id").toString() : "")
+                 .toList());
+         Map<String, List<String>> baseData = Map.of(tableName, csvData);
+         boolean success = processBaseFiles(request, baseData);
+         if (!success) {
+             log.error("Failed to process CSV for table {} for request {}",
+                     tableName, request.requestId());
+         }
+         return success;
+     } catch (Exception e) {
+         log.error("Error processing table {} for request {}: {}",
+                 tableName, request.requestId(), e.getMessage());
+         return false;
+     }
+ }
