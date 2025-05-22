@@ -1995,3 +1995,110 @@ databricks:
     # Catalog and schema to use
     catalog: ${DATABRICKS_CATALOG:hive_metastore}
     schema: ${DATABRICKS_SCHEMA:default}
+
+
+ =========================
+
+ /**
+  *
+  * @param request File creation details containing keys
+  * @return S3 path if successful, null if failed
+  */
+ @PostMapping("/persist-keys")
+ public ResponseEntity<String> persistKeys(@RequestBody FileCreationDetails request) {
+     log.info("Received key persistence request with ID: {}", request.requestId());
+
+     try {
+         // Validate that distinctIds exist
+         if (request.distinctIds() == null || request.distinctIds().isEmpty()) {
+             log.warn("No distinct IDs provided for request ID: {}", request.requestId());
+             return ResponseEntity.badRequest().body(null);
+         }
+
+         // Process the CSV key file
+         String s3Path = fileService.processKeyFile(request);
+
+         if (s3Path != null) {
+             log.info("Completed key persistence for request ID: {}, S3 path: {}",
+                     request.requestId(), s3Path);
+             return ResponseEntity.ok(s3Path);
+         } else {
+             log.error("Failed to process key file for request ID: {}", request.requestId());
+             return ResponseEntity.internalServerError().body(null);
+         }
+
+     } catch (Exception ex) {
+         log.error("Error persisting keys for request ID: {}", request.requestId(), ex);
+         return ResponseEntity.internalServerError().body(null);
+     }
+ }
+
+ ============================
+
+ /**
+  * Process key file - create CSV file with headers and upload to S3
+  * Handles distinctIds in CSV format
+  *
+  * @param request File creation details
+  * @return S3 path if successful, null if failed
+  */
+ public String processKeyFile(FileCreationDetails request) {
+     try {
+         log.info("Creating CSV key file for request: {}", request.requestId());
+
+         // Create file paths for CSV
+         String localFilePath = baseDirectoryPath + "/distinctIds_" + request.requestId() + ".csv";
+         String s3ObjectKey = buildS3ObjectKey(request.requestId(), "adjusted/keyvalues/keys.csv");
+
+         log.info("CSV key file local path: {}", localFilePath);
+         log.info("CSV key file S3 object key: {}", s3ObjectKey);
+
+         // Convert distinctIds to CSV format with headers
+         List<String> csvData = convertDistinctIdsToCSV(request.distinctIds());
+
+         // Create and write to file
+         Path filePath = createLocalFile(localFilePath, csvData);
+
+         // Upload file to S3
+         boolean uploadSuccess = uploadFileToS3(request.requestId(), "CSV key file", filePath, s3ObjectKey);
+
+         if (uploadSuccess) {
+             log.info("Successfully processed CSV key file for request: {}, S3 path: {}",
+                     request.requestId(), s3ObjectKey);
+             return s3ObjectKey;
+         } else {
+             log.error("Failed to upload CSV file to S3 for request: {}", request.requestId());
+             return null;
+         }
+
+     } catch (Exception e) {
+         log.error("Failed to create or upload CSV key file for request {}: {}",
+                 request.requestId(), e.getMessage(), e);
+         return null;
+     }
+ }
+
+ ================
+
+ /**
+  * Converts a list of distinct IDs to CSV format with a header.
+  *
+  * @param distinctIds List of distinct IDs
+  * @return List of strings with "id" header as first row followed by ID rows
+  */
+ private List<String> toCsv(List<String> distinctIds) {
+     List<String> csvData = new ArrayList<>();
+     csvData.add("id");
+
+     if (distinctIds == null || distinctIds.isEmpty()) {
+         log.warn("No distinct IDs provided");
+         return csvData;
+     }
+
+     csvData.addAll(distinctIds.stream()
+             .map(id -> id != null ? id : "")
+             .toList());
+
+     log.info("Converted {} distinct IDs to CSV format", distinctIds.size());
+     return csvData;
+ }
