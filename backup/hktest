@@ -2315,3 +2315,11 @@ List<Map<String, Object>> readCsvAndJoinTableOnColumn(
         List<Map<String, Object>> readCsvFile(
                 @Param("s3CsvPath") String s3CsvPath,
                 @Param("limit") int limit);
+
+
+                 // LocalStack S3 configuration
+                        props.setProperty("spark.hadoop.fs.s3a.endpoint", "http://localhost:4566");
+                        props.setProperty("spark.hadoop.fs.s3a.access.key", "test");
+                        props.setProperty("spark.hadoop.fs.s3a.secret.key", "test");
+                        props.setProperty("spark.hadoop.fs.s3a.path.style.access", "true");
+                        props.setProperty("spark.hadoop.fs.s3a.connection.ssl.enabled", "false");
