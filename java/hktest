@@ -2168,3 +2168,112 @@ databricks:
          return false;
      }
  }
+
+ ==================================
+ ==============================
+ /**
+  * Asynchronously processes a base file for the given request, handling all specified tables.
+  *
+  * @param request The file creation details containing request ID and table list
+  * @return CompletableFuture containing the file completion response
+  */
+ public CompletableFuture<FileCompletionRequest> processBaseFileAsync(FileCreationDetails request) {
+     log.info("Processing base file asynchronously for request ID: {}", request.requestId());
+
+     return CompletableFuture.supplyAsync(() -> {
+         List<String> tableList = request.tableList();
+         if (tableList == null || tableList.isEmpty()) {
+             log.warn("No tables specified for request ID: {}", request.requestId());
+             return createErrorResponse(request, true, false, false);
+         }
+
+         boolean allTablesSuccess = tableList.stream()
+                 .map(tableName -> processTable(request, tableName))
+                 .reduce(true, Boolean::logicalAnd);
+
+         log.info("Base file processing result for request {}: {}",
+                 request.requestId(), allTablesSuccess ? "SUCCESS" : "FAILED");
+
+         return createCompletionResponse(
+                 request,
+                 allTablesSuccess, true,  // base file
+                 false, false,           // adjusted files
+                 false, false            // key file
+         );
+     }, fileProcessingExecutor)
+     .exceptionally(throwable -> {
+         log.error("Error creating base file for request {}: {}",
+                 request.requestId(), throwable.getMessage(), throwable);
+         return createErrorResponse(request, true, false, false);
+     });
+ }
+
+ /**
+  * Processes a single table for the given request and converts its data to CSV.
+  *
+  * @param request   The file creation details containing all necessary data
+  * @param tableName The name of the table to process
+  * @return true if the table was processed successfully, false otherwise
+  */
+ private boolean processTable(FileCreationDetails request, String tableName) {
+     try {
+         List<Map<String, Object>> tableData = fetchDataForTable(request, tableName);
+         List<String> csvData = toCsv(tableData);
+         Map<String, List<String>> baseData = Map.of(tableName, csvData);
+         boolean success = processBaseFiles(request, baseData);
+         if (!success) {
+             log.error("Failed to process CSV for table {} for request {}",
+                     tableName, request.requestId());
+         }
+         return success;
+     } catch (Exception e) {
+         log.error("Error processing table {} for request {}: {}",
+                 tableName, request.requestId(), e.getMessage());
+         return false;
+     }
+ }
+
+ /**
+  * Processes base file data for the given request.
+  *
+  * @param request  The file creation details
+  * @param baseData Map of table name to its CSV data
+  * @return true if processing was successful, false otherwise
+  */
+ private boolean processBaseFiles(FileCreationDetails request, Map<String, List<String>> baseData) {
+     if (baseData == null || baseData.isEmpty()) {
+         log.info("No base data to process for request: {}", request.requestId());
+         return false; // Return false for empty base data since it's required
+     }
+     return processEntityFiles(request, baseData, "base", "base file");
+ }
+
+ /**
+  * Converts table data to CSV format with only data rows (no headers), including all keys, using pipeline delimiter.
+  *
+  * @param tableData List of maps containing table data
+  * @return List of strings with data rows as pipeline-separated values
+  */
+ private List<String> toCsv(List<Map<String, Object>> tableData) {
+     List<String> csvData = new ArrayList<>();
+
+     if (tableData == null || tableData.isEmpty()) {
+         log.warn("No table data provided");
+         return csvData; // Return empty list for no data
+     }
+
+     // Get all keys from the first row
+     Set<String> keys = tableData.get(0).keySet();
+     List<String> orderedKeys = new ArrayList<>(keys); // Convert to list for consistent order
+
+     // Convert each row to a pipeline-separated string of values
+     List<String> rows = tableData.stream()
+             .map(row -> orderedKeys.stream()
+                     .map(key -> row.get(key) != null ? row.get(key).toString() : "")
+                     .collect(Collectors.joining("|")))
+             .toList();
+
+     csvData.addAll(rows);
+     log.info("Converted {} rows to CSV format with {} columns", rows.size(), orderedKeys.size());
+     return csvData;
+ }
