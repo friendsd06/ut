@@ -2278,23 +2278,25 @@ databricks:
      return csvData;
  }
 
- @Select({
-         "SELECT f.*, t.* FROM (",
-         "  SELECT * FROM read_files(",
-         "    '${s3CsvPath}',",
-         "    format => 'csv',",
-         "    header => true,",
-         "    inferSchema => true",
-         "  )",
-         ") f",
-         "INNER JOIN ${catalog}.${schema}.${tableName} t",
-         "ON f.${joinColumn} = t.${joinColumn}",
-         "LIMIT #{limit}"
-     })
-     List<Map<String, Object>> readCsvAndJoinTableOnColumn(
-             @Param("catalog") String catalog,
-             @Param("schema") String schema,
-             @Param("s3CsvPath") String s3CsvPath,
-             @Param("tableName") String tableName,
-             @Param("joinColumn") String joinColumn,
-             @Param("limit") int limit);
+@Select({
+    "SELECT f.*, t.* FROM (",
+    "  SELECT * FROM read_files(",
+    "    '${s3CsvPath}',",
+    "    format => 'csv',",
+    "    header => true,",
+    "    inferSchema => true,",
+    "    sep => '|'",
+    "  )",
+    ") f",
+    "INNER JOIN ${catalog}.${schema}.${tableName} t",
+    "ON f.${csvColumnName} = t.${tableColumnName}",
+    "LIMIT #{limit}"
+})
+List<Map<String, Object>> readCsvAndJoinTableOnColumn(
+        @Param("catalog") String catalog,
+        @Param("schema") String schema,
+        @Param("s3CsvPath") String s3CsvPath,
+        @Param("tableName") String tableName,
+        @Param("csvColumnName") String csvColumnName,      // Column name in CSV file
+        @Param("tableColumnName") String tableColumnName, // Column name in table
+        @Param("limit") int limit);
