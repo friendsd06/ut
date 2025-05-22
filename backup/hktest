@@ -2323,3 +2323,11 @@ List<Map<String, Object>> readCsvAndJoinTableOnColumn(
                         props.setProperty("spark.hadoop.fs.s3a.secret.key", "test");
                         props.setProperty("spark.hadoop.fs.s3a.path.style.access", "true");
                         props.setProperty("spark.hadoop.fs.s3a.connection.ssl.enabled", "false");
+
+
+                        spark.hadoop.fs.s3a.endpoint              http://<public-IP-of-localstack>:4566
+                        spark.hadoop.fs.s3a.path.style.access     true
+                        spark.hadoop.fs.s3a.connection.ssl.enabled false
+                        spark.hadoop.fs.s3a.access.key            test
+                        spark.hadoop.fs.s3a.secret.key            test
+                        spark.hadoop.fs.s3a.region                us-east-1
