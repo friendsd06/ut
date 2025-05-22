@@ -2300,3 +2300,18 @@ List<Map<String, Object>> readCsvAndJoinTableOnColumn(
         @Param("csvColumnName") String csvColumnName,      // Column name in CSV file
         @Param("tableColumnName") String tableColumnName, // Column name in table
         @Param("limit") int limit);
+
+
+        @Select({
+            "SELECT * FROM read_files(",
+            "  '${s3CsvPath}',",
+            "  format => 'csv',",
+            "  header => true,",
+            "  inferSchema => true,",
+            "  sep => '|'",
+            ")",
+            "LIMIT #{limit}"
+        })
+        List<Map<String, Object>> readCsvFile(
+                @Param("s3CsvPath") String s3CsvPath,
+                @Param("limit") int limit);
