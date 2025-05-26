@@ -1668,3 +1668,101 @@ public class AdjustmentController {
         return ResponseEntity.ok("Callback processed successfully");
     }
 }
+
+============================
+# ===================================
+# APPLICATION CONFIGURATION
+# ===================================
+
+# Server configuration
+server.port=8089
+
+# Active profile configuration
+spring.profiles.active=dev
+
+# Spring Boot configuration
+spring.main.allow-circular-references=true
+spring.servlet.multipart.max-file-size=100MB
+spring.servlet.multipart.max-request-size=100MB
+
+# ===================================
+# AWS S3 CONFIGURATION
+# ===================================
+
+# AWS Region
+app.aws.region=us-east-1
+
+# AWS Connection timeout in seconds
+app.aws.connection.timeout=30
+
+# S3 bucket configuration
+app.s3.bucket-name=demo
+
+# LocalStack Configuration (for local development)
+app.localstack.url=https://localhost.localstack.cloud:4566
+
+# ===================================
+# FILE UPLOAD CONFIGURATION
+# ===================================
+
+# Base directory for file operations
+app.upload.directory=D:\\data
+
+# Maximum number of threads for upload operations
+app.upload.max-threads=10
+
+# Thread pool size for file processing (0 = use available processors)
+app.thread-pool.size=4
+
+# Upload part size in MB for multipart uploads
+app.upload.part-size-mb=5
+
+# Upload timeout in minutes
+app.upload.timeout-minutes=30
+
+# File size threshold in MB to determine upload strategy
+app.file.size-threshold-mb=10
+
+# ===================================
+# CALLBACK SERVICE CONFIGURATION
+# ===================================
+
+# Adjustment service configuration for callbacks
+app.adjustment-service.url=http://localhost:8081
+app.adjustment-service.callback-endpoint=/api/v1/file-completion
+
+# Callback settings
+app.callback.enabled=true
+app.callback.timeout-seconds=30
+
+# ===================================
+# LOGGING CONFIGURATION
+# ===================================
+
+# Root logging level
+logging.level.root=INFO
+
+# Application specific logging
+logging.level.com.example.s3upload=DEBUG
+
+# AWS SDK logging (reduce noise)
+logging.level.software.amazon.awssdk=WARN
+
+# Spring framework logging
+logging.level.org.springframework=INFO
+
+# HTTP client logging (useful for debugging callbacks)
+logging.level.org.apache.http=WARN
+
+# ===================================
+# ENVIRONMENT SPECIFIC OVERRIDES
+# ===================================
+
+# Development environment settings
+# These can be overridden in application-dev.properties
+
+# Test environment settings
+# These can be overridden in application-test.properties
+
+# Production environment settings
+# These can be overridden in application-prod.properties
