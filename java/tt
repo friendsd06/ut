@@ -2665,3 +2665,893 @@ public class FileService {
         }
     }
 }
+
+===============
+====================
+
+package com.example.s3upload.service;
+
+import com.example.s3upload.exceptions.FileServiceException;
+import com.example.s3upload.model.FileCompletionRequest;
+import com.example.s3upload.model.FileCreationDetails;
+import com.example.s3upload.sampledata.SampleDataGenerator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+
+/**
+ * Service responsible for managing file operations including:
+ * 1. Creating local files from data
+ * 2. Uploading files to S3 storage
+ * 3. Processing different file types (base, adjusted, key files)
+ * 4. Managing async operations with thread pools
+ * 5. Handling success/failure callbacks consistently
+ * 6. Graceful exception handling without throwing exceptions
+ */
+@Service
+public class FileService {
+
+    private static final Logger log = LoggerFactory.getLogger(FileService.class);
+
+    @Value("${app.upload.directory:D://data}")
+    private String baseDirectoryPath;
+
+    @Value("${app.s3.bucket-name}")
+    private String bucketName;
+
+    @Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
+    @Value("${app.file.size-threshold-mb:10}")
+    private long fileSizeThresholdMb;
+
+    @Value("${app.upload.timeout-minutes:30}")
+    private int uploadTimeoutMinutes;
+
+    @Value("${app.thread-pool.size:4}")
+    private int threadPoolSize;
+
+    private static final String ABINITIO_PATH = "abinitio";
+    private static final String ADJUSTMENT_PATH = "adjustment";
+    private static final String BASE_PATH = "base";
+    private static final String ADJUSTED_PATH = "adjusted";
+    private static final String KEY_VALUES_PATH = "key";
+    private static final String DATA_PREFIX = "data";
+
+    private final FileUploadService fileUploadService;
+    private final DatabricksSqlService databricksService;
+    private final CallbackService callbackService;
+    private final ExecutorService fileProcessingExecutor;
+    private final PathBuilder pathBuilder;
+
+    public FileService(FileUploadService fileUploadService,
+                       DatabricksSqlService databricksService,
+                       CallbackService callbackService) {
+        this.fileUploadService = fileUploadService;
+        this.databricksService = databricksService;
+        this.callbackService = callbackService;
+        this.pathBuilder = new PathBuilder();
+        this.fileProcessingExecutor = createThreadPool();
+    }
+
+    /**
+     * Creates a thread pool for handling file processing tasks
+     * Uses either configured pool size or number of CPU cores
+     */
+    private ExecutorService createThreadPool() {
+        ThreadFactory threadFactory = new ThreadFactory() {
+            private final AtomicInteger count = new AtomicInteger(1);
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r);
+                thread.setName("FileService-worker-" + count.getAndIncrement());
+                return thread;
+            }
+        };
+
+        return new ThreadPoolExecutor(
+                4,
+                4,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(100),
+                threadFactory,
+                new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+    }
+
+    @PostConstruct
+    public void initialize() {
+        try {
+            if (!validateConfig()) {
+                log.error("FileService initialization failed due to invalid configuration");
+                return;
+            }
+            createDirectoryStructure();
+            log.info("FileService initialized successfully at: {}", baseDirectoryPath);
+        } catch (IOException e) {
+            log.error("Failed to initialize FileService", e);
+        }
+    }
+
+    @PreDestroy
+    public void cleanup() {
+        log.info("Shutting down FileService executor...");
+        fileProcessingExecutor.shutdown();
+        try {
+            if (!fileProcessingExecutor.awaitTermination(1, TimeUnit.MINUTES)) {
+                log.warn("Executor did not terminate gracefully, forcing shutdown");
+                fileProcessingExecutor.shutdownNow();
+            }
+            log.info("FileService cleanup completed");
+        } catch (InterruptedException e) {
+            log.warn("Interrupted during shutdown, forcing termination");
+            fileProcessingExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private boolean validateConfig() {
+        if (StringUtils.isNullOrEmpty(baseDirectoryPath)) {
+            log.error("Base directory path cannot be empty");
+            return false;
+        }
+        if (StringUtils.isNullOrEmpty(bucketName)) {
+            log.error("S3 bucket name cannot be empty");
+            return false;
+        }
+        if (uploadTimeoutMinutes <= 0) {
+            log.error("Upload timeout must be positive, current value: {}", uploadTimeoutMinutes);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Main method for synchronous file processing with graceful error handling
+     * Processes key files and adjusted files based on request data
+     * NO CALLBACK - caller handles response
+     */
+    public FileCompletionRequest processFileRequestSync(FileCreationDetails request) {
+        if (!validateRequest(request, "Synchronous processing")) {
+            return ResponseBuilder.buildFailureResponse(request, "Invalid request parameters");
+        }
+
+        log.info("Starting synchronous file processing - ID: {}", request.requestId());
+
+        boolean isKeyFile = hasKeyData(request);
+        boolean isAdjFile = hasAdjustData(request);
+        log.debug("File processing requirements - ID: {}, Key: {}, Adjusted: {}",
+                request.requestId(), isKeyFile, isAdjFile);
+
+        boolean keyFileSuccess = !isKeyFile || processKeyFile(request);
+        boolean adjFileSuccess = !isAdjFile || processAdjustedFiles(request);
+
+        log.info("Synchronous processing completed - ID: {}, Key: {}, Adjusted: {}",
+                request.requestId(), keyFileSuccess, adjFileSuccess);
+
+        FileCompletionRequest completionRequest = ResponseBuilder.buildCompletionResponse(
+                request, false, false,
+                adjFileSuccess, isAdjFile,
+                keyFileSuccess, isKeyFile
+        );
+
+        // NO CALLBACK - return response directly
+        return completionRequest;
+    }
+
+    /**
+     * Processes key file creation and upload to S3 with graceful error handling
+     * NO CALLBACK - caller handles response
+     */
+    public boolean processKeyFile(FileCreationDetails request) {
+        if (!validateRequest(request, "Key file processing")) {
+            return false;
+        }
+
+        if (!hasKeyData(request)) {
+            log.error("Key data is required for processing - ID: {}", request.requestId());
+            return false;
+        }
+
+        try {
+            log.info("Processing key file - ID: {}", request.requestId());
+
+            String env = EnvironmentMapper.mapEnvironment(activeProfile);
+
+            // Create directories for this request
+            createDirectoriesForRequest(request.requestId());
+
+            // Build file paths using the new structure
+            String fileName = "logicRcrdID_" + request.requestId() + ".dat";
+            String localFilePath = pathBuilder.buildKeyFilePath(baseDirectoryPath, env, request.requestId(), fileName);
+            String s3ObjectKey = pathBuilder.buildS3ObjectKey(env, request.requestId(), FileType.KEY, "keys.dat");
+
+            log.debug("Key file paths - Local: {}, S3: {}", localFilePath, s3ObjectKey);
+
+            Path filePath = createLocalFile(localFilePath, request.keysData());
+            if (filePath == null) {
+                log.error("Failed to create local key file - ID: {}", request.requestId());
+                return false;
+            }
+
+            boolean success = uploadFileToS3(request.requestId(), "key file", filePath, s3ObjectKey);
+
+            if (success) {
+                log.info("Key file processing succeeded - ID: {}", request.requestId());
+            } else {
+                log.error("Key file processing failed - ID: {}", request.requestId());
+            }
+
+            // NO CALLBACK - return success status directly
+            return success;
+
+        } catch (Exception e) {
+            log.error("Key file processing failed - ID: {}", request.requestId(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Processes CSV key file with distinct IDs and graceful error handling
+     * NO CALLBACK - caller handles response
+     */
+    public FileCompletionRequest processDistinctIds(FileCreationDetails request) {
+        if (!validateRequest(request, "CSV key file processing")) {
+            return ResponseBuilder.buildFailureResponse(request, "Invalid request parameters");
+        }
+
+        if (request.distinctIds() == null) {
+            log.error("Distinct IDs cannot be null - ID: {}", request.requestId());
+            return ResponseBuilder.buildFailureResponse(request, "Distinct IDs cannot be null");
+        }
+
+        try {
+            log.info("Processing CSV key file - ID: {}", request.requestId());
+
+            String env = EnvironmentMapper.mapEnvironment(activeProfile);
+
+            // Create directories for this request
+            createDirectoriesForRequest(request.requestId());
+
+            // Build file paths using the new structure
+            String fileName = "distinctIds_" + request.requestId() + ".csv";
+            String localFilePath = pathBuilder.buildDistinctFilePath(baseDirectoryPath, env, request.requestId(), fileName);
+            String s3ObjectKey = pathBuilder.buildS3ObjectKey(env, request.requestId(), FileType.DISTINCT, "keys.csv");
+
+            List<String> csvData = DataConverter.convertDistinctIdsToCSV(request.distinctIds());
+
+            Path filePath = createLocalFile(localFilePath, csvData);
+            if (filePath == null) {
+                log.error("Failed to create local CSV key file - ID: {}", request.requestId());
+                return ResponseBuilder.buildFailureResponse(request, "Failed to create local CSV file");
+            }
+
+            boolean success = uploadFileToS3(request.requestId(), "CSV key file", filePath, s3ObjectKey);
+
+            if (success) {
+                log.info("CSV key file processing succeeded - ID: {}", request.requestId());
+            } else {
+                log.error("CSV key file processing failed - ID: {}", request.requestId());
+            }
+
+            // NO CALLBACK - return completion request directly
+            FileCompletionRequest completionRequest = ResponseBuilder.buildCompletionResponse(
+                    request, false, false,    // base file not processed
+                    false, false,             // adjusted file not processed
+                    success, true             // key file processed
+            );
+
+            return completionRequest;
+
+        } catch (Exception e) {
+            log.error("CSV key file processing failed - ID: {}", request.requestId(), e);
+            return ResponseBuilder.buildFailureResponse(request, e.getMessage());
+        }
+    }
+
+    /**
+     * Asynchronously processes base files with graceful error handling
+     * Returns void instead of CompletableFuture
+     */
+    public void processBaseFileAsync(FileCreationDetails request) {
+        if (!validateRequest(request, "Async base file processing")) {
+            FileCompletionRequest failureResponse = ResponseBuilder.buildFailureResponse(request, "Invalid request parameters");
+            sendCallback(failureResponse, "asynchronous base file processing");
+            return;
+        }
+
+        log.info("Starting asynchronous base file processing - ID: {}", request.requestId());
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<String> tableList = request.tableList();
+                if (tableList == null || tableList.isEmpty()) {
+                    log.error("Table list is required for base file processing - ID: {}", request.requestId());
+                    FileCompletionRequest failureResponse = ResponseBuilder.buildFailureResponse(request, "Table list is required");
+                    sendCallback(failureResponse, "asynchronous base file processing");
+                    return;
+                }
+
+                log.debug("Processing {} tables for base file - ID: {}", tableList.size(), request.requestId());
+
+                boolean allTablesSuccess = true;
+                for (String tableName : tableList) {
+                    boolean tableSuccess = processTable(request, tableName);
+                    if (!tableSuccess) {
+                        allTablesSuccess = false;
+                        log.error("Failed to process table: {} - ID: {}", tableName, request.requestId());
+                    }
+                }
+
+                log.info("Base file processing {} - ID: {}",
+                        allTablesSuccess ? "succeeded" : "failed", request.requestId());
+
+                FileCompletionRequest completionRequest = ResponseBuilder.buildCompletionResponse(
+                        request,
+                        allTablesSuccess, true,
+                        false, false,
+                        false, false
+                );
+
+                // Send callback for async processing result
+                sendCallback(completionRequest, "asynchronous base file processing");
+
+            } catch (Exception e) {
+                log.error("Async base file processing failed - ID: {}", request.requestId(), e);
+
+                // Build failure response and send callback
+                FileCompletionRequest failureResponse = ResponseBuilder.buildFailureResponse(request, e.getMessage());
+                sendCallback(failureResponse, "asynchronous base file processing");
+            }
+        }, fileProcessingExecutor);
+    }
+
+    /**
+     * Centralized callback sending method with error handling
+     */
+    private void sendCallback(FileCompletionRequest completionRequest, String operationType) {
+        try {
+            callbackService.notifyFileCompletion(completionRequest);
+            log.debug("Callback sent successfully for {} - ID: {}", operationType, completionRequest.requestId());
+        } catch (Exception e) {
+            log.error("Failed to send callback for {} - ID: {}", operationType, completionRequest.requestId(), e);
+        }
+    }
+
+    /**
+     * Creates the required directory structure for a specific request
+     */
+    private void createDirectoryStructure() throws IOException {
+        // This method can be called without a specific requestId for general setup
+        // Individual request directories will be created when processing files
+        String env = EnvironmentMapper.mapEnvironment(activeProfile);
+        String basePath = Paths.get(baseDirectoryPath, ABINITIO_PATH, env, ADJUSTMENT_PATH).toString();
+        Files.createDirectories(Paths.get(basePath));
+        log.debug("Created base directory structure at: {}", basePath);
+    }
+
+    /**
+     * Creates directories for a specific request
+     */
+    private void createDirectoriesForRequest(String requestId) throws IOException {
+        String env = EnvironmentMapper.mapEnvironment(activeProfile);
+        pathBuilder.createDirectoriesForRequest(baseDirectoryPath, env, requestId);
+        log.debug("Created directory structure for request: {}", requestId);
+    }
+
+    /**
+     * Processes adjusted files with graceful error handling
+     */
+    private boolean processAdjustedFiles(FileCreationDetails request) {
+        if (!validateRequest(request, "Adjusted file processing")) {
+            return false;
+        }
+
+        if (!hasAdjustData(request)) {
+            log.error("Adjust data is required for processing - ID: {}", request.requestId());
+            return false;
+        }
+
+        log.info("Processing adjusted files for {} entities - ID: {}",
+                request.adjustData().size(), request.requestId());
+
+        return processEntityFiles(request, request.adjustData(), ADJUSTED_PATH, "adjusted file");
+    }
+
+    /**
+     * Processes base files with graceful error handling
+     */
+    private boolean processBaseFiles(FileCreationDetails request, Map<String, List<String>> baseData) {
+        if (!validateRequest(request, "Base file processing")) {
+            return false;
+        }
+
+        if (baseData == null || baseData.isEmpty()) {
+            log.error("Base data is required for processing - ID: {}", request.requestId());
+            return false;
+        }
+
+        log.info("Processing base files - ID: {}", request.requestId());
+        return processEntityFiles(request, baseData, BASE_PATH, "base file");
+    }
+
+    /**
+     * Processes a single table with graceful error handling
+     */
+    private boolean processTable(FileCreationDetails request, String tableName) {
+        try {
+            log.debug("Processing table: {} - ID: {}", tableName, request.requestId());
+
+            List<Map<String, Object>> tableData = fetchDataForTable(request, tableName);
+            if (tableData == null) {
+                log.error("Failed to fetch data for table: {} - ID: {}", tableName, request.requestId());
+                return false;
+            }
+
+            List<String> csvData = DataConverter.toCsv(tableData);
+            Map<String, List<String>> baseData = Map.of(tableName, csvData);
+
+            boolean success = processBaseFiles(request, baseData);
+
+            if (!success) {
+                log.error("Failed to process table: {} - ID: {}", tableName, request.requestId());
+            }
+            return success;
+
+        } catch (Exception e) {
+            log.error("Table processing failed for: {} - ID: {}", tableName, request.requestId(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Enhanced entity files processing with graceful error handling
+     */
+    private boolean processEntityFiles(FileCreationDetails request, Map<String, List<String>> entityData,
+                                       String pathSegment, String fileDescription) {
+        log.debug("Processing {} entity files - ID: {}", entityData.size(), request.requestId());
+
+        List<CompletableFuture<Boolean>> futures = entityData.entrySet().stream()
+                .map(entry -> CompletableFuture.supplyAsync(
+                        () -> processEntityFile(request, entry.getKey(), entry.getValue(), pathSegment, fileDescription),
+                        fileProcessingExecutor))
+                .collect(Collectors.toList());
+
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(uploadTimeoutMinutes, TimeUnit.MINUTES);
+
+            boolean allSuccess = true;
+            for (CompletableFuture<Boolean> future : futures) {
+                try {
+                    boolean result = future.get();
+                    if (!result) {
+                        allSuccess = false;
+                    }
+                } catch (Exception e) {
+                    log.error("Error retrieving future result for {}", fileDescription, e);
+                    allSuccess = false;
+                }
+            }
+
+            log.info("Entity files processing completed - ID: {}, Success: {}",
+                    request.requestId(), allSuccess);
+            return allSuccess;
+
+        } catch (TimeoutException e) {
+            log.error("Entity files processing timed out - ID: {}", request.requestId(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("Entity files processing failed - ID: {}", request.requestId(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Processes a single entity file with graceful error handling
+     */
+    private boolean processEntityFile(FileCreationDetails request, String entityName, List<String> data,
+                                      String pathSegment, String fileDescription) {
+        try {
+            log.debug("Processing {} for entity: {} - ID: {}", fileDescription, entityName, request.requestId());
+
+            String cleanEntityName = StringUtils.cleanEntityName(entityName);
+            String env = EnvironmentMapper.mapEnvironment(activeProfile);
+
+            // Create directories for this request
+            createDirectoriesForRequest(request.requestId());
+
+            // Determine file type based on path segment
+            FileType fileType = switch (pathSegment) {
+                case BASE_PATH -> FileType.BASE;
+                case ADJUSTED_PATH -> FileType.ADJUSTED;
+                case KEY_VALUES_PATH -> FileType.KEY;
+                default -> FileType.ADJUSTED; // default fallback
+            };
+
+            // Build file paths using the new structure
+            String fileName = cleanEntityName + "_" + request.requestId() + ".dat";
+            String localFilePath = pathBuilder.buildFilePath(baseDirectoryPath, env, request.requestId(), fileType, fileName);
+            String s3ObjectKey = pathBuilder.buildS3ObjectKey(env, request.requestId(), fileType, cleanEntityName + ".dat");
+
+            Path filePath = createLocalFile(localFilePath, data);
+            if (filePath == null) {
+                log.error("Failed to create local file for entity: {} - ID: {}", entityName, request.requestId());
+                return false;
+            }
+
+            boolean success = uploadFileToS3(request.requestId(),
+                    String.format("%s for entity %s", fileDescription, entityName), filePath, s3ObjectKey);
+
+            log.debug("Entity file processing {} for {} - ID: {}",
+                    success ? "succeeded" : "failed", entityName, request.requestId());
+            return success;
+
+        } catch (Exception e) {
+            log.error("Entity file processing failed for {} - ID: {}", entityName, request.requestId(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Creates a local file with the provided data - returns null on failure
+     */
+    private Path createLocalFile(String filePath, List<String> data) {
+        try {
+            Path path = Paths.get(filePath);
+            Files.createDirectories(path.getParent());
+
+            if (data == null || data.isEmpty()) {
+                log.debug("Creating zero-byte file: {}", filePath);
+                Files.write(path, new byte[0], StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            } else {
+                log.debug("Creating file with {} lines: {}", data.size(), filePath);
+                try (BufferedWriter writer = Files.newBufferedWriter(path,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                    for (String line : data) {
+                        writer.write(line);
+                        writer.newLine();
+                    }
+                }
+            }
+            return path;
+        } catch (IOException e) {
+            log.error("Failed to create local file: {}", filePath, e);
+            return null;
+        }
+    }
+
+    /**
+     * Enhanced file upload with graceful error handling
+     */
+    private boolean uploadFileToS3(String requestId, String fileDescription, Path filePath, String s3ObjectKey) {
+        try {
+            long fileSize = Files.size(filePath);
+            long fileSizeThresholdBytes = fileSizeThresholdMb * 1024 * 1024;
+            log.debug("Uploading {} ({} bytes) - ID: {}", fileDescription, fileSize, requestId);
+
+            if (fileSize < fileSizeThresholdBytes) {
+                fileUploadService.uploadSimpleFile(bucketName, s3ObjectKey, filePath, fileSize);
+            } else {
+                fileUploadService.uploadFileParallel(bucketName, s3ObjectKey, filePath);
+            }
+
+            log.info("{} uploaded successfully - ID: {}", StringUtils.capitalize(fileDescription), requestId);
+            return true;
+
+        } catch (Exception e) {
+            log.error("Failed to upload {} - ID: {}", fileDescription, requestId, e);
+            return false;
+        }
+    }
+
+    /**
+     * Fetches data for a specific table from Databricks with graceful error handling
+     */
+    private List<Map<String, Object>> fetchDataForTable(FileCreationDetails request, String tableName) {
+        try {
+            SampleDataGenerator sampleDataGenerator = new SampleDataGenerator();
+
+            log.warn("fetchDataForTable is not implemented - returning sample data for table: {}", tableName);
+            return sampleDataGenerator.generateAccountSampleData("56765");
+        } catch (Exception e) {
+            log.error("Failed to fetch data for table: {} - ID: {}", tableName, request.requestId(), e);
+            return null;
+        }
+    }
+
+    private boolean hasKeyData(FileCreationDetails request) {
+        return request.keysData() != null && !request.keysData().isEmpty();
+    }
+
+    private boolean hasAdjustData(FileCreationDetails request) {
+        return request.adjustData() != null && !request.adjustData().isEmpty();
+    }
+
+    private boolean validateRequest(FileCreationDetails request, String operation) {
+        if (request == null) {
+            log.error("{}: Request cannot be null", operation);
+            return false;
+        }
+        if (StringUtils.isNullOrEmpty(request.requestId())) {
+            log.error("{}: RequestId cannot be null/empty", operation);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Clean and simple path builder following the structure:
+     * D://data/abinitio/dev/adjustment/<request_id>/adjusted/
+     * D://data/abinitio/dev/adjustment/<request_id>/adjusted/key/  (key inside adjusted)
+     * D://data/abinitio/dev/adjustment/<request_id>/base/
+     * D://data/abinitio/dev/adjustment/<request_id>/distinct/
+     */
+    private static class PathBuilder {
+
+        /**
+         * Builds the base directory path: D://data/abinitio/dev/adjustment/<request_id>
+         */
+        public String buildRequestBasePath(String baseDirectory, String environment, String requestId) {
+            return Paths.get(baseDirectory, ABINITIO_PATH, environment, ADJUSTMENT_PATH, requestId).toString();
+        }
+
+        /**
+         * Builds path for adjusted files: D://data/abinitio/dev/adjustment/<request_id>/adjusted/
+         */
+        public String buildAdjustedPath(String baseDirectory, String environment, String requestId) {
+            return Paths.get(buildRequestBasePath(baseDirectory, environment, requestId), ADJUSTED_PATH).toString();
+        }
+
+        /**
+         * Builds path for key files: D://data/abinitio/dev/adjustment/<request_id>/adjusted/key/
+         * Key folder is INSIDE the adjusted folder
+         */
+        public String buildKeyPath(String baseDirectory, String environment, String requestId) {
+            return Paths.get(buildAdjustedPath(baseDirectory, environment, requestId), KEY_VALUES_PATH).toString();
+        }
+
+        /**
+         * Builds path for base files: D://data/abinitio/dev/adjustment/<request_id>/base/
+         */
+        public String buildBasePath(String baseDirectory, String environment, String requestId) {
+            return Paths.get(buildRequestBasePath(baseDirectory, environment, requestId), BASE_PATH).toString();
+        }
+
+        /**
+         * Builds path for distinct files: D://data/abinitio/dev/adjustment/<request_id>/distinct/
+         */
+        public String buildDistinctPath(String baseDirectory, String environment, String requestId) {
+            return Paths.get(buildRequestBasePath(baseDirectory, environment, requestId), "distinct").toString();
+        }
+
+        /**
+         * Builds complete file path for key files
+         */
+        public String buildKeyFilePath(String baseDirectory, String environment, String requestId, String fileName) {
+            String directoryPath = buildKeyPath(baseDirectory, environment, requestId);
+            return Paths.get(directoryPath, fileName).toString();
+        }
+
+        /**
+         * Builds complete file path for adjusted files
+         */
+        public String buildAdjustedFilePath(String baseDirectory, String environment, String requestId, String fileName) {
+            String directoryPath = buildAdjustedPath(baseDirectory, environment, requestId);
+            return Paths.get(directoryPath, fileName).toString();
+        }
+
+        /**
+         * Builds complete file path for base files
+         */
+        public String buildBaseFilePath(String baseDirectory, String environment, String requestId, String fileName) {
+            String directoryPath = buildBasePath(baseDirectory, environment, requestId);
+            return Paths.get(directoryPath, fileName).toString();
+        }
+
+        /**
+         * Builds complete file path for distinct files
+         */
+        public String buildDistinctFilePath(String baseDirectory, String environment, String requestId, String fileName) {
+            String directoryPath = buildDistinctPath(baseDirectory, environment, requestId);
+            return Paths.get(directoryPath, fileName).toString();
+        }
+
+        /**
+         * Generic method to build file path based on file type
+         */
+        public String buildFilePath(String baseDirectory, String environment, String requestId,
+                                   FileType fileType, String fileName) {
+            return switch (fileType) {
+                case KEY -> buildKeyFilePath(baseDirectory, environment, requestId, fileName);
+                case ADJUSTED -> buildAdjustedFilePath(baseDirectory, environment, requestId, fileName);
+                case BASE -> buildBaseFilePath(baseDirectory, environment, requestId, fileName);
+                case DISTINCT -> buildDistinctFilePath(baseDirectory, environment, requestId, fileName);
+            };
+        }
+
+        /**
+         * Builds S3 object key maintaining the same structure
+         * Key files go under adjusted/key/ path in S3 as well
+         */
+        public String buildS3ObjectKey(String environment, String requestId, FileType fileType, String fileName) {
+            List<String> pathSegments = new ArrayList<>();
+            pathSegments.add(DATA_PREFIX);
+            pathSegments.add(ABINITIO_PATH);
+            pathSegments.add(environment);
+            pathSegments.add(ADJUSTMENT_PATH);
+            pathSegments.add(requestId);
+
+            switch (fileType) {
+                case KEY:
+                    pathSegments.add(ADJUSTED_PATH);  // Key files go under adjusted/key/
+                    pathSegments.add(KEY_VALUES_PATH);
+                    break;
+                case ADJUSTED:
+                    pathSegments.add(ADJUSTED_PATH);
+                    break;
+                case BASE:
+                    pathSegments.add(BASE_PATH);
+                    break;
+                case DISTINCT:
+                    pathSegments.add("distinct");
+                    break;
+            }
+
+            pathSegments.add(fileName);
+            return String.join("/", pathSegments);
+        }
+
+        /**
+         * Creates all required directories for a request
+         * Key directory is created inside adjusted directory
+         */
+        public void createDirectoriesForRequest(String baseDirectory, String environment, String requestId) throws IOException {
+            List<String> directoriesToCreate = List.of(
+                buildRequestBasePath(baseDirectory, environment, requestId),
+                buildAdjustedPath(baseDirectory, environment, requestId),
+                buildKeyPath(baseDirectory, environment, requestId),  // This creates adjusted/key/
+                buildBasePath(baseDirectory, environment, requestId),
+                buildDistinctPath(baseDirectory, environment, requestId)
+            );
+
+            for (String directory : directoriesToCreate) {
+                Files.createDirectories(Paths.get(directory));
+                log.debug("Created directory: {}", directory);
+            }
+        }
+    }
+
+    /**
+     * Enum to represent different file types for cleaner code
+     */
+    private enum FileType {
+        KEY, ADJUSTED, BASE, DISTINCT
+    }
+
+    private static class EnvironmentMapper {
+        public static String mapEnvironment(String activeProfile) {
+            if (activeProfile == null) return "dev";
+            return switch (activeProfile.toLowerCase()) {
+                case "test", "uat" -> "uat";
+                case "preprod" -> "pre";
+                case "prod" -> "prd";
+                default -> "dev";
+            };
+        }
+    }
+
+    /**
+     * Enhanced ResponseBuilder with failure response support
+     */
+    private static class ResponseBuilder {
+        public static FileCompletionRequest buildCompletionResponse(
+                FileCreationDetails request,
+                boolean baseFileSuccess, boolean isBaseFile,
+                boolean adjFileSuccess, boolean isAdjFile,
+                boolean keyFileSuccess, boolean isKeyFile) {
+            return new FileCompletionRequest(
+                    request.requestId(),
+                    request.requestType(),
+                    request.cobDate(),
+                    request.freq(),
+                    baseFileSuccess, isBaseFile,
+                    adjFileSuccess, isAdjFile,
+                    keyFileSuccess, isKeyFile
+            );
+        }
+
+        public static FileCompletionRequest buildFailureResponse(FileCreationDetails request, String errorMessage) {
+            // Build a failure response with all operations marked as failed
+            return new FileCompletionRequest(
+                    request != null ? request.requestId() : "unknown",
+                    request != null ? request.requestType() : "unknown",
+                    request != null ? request.cobDate() : "unknown",
+                    request != null ? request.freq() : "unknown",
+                    false, true,  // base file failed
+                    false, true,  // adjusted file failed
+                    false, true   // key file failed
+            );
+        }
+    }
+
+    private static class DataConverter {
+        public static List<String> convertDistinctIdsToCSV(List<String> distinctIds) {
+            List<String> csvData = new ArrayList<>();
+            csvData.add("id");
+
+            if (distinctIds == null || distinctIds.isEmpty()) {
+                log.warn("No distinct IDs provided for CSV conversion");
+                return csvData;
+            }
+            distinctIds.stream()
+                    .map(id -> id != null ? id : "")
+                    .forEach(csvData::add);
+            log.debug("Converted {} distinct IDs to CSV format", distinctIds.size());
+            return csvData;
+        }
+
+        public static List<String> toCsv(List<Map<String, Object>> tableData) {
+            List<String> csvData = new ArrayList<>();
+            if (tableData == null || tableData.isEmpty()) {
+                log.warn("No table data provided for CSV conversion");
+                return csvData;
+            }
+            Set<String> keys = tableData.get(0).keySet();
+            List<String> orderedKeys = new ArrayList<>(keys);
+            List<String> rows = tableData.stream()
+                    .map(row -> orderedKeys.stream()
+                            .map(key -> row.get(key) != null ? row.get(key).toString() : "")
+                            .collect(Collectors.joining("|")))
+                    .collect(Collectors.toList());
+            csvData.addAll(rows);
+            log.debug("Converted {} rows to CSV format with {} columns", rows.size(), orderedKeys.size());
+            return csvData;
+        }
+    }
+
+    private static class StringUtils {
+        public static String cleanEntityName(String entityName) {
+            if (entityName == null || entityName.isEmpty()) {
+                return entityName;
+            }
+            return entityName.toLowerCase().replace("_vue", "");
+        }
+
+        public static String capitalize(String input) {
+            if (input == null || input.isEmpty()) {
+                return input;
+            }
+            return input.substring(0, 1).toUpperCase() + input.substring(1);
+        }
+
+        public static String sanitizeTableName(String tableName) {
+            if (tableName == null || tableName.isEmpty()) {
+                return tableName;
+            }
+            return tableName.replaceAll("[^a-zA-Z0-9_.]", "");
+        }
+
+        public static boolean isNullOrEmpty(String str) {
+            return str == null || str.isEmpty();
+        }
+
+        public static boolean isNullOrBlank(String str) {
+            return str == null || str.trim().isEmpty();
+        }
+    }
+}
