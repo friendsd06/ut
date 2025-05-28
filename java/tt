@@ -527,3 +527,22 @@ public class FileUploadService {
         }
     }
 }
+
+=================
+/**
+ * Service for managing file operations in a data processing pipeline.
+ *
+ * Key responsibilities:
+ * - Create local files from structured data
+ * - Upload files to S3 storage
+ * - Process three file types: base (source data), adjusted (modified data), and key (identifiers)
+ * - Handle synchronous and asynchronous operations
+ * - Provide callback notifications for async operations
+ *
+ * Directory structure:
+ * {baseDir}/abinitio/{env}/adjustment/{requestId}/
+ *   ├── base/          (source data files)
+ *   ├── adjusted/      (modified data files)
+ *   │   └── key/       (identifier files)
+ *   └── distinct/      (distinct ID files)
+ */
