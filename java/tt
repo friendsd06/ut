@@ -2462,4 +2462,25 @@ curl -X POST "http://localhost:8080/api/test/send-message?queueName=order-group-
 ## Production Deployment
 
 1. Set the profile to `prod`:
+
+
+In SQS Terms:
+One Queue, Multiple Threads:
+SQS Queue: [ORDER] [PAYMENT] [ORDER] [NOTIFICATION]
+           ↓        ↓        ↓        ↓
+Thread-1: ORDER ───────────────────── (processing...)
+Thread-2: PAYMENT ─────────────────── (processing...)
+Thread-3: ORDER ───────────────────── (processing...)
+Thread-4: NOTIFICATION ─────────────── (processing...)
+
+ALL HAPPENING AT THE SAME TIME = PARALLEL!
+Simple Answer:
+YES, it's parallel because:
+
+🔥 Multiple threads pull messages from the same queue
+🔥 Each thread processes different messages simultaneously
+🔥 GroupId just determines which processor to use
+🔥 Different groups can be processed at the exact same time
+
+It's like having multiple workers taking orders from one window - they all work in parallel, just on different types of food!
    ```
