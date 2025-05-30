@@ -529,20 +529,1937 @@ public class FileUploadService {
 }
 
 =================
-/**
- * Service for managing file operations in a data processing pipeline.
- *
- * Key responsibilities:
- * - Create local files from structured data
- * - Upload files to S3 storage
- * - Process three file types: base (source data), adjusted (modified data), and key (identifiers)
- * - Handle synchronous and asynchronous operations
- * - Provide callback notifications for async operations
- *
- * Directory structure:
- * {baseDir}/abinitio/{env}/adjustment/{requestId}/
- *   ├── base/          (source data files)
- *   ├── adjusted/      (modified data files)
- *   │   └── key/       (identifier files)
- *   └── distinct/      (distinct ID files)
- */
+# SQS Consumer Project Structure - AWS SDK 2.26.11
+
+## Project Directory Structure:
+```
+sqs-consumer/
+├── pom.xml
+├── README.md
+├── docker-compose.yml
+├── run.sh
+├── src/
+│   └── main/
+│       ├── java/
+│       │   └── com/
+│       │       └── sqsconsumer/
+│       │           ├── SqsConsumerApplication.java
+│       │           ├── config/
+│       │           │   ├── SqsConfiguration.java
+│       │           │   └── ThreadPoolConfiguration.java
+│       │           ├── controller/
+│       │           │   └── TestController.java
+│       │           ├── dto/
+│       │           │   ├── MessageContext.java
+│       │           │   └── ProcessingResult.java
+│       │           ├── exception/
+│       │           │   ├── MessageProcessingException.java
+│       │           │   └── SqsConnectionException.java
+│       │           ├── processor/
+│       │           │   ├── MessageProcessor.java
+│       │           │   └── impl/
+│       │           │       ├── OrderMessageProcessor.java
+│       │           │       ├── PaymentMessageProcessor.java
+│       │           │       └── NotificationMessageProcessor.java
+│       │           ├── service/
+│       │           │   ├── SqsConsumerService.java
+│       │           │   ├── SqsHealthService.java
+│       │           │   └── MessageProducerService.java
+│       │           └── util/
+│       │               ├── MessageUtils.java
+│       │               └── MetricsUtil.java
+│       └── resources/
+│           ├── application.yml
+│           ├── application-dev.yml
+│           ├── application-prod.yml
+│           └── logback-spring.xml
+└── src/test/
+    └── java/
+        └── com/
+            └── sqsconsumer/
+                ├── SqsConsumerApplicationTests.java
+                └── service/
+                    └── SqsConsumerServiceTest.java
+```
+
+## File Contents:
+
+### pom.xml
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.sqsconsumer</groupId>
+    <artifactId>sqs-consumer</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>SQS Consumer Application</name>
+    <description>Production-ready SQS Consumer with Group-based Processing</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <aws.sdk.version>2.26.11</aws.sdk.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- Spring Boot Starters -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- AWS SDK -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sqs</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!-- JSON Processing -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- Validation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- Micrometer for metrics -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- Test Dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>localstack</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-configuration-processor</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.0.0</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+
+### src/main/java/com/sqsconsumer/SqsConsumerApplication.java
+```java
+package com.sqsconsumer;
+
+import com.sqsconsumer.service.SqsConsumerService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+
+@SpringBootApplication
+@ConfigurationPropertiesScan
+public class SqsConsumerApplication implements CommandLineRunner {
+
+    private static final Logger logger = LoggerFactory.getLogger(SqsConsumerApplication.class);
+
+    @Autowired
+    private SqsConsumerService sqsConsumerService;
+
+    public static void main(String[] args) {
+        SpringApplication.run(SqsConsumerApplication.class, args);
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        logger.info("Starting SQS Consumer Application");
+
+        try {
+            sqsConsumerService.startConsumers();
+            logger.info("SQS Consumer Application started successfully");
+
+            // Keep the application running
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                logger.info("Shutting down SQS Consumer Application");
+                sqsConsumerService.stopConsumers();
+            }));
+
+        } catch (Exception e) {
+            logger.error("Failed to start SQS Consumer Application", e);
+            System.exit(1);
+        }
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/config/SqsConfiguration.java
+```java
+package com.sqsconsumer.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.validation.annotation.Validated;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsClient;
+
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import java.net.URI;
+import java.time.Duration;
+
+@Configuration
+@ConfigurationProperties(prefix = "aws.sqs")
+@Validated
+public class SqsConfiguration {
+
+    @NotBlank
+    private String endpoint = "http://localhost:4566";
+
+    @NotBlank
+    private String region = "us-east-1";
+
+    @NotBlank
+    private String accessKey = "test";
+
+    @NotBlank
+    private String secretKey = "test";
+
+    @Min(1)
+    private int maxConcurrentConsumers = 10;
+
+    @NotNull
+    private Duration visibilityTimeout = Duration.ofSeconds(30);
+
+    @NotNull
+    private Duration waitTimeSeconds = Duration.ofSeconds(20);
+
+    @Min(1)
+    private int maxNumberOfMessages = 10;
+
+    @NotNull
+    private Duration pollingInterval = Duration.ofSeconds(5);
+
+    @NotNull
+    private Duration connectionTimeout = Duration.ofSeconds(10);
+
+    @NotNull
+    private Duration socketTimeout = Duration.ofSeconds(30);
+
+    @Min(1)
+    private int maxConnections = 50;
+
+    @Bean
+    public SqsClient sqsClient() {
+        return SqsClient.builder()
+                .endpointOverride(URI.create(endpoint))
+                .region(Region.of(region))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(accessKey, secretKey)))
+                .httpClient(ApacheHttpClient.builder()
+                        .connectionTimeout(connectionTimeout)
+                        .socketTimeout(socketTimeout)
+                        .maxConnections(maxConnections)
+                        .build())
+                .build();
+    }
+
+    // Getters and setters
+    public String getEndpoint() { return endpoint; }
+    public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
+
+    public String getAccessKey() { return accessKey; }
+    public void setAccessKey(String accessKey) { this.accessKey = accessKey; }
+
+    public String getSecretKey() { return secretKey; }
+    public void setSecretKey(String secretKey) { this.secretKey = secretKey; }
+
+    public int getMaxConcurrentConsumers() { return maxConcurrentConsumers; }
+    public void setMaxConcurrentConsumers(int maxConcurrentConsumers) {
+        this.maxConcurrentConsumers = maxConcurrentConsumers;
+    }
+
+    public Duration getVisibilityTimeout() { return visibilityTimeout; }
+    public void setVisibilityTimeout(Duration visibilityTimeout) {
+        this.visibilityTimeout = visibilityTimeout;
+    }
+
+    public Duration getWaitTimeSeconds() { return waitTimeSeconds; }
+    public void setWaitTimeSeconds(Duration waitTimeSeconds) {
+        this.waitTimeSeconds = waitTimeSeconds;
+    }
+
+    public int getMaxNumberOfMessages() { return maxNumberOfMessages; }
+    public void setMaxNumberOfMessages(int maxNumberOfMessages) {
+        this.maxNumberOfMessages = maxNumberOfMessages;
+    }
+
+    public Duration getPollingInterval() { return pollingInterval; }
+    public void setPollingInterval(Duration pollingInterval) {
+        this.pollingInterval = pollingInterval;
+    }
+
+    public Duration getConnectionTimeout() { return connectionTimeout; }
+    public void setConnectionTimeout(Duration connectionTimeout) {
+        this.connectionTimeout = connectionTimeout;
+    }
+
+    public Duration getSocketTimeout() { return socketTimeout; }
+    public void setSocketTimeout(Duration socketTimeout) {
+        this.socketTimeout = socketTimeout;
+    }
+
+    public int getMaxConnections() { return maxConnections; }
+    public void setMaxConnections(int maxConnections) {
+        this.maxConnections = maxConnections;
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/config/ThreadPoolConfiguration.java
+```java
+package com.sqsconsumer.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
+
+@Configuration
+public class ThreadPoolConfiguration {
+
+    @Bean(name = "sqsTaskExecutor")
+    public Executor sqsTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("SQS-Consumer-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/controller/TestController.java
+```java
+package com.sqsconsumer.controller;
+
+import com.sqsconsumer.service.MessageProducerService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/test")
+public class TestController {
+
+    @Autowired
+    private MessageProducerService messageProducerService;
+
+    @PostMapping("/send-messages")
+    public ResponseEntity<Map<String, String>> sendTestMessages() {
+        try {
+            messageProducerService.sendTestMessages();
+            return ResponseEntity.ok(Map.of("status", "success", "message", "Test messages sent"));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("status", "error", "message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/send-message")
+    public ResponseEntity<Map<String, String>> sendMessage(
+            @RequestParam(defaultValue = "multi-group-queue") String queueName,
+            @RequestParam String groupId,
+            @RequestBody String messageBody) {
+        try {
+            String messageId = messageProducerService.sendMessage(queueName, messageBody, groupId);
+            return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "messageId", messageId,
+                "queueName", queueName,
+                "groupId", groupId
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("status", "error", "message", e.getMessage()));
+        }
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/dto/OrderMessage.java
+```java
+package com.sqsconsumer.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+public class OrderMessage {
+
+    @JsonProperty("orderId")
+    private String orderId;
+
+    @JsonProperty("customerId")
+    private String customerId;
+
+    @JsonProperty("amount")
+    private BigDecimal amount;
+
+    @JsonProperty("currency")
+    private String currency;
+
+    @JsonProperty("status")
+    private String status;
+
+    @JsonProperty("createdAt")
+    private Instant createdAt;
+
+    // Default constructor for Jackson
+    public OrderMessage() {}
+
+    public OrderMessage(String orderId, String customerId, BigDecimal amount, String currency) {
+        this.orderId = orderId;
+        this.customerId = customerId;
+        this.amount = amount;
+        this.currency = currency;
+        this.status = "PENDING";
+        this.createdAt = Instant.now();
+    }
+
+    // Getters and Setters
+    public String getOrderId() { return orderId; }
+    public void setOrderId(String orderId) { this.orderId = orderId; }
+
+    public String getCustomerId() { return customerId; }
+    public void setCustomerId(String customerId) { this.customerId = customerId; }
+
+    public BigDecimal getAmount() { return amount; }
+    public void setAmount(BigDecimal amount) { this.amount = amount; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    @Override
+    public String toString() {
+        return "OrderMessage{" +
+                "orderId='" + orderId + '\'' +
+                ", customerId='" + customerId + '\'' +
+                ", amount=" + amount +
+                ", currency='" + currency + '\'' +
+                ", status='" + status + '\'' +
+                ", createdAt=" + createdAt +
+                '}';
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/dto/PaymentMessage.java
+```java
+package com.sqsconsumer.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+public class PaymentMessage {
+
+    @JsonProperty("paymentId")
+    private String paymentId;
+
+    @JsonProperty("orderId")
+    private String orderId;
+
+    @JsonProperty("amount")
+    private BigDecimal amount;
+
+    @JsonProperty("currency")
+    private String currency;
+
+    @JsonProperty("paymentMethod")
+    private String paymentMethod;
+
+    @JsonProperty("status")
+    private String status;
+
+    @JsonProperty("processedAt")
+    private Instant processedAt;
+
+    // Default constructor for Jackson
+    public PaymentMessage() {}
+
+    public PaymentMessage(String paymentId, String orderId, BigDecimal amount,
+                         String currency, String paymentMethod) {
+        this.paymentId = paymentId;
+        this.orderId = orderId;
+        this.amount = amount;
+        this.currency = currency;
+        this.paymentMethod = paymentMethod;
+        this.status = "PROCESSING";
+        this.processedAt = Instant.now();
+    }
+
+    // Getters and Setters
+    public String getPaymentId() { return paymentId; }
+    public void setPaymentId(String paymentId) { this.paymentId = paymentId; }
+
+    public String getOrderId() { return orderId; }
+    public void setOrderId(String orderId) { this.orderId = orderId; }
+
+    public BigDecimal getAmount() { return amount; }
+    public void setAmount(BigDecimal amount) { this.amount = amount; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+
+    public String getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(String paymentMethod) { this.paymentMethod = paymentMethod; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public Instant getProcessedAt() { return processedAt; }
+    public void setProcessedAt(Instant processedAt) { this.processedAt = processedAt; }
+
+    @Override
+    public String toString() {
+        return "PaymentMessage{" +
+                "paymentId='" + paymentId + '\'' +
+                ", orderId='" + orderId + '\'' +
+                ", amount=" + amount +
+                ", currency='" + currency + '\'' +
+                ", paymentMethod='" + paymentMethod + '\'' +
+                ", status='" + status + '\'' +
+                ", processedAt=" + processedAt +
+                '}';
+    }
+}
+```
+```java
+package com.sqsconsumer.dto;
+
+import java.time.Instant;
+import java.util.Map;
+
+public class MessageContext {
+    private final String messageId;
+    private final String groupId;
+    private final String messageBody;
+    private final Map<String, String> messageAttributes;
+    private final Instant receivedAt;
+    private final int attemptCount;
+
+    public MessageContext(String messageId, String groupId, String messageBody,
+                         Map<String, String> messageAttributes, Instant receivedAt, int attemptCount) {
+        this.messageId = messageId;
+        this.groupId = groupId;
+        this.messageBody = messageBody;
+        this.messageAttributes = messageAttributes;
+        this.receivedAt = receivedAt;
+        this.attemptCount = attemptCount;
+    }
+
+    // Getters
+    public String getMessageId() { return messageId; }
+    public String getGroupId() { return groupId; }
+    public String getMessageBody() { return messageBody; }
+    public Map<String, String> getMessageAttributes() { return messageAttributes; }
+    public Instant getReceivedAt() { return receivedAt; }
+    public int getAttemptCount() { return attemptCount; }
+
+    @Override
+    public String toString() {
+        return "MessageContext{" +
+                "messageId='" + messageId + '\'' +
+                ", groupId='" + groupId + '\'' +
+                ", attemptCount=" + attemptCount +
+                ", receivedAt=" + receivedAt +
+                '}';
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/dto/ProcessingResult.java
+```java
+package com.sqsconsumer.dto;
+
+public class ProcessingResult {
+    private final boolean success;
+    private final String errorMessage;
+    private final long processingTimeMs;
+
+    private ProcessingResult(boolean success, String errorMessage, long processingTimeMs) {
+        this.success = success;
+        this.errorMessage = errorMessage;
+        this.processingTimeMs = processingTimeMs;
+    }
+
+    public static ProcessingResult success(long processingTimeMs) {
+        return new ProcessingResult(true, null, processingTimeMs);
+    }
+
+    public static ProcessingResult failure(String errorMessage, long processingTimeMs) {
+        return new ProcessingResult(false, errorMessage, processingTimeMs);
+    }
+
+    // Getters
+    public boolean isSuccess() { return success; }
+    public String getErrorMessage() { return errorMessage; }
+    public long getProcessingTimeMs() { return processingTimeMs; }
+
+    @Override
+    public String toString() {
+        return "ProcessingResult{" +
+                "success=" + success +
+                ", errorMessage='" + errorMessage + '\'' +
+                ", processingTimeMs=" + processingTimeMs +
+                '}';
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/exception/MessageProcessingException.java
+```java
+package com.sqsconsumer.exception;
+
+public class MessageProcessingException extends RuntimeException {
+    private final String messageId;
+    private final String groupId;
+
+    public MessageProcessingException(String messageId, String groupId, String message) {
+        super(message);
+        this.messageId = messageId;
+        this.groupId = groupId;
+    }
+
+    public MessageProcessingException(String messageId, String groupId, String message, Throwable cause) {
+        super(message, cause);
+        this.messageId = messageId;
+        this.groupId = groupId;
+    }
+
+    public String getMessageId() { return messageId; }
+    public String getGroupId() { return groupId; }
+
+    @Override
+    public String toString() {
+        return "MessageProcessingException{" +
+                "messageId='" + messageId + '\'' +
+                ", groupId='" + groupId + '\'' +
+                ", message='" + getMessage() + '\'' +
+                '}';
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/exception/SqsConnectionException.java
+```java
+package com.sqsconsumer.exception;
+
+public class SqsConnectionException extends RuntimeException {
+    public SqsConnectionException(String message) {
+        super(message);
+    }
+
+    public SqsConnectionException(String message, Throwable cause) {
+        super(message, cause);
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/processor/MessageProcessor.java
+```java
+package com.sqsconsumer.processor;
+
+import com.sqsconsumer.dto.MessageContext;
+import com.sqsconsumer.dto.ProcessingResult;
+
+public interface MessageProcessor {
+    ProcessingResult processMessage(MessageContext context);
+    String getSupportedGroupId();
+    boolean isHealthy();
+}
+```
+
+### src/main/java/com/sqsconsumer/processor/impl/OrderMessageProcessor.java
+```java
+package com.sqsconsumer.processor.impl;
+
+import com.sqsconsumer.dto.MessageContext;
+import com.sqsconsumer.dto.ProcessingResult;
+import com.sqsconsumer.processor.MessageProcessor;
+import com.sqsconsumer.util.MetricsUtil;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+@Component
+public class OrderMessageProcessor implements MessageProcessor {
+
+    private static final Logger logger = LoggerFactory.getLogger(OrderMessageProcessor.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public ProcessingResult processMessage(MessageContext context) {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            logger.info("Processing order message - MessageId: {}, GroupId: {}",
+                    context.getMessageId(), context.getGroupId());
+
+            // Parse message body
+            JsonNode messageJson = objectMapper.readTree(context.getMessageBody());
+
+            // Simulate order processing logic
+            String orderId = messageJson.has("orderId") ? messageJson.get("orderId").asText() : "unknown";
+            String customerId = messageJson.has("customerId") ? messageJson.get("customerId").asText() : "unknown";
+
+            logger.debug("Processing order - OrderId: {}, CustomerId: {}", orderId, customerId);
+
+            // Simulate processing time
+            Thread.sleep(1000);
+
+            // Validate order data
+            if ("unknown".equals(orderId)) {
+                throw new IllegalArgumentException("Order ID is missing or invalid");
+            }
+
+            long processingTime = System.currentTimeMillis() - startTime;
+
+            logger.info("Order message processed successfully - MessageId: {}, OrderId: {}, ProcessingTime: {}ms",
+                    context.getMessageId(), orderId, processingTime);
+
+            MetricsUtil.recordProcessingTime("ORDER_GROUP", processingTime);
+            MetricsUtil.incrementProcessedCount("ORDER_GROUP");
+
+            return ProcessingResult.success(processingTime);
+
+        } catch (Exception e) {
+            long processingTime = System.currentTimeMillis() - startTime;
+            logger.error("Error processing order message - MessageId: {}", context.getMessageId(), e);
+
+            MetricsUtil.incrementErrorCount("ORDER_GROUP");
+
+            return ProcessingResult.failure(e.getMessage(), processingTime);
+        }
+    }
+
+    @Override
+    public String getSupportedGroupId() {
+        return "ORDER_GROUP";
+    }
+
+    @Override
+    public boolean isHealthy() {
+        return true; // Add health check logic if needed
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/processor/impl/PaymentMessageProcessor.java
+```java
+package com.sqsconsumer.processor.impl;
+
+import com.sqsconsumer.dto.MessageContext;
+import com.sqsconsumer.dto.ProcessingResult;
+import com.sqsconsumer.processor.MessageProcessor;
+import com.sqsconsumer.util.MetricsUtil;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+@Component
+public class PaymentMessageProcessor implements MessageProcessor {
+
+    private static final Logger logger = LoggerFactory.getLogger(PaymentMessageProcessor.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public ProcessingResult processMessage(MessageContext context) {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            logger.info("Processing payment message - MessageId: {}, GroupId: {}",
+                    context.getMessageId(), context.getGroupId());
+
+            // Parse message body
+            JsonNode messageJson = objectMapper.readTree(context.getMessageBody());
+
+            // Simulate payment processing logic
+            String paymentId = messageJson.has("paymentId") ? messageJson.get("paymentId").asText() : "unknown";
+            String amount = messageJson.has("amount") ? messageJson.get("amount").asText() : "0";
+
+            logger.debug("Processing payment - PaymentId: {}, Amount: {}", paymentId, amount);
+
+            // Simulate processing time
+            Thread.sleep(800);
+
+            // Validate payment data
+            if ("unknown".equals(paymentId)) {
+                throw new IllegalArgumentException("Payment ID is missing or invalid");
+            }
+
+            long processingTime = System.currentTimeMillis() - startTime;
+
+            logger.info("Payment message processed successfully - MessageId: {}, PaymentId: {}, ProcessingTime: {}ms",
+                    context.getMessageId(), paymentId, processingTime);
+
+            MetricsUtil.recordProcessingTime("PAYMENT_GROUP", processingTime);
+            MetricsUtil.incrementProcessedCount("PAYMENT_GROUP");
+
+            return ProcessingResult.success(processingTime);
+
+        } catch (Exception e) {
+            long processingTime = System.currentTimeMillis() - startTime;
+            logger.error("Error processing payment message - MessageId: {}", context.getMessageId(), e);
+
+            MetricsUtil.incrementErrorCount("PAYMENT_GROUP");
+
+            return ProcessingResult.failure(e.getMessage(), processingTime);
+        }
+    }
+
+    @Override
+    public String getSupportedGroupId() {
+        return "PAYMENT_GROUP";
+    }
+
+    @Override
+    public boolean isHealthy() {
+        return true; // Add health check logic if needed
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/processor/impl/NotificationMessageProcessor.java
+```java
+package com.sqsconsumer.processor.impl;
+
+import com.sqsconsumer.dto.MessageContext;
+import com.sqsconsumer.dto.ProcessingResult;
+import com.sqsconsumer.processor.MessageProcessor;
+import com.sqsconsumer.util.MetricsUtil;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+@Component
+public class NotificationMessageProcessor implements MessageProcessor {
+
+    private static final Logger logger = LoggerFactory.getLogger(NotificationMessageProcessor.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public ProcessingResult processMessage(MessageContext context) {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            logger.info("Processing notification message - MessageId: {}, GroupId: {}",
+                    context.getMessageId(), context.getGroupId());
+
+            // Parse message body
+            JsonNode messageJson = objectMapper.readTree(context.getMessageBody());
+
+            // Simulate notification processing logic
+            String notificationId = messageJson.has("notificationId") ? messageJson.get("notificationId").asText() : "unknown";
+            String recipient = messageJson.has("recipient") ? messageJson.get("recipient").asText() : "unknown";
+
+            logger.debug("Processing notification - NotificationId: {}, Recipient: {}", notificationId, recipient);
+
+            // Simulate processing time
+            Thread.sleep(500);
+
+            // Validate notification data
+            if ("unknown".equals(notificationId)) {
+                throw new IllegalArgumentException("Notification ID is missing or invalid");
+            }
+
+            long processingTime = System.currentTimeMillis() - startTime;
+
+            logger.info("Notification message processed successfully - MessageId: {}, NotificationId: {}, ProcessingTime: {}ms",
+                    context.getMessageId(), notificationId, processingTime);
+
+            MetricsUtil.recordProcessingTime("NOTIFICATION_GROUP", processingTime);
+            MetricsUtil.incrementProcessedCount("NOTIFICATION_GROUP");
+
+            return ProcessingResult.success(processingTime);
+
+        } catch (Exception e) {
+            long processingTime = System.currentTimeMillis() - startTime;
+            logger.error("Error processing notification message - MessageId: {}", context.getMessageId(), e);
+
+            MetricsUtil.incrementErrorCount("NOTIFICATION_GROUP");
+
+            return ProcessingResult.failure(e.getMessage(), processingTime);
+        }
+    }
+
+    @Override
+    public String getSupportedGroupId() {
+        return "NOTIFICATION_GROUP";
+    }
+
+    @Override
+    public boolean isHealthy() {
+        return true; // Add health check logic if needed
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/service/SqsConsumerService.java
+```java
+package com.sqsconsumer.service;
+
+import com.sqsconsumer.config.SqsConfiguration;
+import com.sqsconsumer.dto.MessageContext;
+import com.sqsconsumer.dto.ProcessingResult;
+import com.sqsconsumer.exception.MessageProcessingException;
+import com.sqsconsumer.exception.SqsConnectionException;
+import com.sqsconsumer.processor.MessageProcessor;
+import com.sqsconsumer.util.MessageUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.*;
+
+import jakarta.annotation.PreDestroy;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Service
+public class SqsConsumerService {
+
+    private static final Logger logger = LoggerFactory.getLogger(SqsConsumerService.class);
+
+    private final SqsClient sqsClient;
+    private final SqsConfiguration config;
+    private final Map<String, MessageProcessor> messageProcessors;
+    private final ExecutorService executorService;
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+    private final Map<String, String> queueUrls = new ConcurrentHashMap<>();
+
+    @Autowired
+    public SqsConsumerService(SqsClient sqsClient,
+                            SqsConfiguration config,
+                            List<MessageProcessor> processors) {
+        this.sqsClient = sqsClient;
+        this.config = config;
+        this.executorService = Executors.newFixedThreadPool(
+            config.getMaxConcurrentConsumers(),
+            r -> {
+                Thread t = new Thread(r);
+                t.setName("SQS-Consumer-" + t.getId());
+                t.setDaemon(false);
+                return t;
+            }
+        );
+
+        // Map processors by their supported group IDs
+        this.messageProcessors = processors.stream()
+                .collect(Collectors.toMap(
+                    MessageProcessor::getSupportedGroupId,
+                    Function.identity()
+                ));
+
+        logger.info("Initialized SQS Consumer Service with {} processors: {}",
+                messageProcessors.size(), messageProcessors.keySet());
+
+        // Validate SQS connection
+        validateSqsConnection();
+    }
+
+    private void validateSqsConnection() {
+        try {
+            sqsClient.listQueues();
+            logger.info("SQS connection validated successfully");
+        } catch (Exception e) {
+            logger.error("Failed to connect to SQS", e);
+            throw new SqsConnectionException("Unable to connect to SQS: " + e.getMessage(), e);
+        }
+    }
+
+    public void startConsumers() {
+        if (isRunning.compareAndSet(false, true)) {
+            logger.info("Starting SQS consumers for group IDs: {}", messageProcessors.keySet());
+
+            // Use a single queue for all groups
+            String singleQueueName = "multi-group-queue";
+
+            // Start multiple consumer threads for the same queue
+            for (int i = 0; i < config.getMaxConcurrentConsumers(); i++) {
+                executorService.submit(() -> consumeMessagesFromSingleQueue(singleQueueName));
+            }
+        } else {
+            logger.warn("SQS consumers are already running");
+        }
+    }
+
+    public void stopConsumers() {
+        if (isRunning.compareAndSet(true, false)) {
+            logger.info("Stopping SQS consumers");
+            executorService.shutdown();
+
+            try {
+                if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+                    logger.warn("Executor did not terminate gracefully, forcing shutdown");
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                logger.warn("Interrupted while waiting for executor termination");
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void consumeMessagesFromSingleQueue(String queueName) {
+        logger.info("Starting consumer for single queue: {}", queueName);
+
+        String queueUrl = getOrCreateQueue(queueName);
+        int consecutiveErrors = 0;
+        final int maxConsecutiveErrors = 5;
+
+        while (isRunning.get()) {
+            try {
+                ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
+                        .queueUrl(queueUrl)
+                        .maxNumberOfMessages(config.getMaxNumberOfMessages())
+                        .waitTimeSeconds((int) config.getWaitTimeSeconds().getSeconds())
+                        .visibilityTimeout((int) config.getVisibilityTimeout().getSeconds())
+                        .messageAttributeNames("All")
+                        .attributeNames(QueueAttributeName.ALL)
+                        .build();
+
+                ReceiveMessageResponse response = sqsClient.receiveMessage(receiveRequest);
+
+                if (response.hasMessages()) {
+                    logger.debug("Received {} messages from single queue", response.messages().size());
+                    consecutiveErrors = 0; // Reset error counter on successful receive
+
+                    for (Message message : response.messages()) {
+                        try {
+                            processMessageWithRouting(message, queueUrl);
+                        } catch (Exception e) {
+                            logger.error("Error processing message {} from single queue",
+                                    message.messageId(), e);
+                            // Individual message errors don't count toward consecutive errors
+                        }
+                    }
+                } else {
+                    // No messages received, short sleep before next poll
+                    Thread.sleep(config.getPollingInterval().toMillis());
+                }
+
+            } catch (InterruptedException e) {
+                logger.info("Consumer interrupted for single queue: {}", queueName);
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                consecutiveErrors++;
+                logger.error("Error in consumer loop for single queue: {} (consecutive errors: {})",
+                        queueName, consecutiveErrors, e);
+
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    logger.error("Too many consecutive errors for single queue: {}, stopping consumer", queueName);
+                    break;
+                }
+
+                try {
+                    // Exponential backoff with jitter
+                    long backoffMs = Math.min(5000 * (long) Math.pow(2, consecutiveErrors - 1), 30000);
+                    long jitter = (long) (Math.random() * 1000);
+                    Thread.sleep(backoffMs + jitter);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        logger.info("Consumer stopped for single queue: {}", queueName);
+    }
+
+    private void processMessageWithRouting(Message message, String queueUrl) {
+        try {
+            // Extract GroupId from message attributes
+            String groupId = extractGroupIdFromMessage(message);
+
+            if (groupId == null) {
+                logger.error("Message {} has no GroupId attribute, skipping", message.messageId());
+                deleteMessage(queueUrl, message.receiptHandle()); // Remove invalid message
+                return;
+            }
+
+            // Find the appropriate processor for this group
+            MessageProcessor processor = messageProcessors.get(groupId);
+            if (processor == null) {
+                logger.error("No processor found for GroupId: {}, skipping message {}",
+                        groupId, message.messageId());
+                deleteMessage(queueUrl, message.receiptHandle()); // Remove unprocessable message
+                return;
+            }
+
+            logger.debug("Routing message ID: {} to processor for GroupId: {}",
+                    message.messageId(), groupId);
+
+            // Create message context
+            MessageContext context = new MessageContext(
+                message.messageId(),
+                groupId,
+                message.body(),
+                MessageUtils.extractMessageAttributes(message.messageAttributes()),
+                Instant.now(),
+                MessageUtils.getApproximateReceiveCount(MessageUtils.convertSystemAttributes(message.attributes()))
+            );
+
+            // Process the message
+            ProcessingResult result = processor.processMessage(context);
+
+            if (result.isSuccess()) {
+                // Delete the message after successful processing
+                deleteMessage(queueUrl, message.receiptHandle());
+                logger.debug("Successfully processed and deleted message ID: {} for GroupId: {}",
+                        message.messageId(), groupId);
+            } else {
+                logger.error("Message processing failed for ID: {}, GroupId: {}, Error: {}",
+                        message.messageId(), groupId, result.getErrorMessage());
+                throw new MessageProcessingException(message.messageId(), groupId,
+                        "Processing failed: " + result.getErrorMessage());
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to process message ID: {}", message.messageId(), e);
+            // Don't delete the message on error - let it become visible again for retry
+            throw e;
+        }
+    }
+
+    private String extractGroupIdFromMessage(Message message) {
+        // First try to get GroupId from message attributes
+        Map<String, MessageAttributeValue> messageAttributes = message.messageAttributes();
+        if (messageAttributes.containsKey("GroupId")) {
+            return messageAttributes.get("GroupId").stringValue();
+        }
+
+        // Fallback: try to extract from message body if it's JSON
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode jsonNode = mapper.readTree(message.body());
+            if (jsonNode.has("groupId")) {
+                return jsonNode.get("groupId").asText();
+            }
+            if (jsonNode.has("GroupId")) {
+                return jsonNode.get("GroupId").asText();
+            }
+        } catch (Exception e) {
+            logger.debug("Could not extract GroupId from message body for message: {}", message.messageId());
+        }
+
+        return null;
+    }
+
+    private void deleteMessage(String queueUrl, String receiptHandle) {
+        try {
+            DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .receiptHandle(receiptHandle)
+                    .build();
+
+            sqsClient.deleteMessage(deleteRequest);
+        } catch (Exception e) {
+            logger.error("Failed to delete message with receipt handle: {}", receiptHandle, e);
+            throw e;
+        }
+    }
+
+    private String getOrCreateQueue(String queueName) {
+        return queueUrls.computeIfAbsent(queueName, this::createOrGetQueueUrl);
+    }
+
+    private String createOrGetQueueUrl(String queueName) {
+        try {
+            // Try to get existing queue URL
+            GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
+                    .queueName(queueName)
+                    .build();
+
+            GetQueueUrlResponse getQueueResponse = sqsClient.getQueueUrl(getQueueRequest);
+            logger.info("Found existing queue: {} with URL: {}", queueName, getQueueResponse.queueUrl());
+            return getQueueResponse.queueUrl();
+
+        } catch (QueueDoesNotExistException e) {
+            // Queue doesn't exist, create it
+            logger.info("Queue {} does not exist, creating it", queueName);
+
+            CreateQueueRequest createQueueRequest = CreateQueueRequest.builder()
+                    .queueName(queueName)
+                    .attributes(Map.of(
+                        QueueAttributeName.VISIBILITY_TIMEOUT,
+                        String.valueOf(config.getVisibilityTimeout().getSeconds()),
+                        QueueAttributeName.RECEIVE_MESSAGE_WAIT_TIME_SECONDS,
+                        String.valueOf(config.getWaitTimeSeconds().getSeconds()),
+                        QueueAttributeName.MESSAGE_RETENTION_PERIOD,
+                        String.valueOf(14 * 24 * 60 * 60), // 14 days
+                        QueueAttributeName.REDRIVE_POLICY,
+                        "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:" + queueName + "-dlq\",\"maxReceiveCount\":3}"
+                    ))
+                    .build();
+
+            CreateQueueResponse createQueueResponse = sqsClient.createQueue(createQueueRequest);
+            logger.info("Created queue: {} with URL: {}", queueName, createQueueResponse.queueUrl());
+            return createQueueResponse.queueUrl();
+        }
+    }
+
+    public boolean isRunning() {
+        return isRunning.get();
+    }
+
+    public Map<String, String> getQueueUrls() {
+        return Map.copyOf(queueUrls);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        stopConsumers();
+        sqsClient.close();
+    }
+}
+
+### src/main/java/com/sqsconsumer/service/SqsHealthService.java
+```java
+package com.sqsconsumer.service;
+
+import com.sqsconsumer.processor.MessageProcessor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuator.health.Health;
+import org.springframework.boot.actuator.health.HealthIndicator;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Service
+public class SqsHealthService implements HealthIndicator {
+
+    private static final Logger logger = LoggerFactory.getLogger(SqsHealthService.class);
+
+    @Autowired
+    private SqsClient sqsClient;
+
+    @Autowired
+    private SqsConsumerService consumerService;
+
+    @Autowired
+    private List<MessageProcessor> messageProcessors;
+
+    @Override
+    public Health health() {
+        try {
+            // Check SQS connectivity
+            sqsClient.listQueues();
+
+            // Check if consumers are running
+            boolean consumersRunning = consumerService.isRunning();
+
+            // Check processor health
+            Map<String, Boolean> processorHealth = messageProcessors.stream()
+                    .collect(Collectors.toMap(
+                        MessageProcessor::getSupportedGroupId,
+                        MessageProcessor::isHealthy
+                    ));
+
+            boolean allProcessorsHealthy = processorHealth.values().stream()
+                    .allMatch(Boolean::booleanValue);
+
+            if (consumersRunning && allProcessorsHealthy) {
+                return Health.up()
+                        .withDetail("consumers", "running")
+                        .withDetail("processors", processorHealth)
+                        .withDetail("queues", consumerService.getQueueUrls())
+                        .build();
+            } else {
+                return Health.down()
+                        .withDetail("consumers", consumersRunning ? "running" : "stopped")
+                        .withDetail("processors", processorHealth)
+                        .build();
+            }
+
+        } catch (Exception e) {
+            logger.error("Health check failed", e);
+            return Health.down()
+                    .withDetail("error", e.getMessage())
+                    .build();
+        }
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/service/MessageProducerService.java
+```java
+package com.sqsconsumer.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.*;
+
+import java.util.Map;
+
+@Service
+public class MessageProducerService {
+
+    private static final Logger logger = LoggerFactory.getLogger(MessageProducerService.class);
+
+    @Autowired
+    private SqsClient sqsClient;
+
+    public String sendMessage(String queueName, String messageBody, String groupId) {
+        return sendMessage(queueName, messageBody, groupId, Map.of());
+    }
+
+    public String sendMessage(String queueName, String messageBody, String groupId,
+                            Map<String, String> additionalAttributes) {
+        try {
+            GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
+                    .queueName(queueName)
+                    .build();
+
+            String queueUrl = sqsClient.getQueueUrl(getQueueRequest).queueUrl();
+
+            // Build message attributes
+            Map<String, MessageAttributeValue> messageAttributes =
+                    additionalAttributes.entrySet().stream()
+                            .collect(java.util.stream.Collectors.toMap(
+                                Map.Entry::getKey,
+                                entry -> MessageAttributeValue.builder()
+                                        .stringValue(entry.getValue())
+                                        .dataType("String")
+                                        .build()
+                            ));
+
+            // Add group ID
+            messageAttributes.put("GroupId", MessageAttributeValue.builder()
+                    .stringValue(groupId)
+                    .dataType("String")
+                    .build());
+
+            SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(messageBody)
+                    .messageAttributes(messageAttributes)
+                    .build();
+
+            SendMessageResponse response = sqsClient.sendMessage(sendMessageRequest);
+
+            logger.info("Message sent successfully. MessageId: {}, GroupId: {}, Queue: {}",
+                    response.messageId(), groupId, queueName);
+
+            return response.messageId();
+
+        } catch (Exception e) {
+            logger.error("Failed to send message to queue: {}, GroupId: {}", queueName, groupId, e);
+            throw e;
+        }
+    }
+
+    public void sendTestMessages() {
+        // Order test message - sent to single queue with GroupId attribute
+        String orderMessage = "{\"orderId\":\"ORD-001\",\"customerId\":\"CUST-123\",\"amount\":99.99}";
+        sendMessage("multi-group-queue", orderMessage, "ORDER_GROUP");
+
+        // Payment test message - sent to single queue with GroupId attribute
+        String paymentMessage = "{\"paymentId\":\"PAY-001\",\"amount\":\"99.99\",\"currency\":\"USD\"}";
+        sendMessage("multi-group-queue", paymentMessage, "PAYMENT_GROUP");
+
+        // Notification test message - sent to single queue with GroupId attribute
+        String notificationMessage = "{\"notificationId\":\"NOT-001\",\"recipient\":\"user@example.com\",\"type\":\"ORDER_CONFIRMATION\"}";
+        sendMessage("multi-group-queue", notificationMessage, "NOTIFICATION_GROUP");
+
+        logger.info("Test messages sent successfully to single queue with different GroupIds");
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/util/MessageUtils.java
+```java
+package com.sqsconsumer.util;
+
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName;
+
+import java.util.Map;
+import java.util.stream.Collectors;
+
+public class MessageUtils {
+
+    public static String generateQueueName(String groupId) {
+        return groupId.toLowerCase().replace("_", "-") + "-queue";
+    }
+
+    public static Map<String, String> extractMessageAttributes(Map<String, MessageAttributeValue> attributes) {
+        return attributes.entrySet().stream()
+                .collect(Collectors.toMap(
+                    Map.Entry::getKey,
+                    entry -> entry.getValue().stringValue() != null ?
+                            entry.getValue().stringValue() :
+                            (entry.getValue().binaryValue() != null ?
+                                    entry.getValue().binaryValue().toString() : "")
+                ));
+    }
+
+    public static Map<String, String> convertSystemAttributes(Map<MessageSystemAttributeName, String> systemAttributes) {
+        return systemAttributes.entrySet().stream()
+                .collect(Collectors.toMap(
+                    entry -> entry.getKey().toString(),
+                    Map.Entry::getValue
+                ));
+    }
+
+    public static int getApproximateReceiveCount(Map<String, String> attributes) {
+        try {
+            String receiveCount = attributes.get("ApproximateReceiveCount");
+            if (receiveCount == null) {
+                // Try with the enum name as well
+                receiveCount = attributes.get(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT.toString());
+            }
+            return receiveCount != null ? Integer.parseInt(receiveCount) : 1;
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    public static boolean isRetryableError(Throwable throwable) {
+        // Define which errors should trigger retry
+        return !(throwable instanceof IllegalArgumentException ||
+                throwable instanceof SecurityException ||
+                throwable instanceof ClassCastException);
+    }
+}
+```
+
+### src/main/java/com/sqsconsumer/util/MetricsUtil.java
+```java
+package com.sqsconsumer.util;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
+
+import java.time.Duration;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+public class MetricsUtil {
+
+    private static final ConcurrentMap<String, Counter> processedCounters = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<String, Counter> errorCounters = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<String, Timer> processingTimers = new ConcurrentHashMap<>();
+
+    public static void incrementProcessedCount(String groupId) {
+        processedCounters.computeIfAbsent(groupId,
+                k -> Counter.builder("sqs.messages.processed")
+                        .tag("group", k)
+                        .description("Number of successfully processed messages")
+                        .register(Metrics.globalRegistry))
+                .increment();
+    }
+
+    public static void incrementErrorCount(String groupId) {
+        errorCounters.computeIfAbsent(groupId,
+                k -> Counter.builder("sqs.messages.errors")
+                        .tag("group", k)
+                        .description("Number of message processing errors")
+                        .register(Metrics.globalRegistry))
+                .increment();
+    }
+
+    public static void recordProcessingTime(String groupId, long processingTimeMs) {
+        processingTimers.computeIfAbsent(groupId,
+                k -> Timer.builder("sqs.messages.processing.time")
+                        .tag("group", k)
+                        .description("Message processing time")
+                        .register(Metrics.globalRegistry))
+                .record(Duration.ofMillis(processingTimeMs));
+    }
+}
+```
+
+### src/main/resources/application.yml
+```yaml
+spring:
+  application:
+    name: sqs-consumer
+  profiles:
+    active: dev
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+aws:
+  sqs:
+    endpoint: http://localhost:4566
+    region: us-east-1
+    access-key: test
+    secret-key: test
+    max-concurrent-consumers: 10
+    visibility-timeout: PT30S
+    wait-time-seconds: PT20S
+    max-number-of-messages: 10
+    polling-interval: PT5S
+    connection-timeout: PT10S
+    socket-timeout: PT30S
+    max-connections: 50
+
+logging:
+  level:
+    root: INFO
+    com.sqsconsumer: DEBUG
+    software.amazon.awssdk: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n"
+  file:
+    name: logs/sqs-consumer.log
+```
+
+### src/main/resources/application-dev.yml
+```yaml
+aws:
+  sqs:
+    endpoint: http://localhost:4566
+    region: us-east-1
+    access-key: test
+    secret-key: test
+
+logging:
+  level:
+    com.sqsconsumer: DEBUG
+```
+
+### src/main/resources/application-prod.yml
+```yaml
+aws:
+  sqs:
+    endpoint: https://sqs.us-east-1.amazonaws.com
+    region: us-east-1
+    # Use environment variables or AWS IAM roles in production
+    # access-key: ${AWS_ACCESS_KEY_ID}
+    # secret-key: ${AWS_SECRET_ACCESS_KEY}
+    max-concurrent-consumers: 20
+    connection-timeout: PT30S
+    socket-timeout: PT60S
+    max-connections: 100
+
+logging:
+  level:
+    com.sqsconsumer: INFO
+    root: WARN
+```
+
+### src/main/resources/logback-spring.xml
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProfile name="!prod">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>logs/sqs-consumer.log</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <fileNamePattern>logs/sqs-consumer.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                    <maxFileSize>100MB</maxFileSize>
+                </timeBasedFileNamingAndTriggeringPolicy>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>3GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n</pattern>
+            </encoder>
+        </appender>
+
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n</pattern>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>
+```
+
+### docker-compose.yml
+```yaml
+version: '3.8'
+
+services:
+  localstack:
+    container_name: "${LOCALSTACK_DOCKER_NAME-localstack_main}"
+    image: localstack/localstack:3.4
+    ports:
+      - "127.0.0.1:4566:4566"            # LocalStack Gateway
+      - "127.0.0.1:4510-4559:4510-4559"  # external services port range
+    environment:
+      - DEBUG=${DEBUG-}
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - SERVICES=sqs
+    volumes:
+      - "${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+```
+
+### run.sh
+```bash
+#!/bin/bash
+
+# SQS Consumer Application Startup Script
+
+echo "Starting SQS Consumer Application..."
+
+# Check if LocalStack is needed
+if [[ "${SPRING_PROFILES_ACTIVE}" != "prod" ]]; then
+    echo "Starting LocalStack for development..."
+
+    # Check if Docker is running
+    if ! docker info > /dev/null 2>&1; then
+        echo "Docker is not running. Please start Docker first."
+        exit 1
+    fi
+
+    # Start LocalStack
+    docker-compose up -d localstack
+
+    # Wait for LocalStack to be ready
+    echo "Waiting for LocalStack to be ready..."
+    timeout=60
+    while ! curl -s http://localhost:4566/_localstack/health > /dev/null; do
+        sleep 2
+        timeout=$((timeout - 2))
+        if [ $timeout -le 0 ]; then
+            echo "LocalStack failed to start within 60 seconds"
+            exit 1
+        fi
+    done
+    echo "LocalStack is ready!"
+fi
+
+# Create logs directory
+mkdir -p logs
+
+# Set JVM options for production
+export JAVA_OPTS="${JAVA_OPTS} -Xms512m -Xmx2g -XX:+UseG1GC -XX:+UseStringDeduplication"
+
+# Run the application
+echo "Starting SQS Consumer Application..."
+if [ -f "target/sqs-consumer-1.0.0.jar" ]; then
+    java $JAVA_OPTS -jar target/sqs-consumer-1.0.0.jar
+else
+    echo "JAR file not found. Please run 'mvn clean package' first."
+    exit 1
+fi
+```
+
+### README.md
+```markdown
+# SQS Consumer Application
+
+A production-ready Spring Boot application for consuming messages from Amazon SQS with group-based processing using AWS SDK 2.26.11.
+
+## Features
+
+- **Multi-Group Processing**: Support for different message processors based on group IDs
+- **LocalStack Support**: Configured for local development with LocalStack
+- **Production Ready**: Comprehensive error handling, metrics, and health checks
+- **Configurable**: Extensive configuration options for different environments
+- **Monitoring**: Built-in health checks and Prometheus metrics
+- **Graceful Shutdown**: Proper resource cleanup and graceful shutdown handling
+- **AWS SDK 2.26.11**: Latest AWS SDK version with all API compatibility
+
+## Quick Start
+
+### Prerequisites
+
+- Java 17 or higher
+- Maven 3.6+
+- Docker (for LocalStack)
+
+### Running the Application
+
+1. **Clone and build the project:**
+   ```bash
+   mvn clean package
+   ```
+
+2. **Start the application:**
+   ```bash
+   chmod +x run.sh
+   ./run.sh
+   ```
+
+   This will:
+   - Start LocalStack in Docker
+   - Wait for LocalStack to be ready
+   - Start the SQS consumer application
+
+3. **Send test messages:**
+   ```bash
+   curl -X POST http://localhost:8080/api/test/send-messages
+   ```
+
+### Manual Setup
+
+1. **Start LocalStack:**
+   ```bash
+   docker-compose up -d localstack
+   ```
+
+2. **Run the application:**
+   ```bash
+   java -jar target/sqs-consumer-1.0.0.jar
+   ```
+
+## API Endpoints
+
+- **Health Check**: `GET http://localhost:8080/actuator/health`
+- **Metrics**: `GET http://localhost:8080/actuator/metrics`
+- **Prometheus**: `GET http://localhost:8080/actuator/prometheus`
+- **Send Test Messages**: `POST http://localhost:8080/api/test/send-messages`
+- **Send Custom Message**: `POST http://localhost:8080/api/test/send-message?queueName=order-group-queue&groupId=ORDER_GROUP`
+
+## Configuration
+
+### Environment Profiles
+
+- **dev** (default): Uses LocalStack for development
+- **prod**: Configured for AWS production environment
+
+### Key Configuration Properties
+
+```yaml
+aws:
+  sqs:
+    endpoint: http://localhost:4566  # LocalStack endpoint
+    region: us-east-1
+    max-concurrent-consumers: 10
+    visibility-timeout: PT30S
+    wait-time-seconds: PT20S
+```
+
+### Adding New Message Processors
+
+1. Implement the `MessageProcessor` interface:
+   ```java
+   @Component
+   public class CustomMessageProcessor implements MessageProcessor {
+       @Override
+       public ProcessingResult processMessage(MessageContext context) {
+           // Your processing logic here
+           return ProcessingResult.success(processingTime);
+       }
+
+       @Override
+       public String getSupportedGroupId() {
+           return "CUSTOM_GROUP";
+       }
+
+       @Override
+       public boolean isHealthy() {
+           return true;
+       }
+   }
+   ```
+
+2. The processor will be automatically discovered and registered
+
+## Monitoring
+
+- **Health Check**: `http://localhost:8080/actuator/health`
+- **Metrics**: `http://localhost:8080/actuator/metrics`
+- **Prometheus**: `http://localhost:8080/actuator/prometheus`
+
+## Testing
+
+Send test messages using the built-in endpoints:
+
+```bash
+# Send test messages for all groups
+curl -X POST http://localhost:8080/api/test/send-messages
+
+# Send custom message
+curl -X POST "http://localhost:8080/api/test/send-message?queueName=order-group-queue&groupId=ORDER_GROUP" \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"ORD-123","customerId":"CUST-456","amount":199.99}'
+```
+
+## Production Deployment
+
+1. Set the profile to `prod`:
+   ```
