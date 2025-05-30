@@ -2483,4 +2483,76 @@ YES, it's parallel because:
 🔥 Different groups can be processed at the exact same time
 
 It's like having multiple workers taking orders from one window - they all work in parallel, just on different types of food!
+
+
+Key Changes Made:
+
+Single Queue: All messages go to "multi-group-queue"
+Message Routing: The consumer reads the GroupId from message attributes and routes to the correct processor
+Flexible GroupId Extraction:
+
+First tries message attributes: message.messageAttributes().get("GroupId")
+Fallback to JSON body: {"groupId": "ORDER_GROUP"}
+
+
+Multiple Consumer Threads: Multiple threads read from the same queue for better throughput
+Error Handling: Messages with invalid/missing GroupId are removed from the queue
+
+Benefits of Single Queue:
+✅ Simpler Infrastructure: Only one queue to manage
+✅ Better Resource Utilization: All consumer threads can process any message type
+✅ Easier Scaling: Add more consumer threads without managing multiple queues
+✅ Cost Effective: Fewer SQS queues to maintain
+Testing:
+bash# Send test messages (all go to same queue)
+curl -X POST http://localhost:8080/api/test/send-messages
+
+# Send custom message to single queue
+curl -X POST "http://localhost:8080/api/test/send-message?groupId=ORDER_GROUP" \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"ORD-123","customerId":"CUST-456"}'
+The system will automatically route messages to the correct processor based on the GroupId attribute!RetryAis this parallel consuption if we have two group and one queueEditYes, it IS parallel consumption! Here's exactly how it works with 2 groups and 1 queue:
+Parallel Consumption Architecture:
+┌─────────────────────────────────────────────────┐
+│        Single Queue: "multi-group-queue"        │
+│                                                 │
+│  [ORDER_GROUP msg] [PAYMENT_GROUP msg] [ORDER_GROUP msg] [PAYMENT_GROUP msg]  │
+│                                                 │
+└─────────────────────────────────────────────────┘
+                            │
+                            ▼
+        Multiple Consumer Threads (Parallel Processing)
+                            │
+    ┌───────────────────────┼───────────────────────┐
+    ▼                       ▼                       ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Thread 1    │     │ Thread 2    │     │ Thread 3    │
+│ Processing  │     │ Processing  │     │ Processing  │
+│ ORDER msg   │     │ PAYMENT msg │     │ ORDER msg   │
+└─────────────┘     └─────────────┘     └─────────────┘
+    │                       │                       │
+    ▼                       ▼                       ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│OrderProcessor│     │PaymentProc  │     │OrderProcessor│
+└─────────────┘     └─────────────┘     └─────────────┘
+How Parallel Processing Works:
+1. Multiple Consumer Threads
+java// Creates multiple threads that all read from the same queue
+for (int i = 0; i < config.getMaxConcurrentConsumers(); i++) {
+    executorService.submit(() -> consumeMessagesFromSingleQueue(singleQueueName));
+}
+2. Each Thread Can Process Any Group
+java// Each thread:
+// 1. Polls the queue for messages (up to 10 at once)
+// 2. For each message, extracts GroupId
+// 3. Routes to appropriate processor
+// 4. Processes in parallel with other threads
+3. Real Example with 10 Consumer Threads:
+ThreadCurrent MessageGroupStatusThread-1Processing Order-001ORDER_GROUP⚡ ActiveThread-2Processing Payment-005PAYMENT_GROUP⚡ ActiveThread-3Processing Order-002ORDER_GROUP⚡ ActiveThread-4Processing Payment-006PAYMENT_GROUP⚡ ActiveThread-5Polling for messages-🔄 WaitingThread-6Processing Order-003ORDER_GROUP⚡ ActiveThread-7Processing Payment-007PAYMENT_GROUP⚡ ActiveThread-8Processing Order-004ORDER_GROUP⚡ ActiveThread-9Polling for messages-🔄 WaitingThread-10Processing Payment-008PAYMENT_GROUP⚡ Active
+Benefits of This Approach:
+✅ True Parallelism: Multiple messages processed simultaneously
+✅ Dynamic Load Balancing: Threads automatically pick up available work
+✅ No Group Blocking: If one group has many messages, other threads can still process the other group
+✅ Efficient Resource Usage: All threads stay busy as long as there are messages
+Performance Comparison:
    ```
