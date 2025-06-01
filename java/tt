@@ -5335,3 +5335,2002 @@ Performance Comparison:
            return ResponseEntity.ok(response);
        }
    }
+
+   ============================
+   // pom.xml dependencies
+   /*
+   <dependencies>
+       <dependency>
+           <groupId>org.springframework.boot</groupId>
+           <artifactId>spring-boot-starter</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>org.springframework.boot</groupId>
+           <artifactId>spring-boot-starter-web</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>org.springframework.boot</groupId>
+           <artifactId>spring-boot-starter-actuator</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>software.amazon.awssdk</groupId>
+           <artifactId>sqs</artifactId>
+           <version>2.20.68</version>
+       </dependency>
+       <dependency>
+           <groupId>com.fasterxml.jackson.core</groupId>
+           <artifactId>jackson-databind</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>io.micrometer</groupId>
+           <artifactId>micrometer-core</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>io.micrometer</groupId>
+           <artifactId>micrometer-registry-prometheus</artifactId>
+       </dependency>
+   </dependencies>
+   */
+
+   // application.yml
+   /*
+   spring:
+     application:
+       name: sqs-multi-group-consumer
+     profiles:
+       active: dev
+
+   management:
+     endpoints:
+       web:
+         exposure:
+           include: health,info,metrics,prometheus,loggers
+     endpoint:
+       health:
+         show-details: always
+     metrics:
+       export:
+         prometheus:
+           enabled: true
+
+   aws:
+     region: ${AWS_REGION:us-east-1}
+     access-key: ${AWS_ACCESS_KEY:your-access-key}
+     secret-key: ${AWS_SECRET_KEY:your-secret-key}
+     sqs:
+       queue-url: ${SQS_QUEUE_URL:https://sqs.us-east-1.amazonaws.com/123456789012/my-main-queue}
+       dlq-url: ${SQS_DLQ_URL:https://sqs.us-east-1.amazonaws.com/123456789012/my-main-queue-dlq}
+       max-messages: ${SQS_MAX_MESSAGES:10}
+       wait-time-seconds: ${SQS_WAIT_TIME:20}
+       max-retry-attempts: ${SQS_MAX_RETRY:3}
+       error-backoff-seconds: ${SQS_ERROR_BACKOFF:5}
+
+   consumer:
+     shutdown-timeout-seconds: ${CONSUMER_SHUTDOWN_TIMEOUT:60}
+     health-check-interval-seconds: ${HEALTH_CHECK_INTERVAL:30}
+     groups:
+       order-processing:
+         thread-pool-size: ${ORDER_THREADS:5}
+         enabled: ${ORDER_ENABLED:true}
+         priority: HIGH
+         retry-enabled: true
+       analytics:
+         thread-pool-size: ${ANALYTICS_THREADS:3}
+         enabled: ${ANALYTICS_ENABLED:true}
+         priority: MEDIUM
+         retry-enabled: false
+       notification:
+         thread-pool-size: ${NOTIFICATION_THREADS:8}
+         enabled: ${NOTIFICATION_ENABLED:true}
+         priority: LOW
+         retry-enabled: true
+
+   logging:
+     level:
+       com.example.sqs: ${LOG_LEVEL:INFO}
+       root: WARN
+     pattern:
+       console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}] [%X{consumerGroup}] %logger{36} - %msg%n"
+       file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}] [%X{consumerGroup}] %logger{36} - %msg%n"
+     file:
+       name: logs/sqs-consumer.log
+   */
+
+   // Message Model with Validation
+   package com.example.sqs.model;
+
+   import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+   import com.fasterxml.jackson.annotation.JsonProperty;
+
+   import javax.validation.constraints.NotBlank;
+   import javax.validation.constraints.NotNull;
+   import javax.validation.constraints.Positive;
+
+   @JsonIgnoreProperties(ignoreUnknown = true)
+   public class OrderMessage {
+
+       @NotBlank(message = "Order ID cannot be blank")
+       @JsonProperty("orderId")
+       private String orderId;
+
+       @NotBlank(message = "Customer ID cannot be blank")
+       @JsonProperty("customerId")
+       private String customerId;
+
+       @NotNull(message = "Amount cannot be null")
+       @Positive(message = "Amount must be positive")
+       @JsonProperty("amount")
+       private Double amount;
+
+       @JsonProperty("messageGroup")
+       private String messageGroup;
+
+       @JsonProperty("timestamp")
+       private Long timestamp;
+
+       @JsonProperty("priority")
+       private String priority = "NORMAL";
+
+       @JsonProperty("source")
+       private String source = "API";
+
+       // Default constructor
+       public OrderMessage() {}
+
+       // Constructor
+       public OrderMessage(String orderId, String customerId, Double amount, String messageGroup) {
+           this.orderId = orderId;
+           this.customerId = customerId;
+           this.amount = amount;
+           this.messageGroup = messageGroup;
+           this.timestamp = System.currentTimeMillis();
+       }
+
+       // Getters and setters
+       public String getOrderId() { return orderId; }
+       public void setOrderId(String orderId) { this.orderId = orderId; }
+
+       public String getCustomerId() { return customerId; }
+       public void setCustomerId(String customerId) { this.customerId = customerId; }
+
+       public Double getAmount() { return amount; }
+       public void setAmount(Double amount) { this.amount = amount; }
+
+       public String getMessageGroup() { return messageGroup; }
+       public void setMessageGroup(String messageGroup) { this.messageGroup = messageGroup; }
+
+       public Long getTimestamp() { return timestamp; }
+       public void setTimestamp(Long timestamp) { this.timestamp = timestamp; }
+
+       public String getPriority() { return priority; }
+       public void setPriority(String priority) { this.priority = priority; }
+
+       public String getSource() { return source; }
+       public void setSource(String source) { this.source = source; }
+
+       public boolean isValid() {
+           return orderId != null && !orderId.trim().isEmpty() &&
+                  customerId != null && !customerId.trim().isEmpty() &&
+                  amount != null && amount > 0;
+       }
+
+       @Override
+       public String toString() {
+           return String.format("OrderMessage{orderId='%s', customerId='%s', amount=%.2f, messageGroup='%s', priority='%s', timestamp=%d}",
+                   orderId, customerId, amount, messageGroup, priority, timestamp);
+       }
+   }
+
+   // Consumer Group Priority Enum
+   package com.example.sqs.enums;
+
+   public enum ConsumerPriority {
+       HIGH(1),
+       MEDIUM(2),
+       LOW(3);
+
+       private final int level;
+
+       ConsumerPriority(int level) {
+           this.level = level;
+       }
+
+       public int getLevel() {
+           return level;
+       }
+   }
+
+   // Consumer Group Status
+   package com.example.sqs.enums;
+
+   public enum ConsumerGroupStatus {
+       STARTING,
+       RUNNING,
+       STOPPING,
+       STOPPED,
+       ERROR,
+       DEGRADED
+   }
+
+   // Processing Result
+   package com.example.sqs.model;
+
+   public class ProcessingResult {
+       private boolean success;
+       private String message;
+       private long processingTimeMs;
+       private Exception exception;
+
+       public ProcessingResult(boolean success, String message, long processingTimeMs) {
+           this.success = success;
+           this.message = message;
+           this.processingTimeMs = processingTimeMs;
+       }
+
+       public ProcessingResult(boolean success, String message, long processingTimeMs, Exception exception) {
+           this.success = success;
+           this.message = message;
+           this.processingTimeMs = processingTimeMs;
+           this.exception = exception;
+       }
+
+       // Getters
+       public boolean isSuccess() { return success; }
+       public String getMessage() { return message; }
+       public long getProcessingTimeMs() { return processingTimeMs; }
+       public Exception getException() { return exception; }
+   }
+
+   // Enhanced Consumer Group Interface
+   package com.example.sqs.consumer;
+
+   import com.example.sqs.enums.ConsumerGroupStatus;
+   import com.example.sqs.enums.ConsumerPriority;
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.model.ProcessingResult;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   public interface ConsumerGroup {
+       String getGroupName();
+       ConsumerPriority getPriority();
+       boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage);
+       ProcessingResult processMessage(OrderMessage orderMessage, Message sqsMessage);
+       int getThreadPoolSize();
+       boolean isEnabled();
+       boolean isRetryEnabled();
+       ConsumerGroupStatus getStatus();
+       void setStatus(ConsumerGroupStatus status);
+       long getProcessedCount();
+       long getFailedCount();
+       double getAverageProcessingTime();
+       void recordProcessingMetric(long processingTimeMs, boolean success);
+   }
+
+   // AWS SQS Configuration with Connection Pooling
+   package com.example.sqs.config;
+
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.context.annotation.Bean;
+   import org.springframework.context.annotation.Configuration;
+   import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+   import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+   import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+   import software.amazon.awssdk.core.retry.RetryPolicy;
+   import software.amazon.awssdk.http.apache.ApacheHttpClient;
+   import software.amazon.awssdk.regions.Region;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+
+   import java.time.Duration;
+
+   @Configuration
+   public class SqsConfig {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsConfig.class);
+
+       @Value("${aws.access-key}")
+       private String accessKey;
+
+       @Value("${aws.secret-key}")
+       private String secretKey;
+
+       @Value("${aws.region}")
+       private String region;
+
+       @Bean
+       public SqsClient sqsClient() {
+           logger.info("INIT_SQS_CLIENT - Initializing SQS client for region: {}", region);
+
+           try {
+               SqsClient client = SqsClient.builder()
+                       .region(Region.of(region))
+                       .credentialsProvider(StaticCredentialsProvider.create(
+                               AwsBasicCredentials.create(accessKey, secretKey)))
+                       .httpClient(ApacheHttpClient.builder()
+                               .maxConnections(100)
+                               .connectionTimeout(Duration.ofSeconds(30))
+                               .socketTimeout(Duration.ofSeconds(30))
+                               .build())
+                       .overrideConfiguration(ClientOverrideConfiguration.builder()
+                               .apiCallTimeout(Duration.ofMinutes(2))
+                               .apiCallAttemptTimeout(Duration.ofSeconds(30))
+                               .retryPolicy(RetryPolicy.builder()
+                                       .numRetries(3)
+                                       .build())
+                               .build())
+                       .build();
+
+               logger.info("INIT_SQS_CLIENT_SUCCESS - SQS client initialized successfully");
+               return client;
+
+           } catch (Exception e) {
+               logger.error("INIT_SQS_CLIENT_FAILED - Failed to initialize SQS client: {}", e.getMessage(), e);
+               throw new RuntimeException("Failed to initialize SQS client", e);
+           }
+       }
+   }
+
+   // Base Consumer Group Implementation
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import com.example.sqs.enums.ConsumerGroupStatus;
+   import com.example.sqs.enums.ConsumerPriority;
+   import org.slf4j.MDC;
+
+   import java.util.concurrent.atomic.AtomicLong;
+   import java.util.concurrent.atomic.LongAdder;
+
+   public abstract class BaseConsumerGroup implements ConsumerGroup {
+
+       protected final AtomicLong processedCount = new AtomicLong(0);
+       protected final AtomicLong failedCount = new AtomicLong(0);
+       protected final LongAdder totalProcessingTime = new LongAdder();
+       protected volatile ConsumerGroupStatus status = ConsumerGroupStatus.STOPPED;
+
+       protected void setMDCContext() {
+           MDC.put("consumerGroup", getGroupName());
+           MDC.put("traceId", java.util.UUID.randomUUID().toString().substring(0, 8));
+       }
+
+       protected void clearMDCContext() {
+           MDC.remove("consumerGroup");
+           MDC.remove("traceId");
+       }
+
+       @Override
+       public ConsumerGroupStatus getStatus() {
+           return status;
+       }
+
+       @Override
+       public void setStatus(ConsumerGroupStatus status) {
+           this.status = status;
+       }
+
+       @Override
+       public long getProcessedCount() {
+           return processedCount.get();
+       }
+
+       @Override
+       public long getFailedCount() {
+           return failedCount.get();
+       }
+
+       @Override
+       public double getAverageProcessingTime() {
+           long processed = processedCount.get();
+           return processed > 0 ? (double) totalProcessingTime.sum() / processed : 0.0;
+       }
+
+       @Override
+       public void recordProcessingMetric(long processingTimeMs, boolean success) {
+           if (success) {
+               processedCount.incrementAndGet();
+           } else {
+               failedCount.incrementAndGet();
+           }
+           totalProcessingTime.add(processingTimeMs);
+       }
+   }
+
+   // Order Processing Consumer Group
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.enums.ConsumerPriority;
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.model.ProcessingResult;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Component;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   @Component
+   public class OrderProcessingGroup extends BaseConsumerGroup {
+
+       private static final Logger logger = LoggerFactory.getLogger(OrderProcessingGroup.class);
+
+       @Value("${consumer.groups.order-processing.thread-pool-size:5}")
+       private int threadPoolSize;
+
+       @Value("${consumer.groups.order-processing.enabled:true}")
+       private boolean enabled;
+
+       @Value("${consumer.groups.order-processing.retry-enabled:true}")
+       private boolean retryEnabled;
+
+       @Override
+       public String getGroupName() {
+           return "ORDER_PROCESSING";
+       }
+
+       @Override
+       public ConsumerPriority getPriority() {
+           return ConsumerPriority.HIGH;
+       }
+
+       @Override
+       public boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage) {
+           setMDCContext();
+           try {
+               String messageGroup = orderMessage.getMessageGroup();
+               boolean shouldProcess = messageGroup == null || "ORDER".equals(messageGroup) || "ALL".equals(messageGroup);
+
+               logger.debug("MESSAGE_FILTER - OrderId: {}, MessageGroup: {}, ShouldProcess: {}",
+                           orderMessage.getOrderId(), messageGroup, shouldProcess);
+
+               return shouldProcess;
+           } finally {
+               clearMDCContext();
+           }
+       }
+
+       @Override
+       public ProcessingResult processMessage(OrderMessage orderMessage, Message sqsMessage) {
+           setMDCContext();
+           long startTime = System.currentTimeMillis();
+
+           try {
+               logger.info("PROCESSING_START - OrderId: {}, CustomerId: {}, Amount: ${:.2f}, MessageId: {}",
+                          orderMessage.getOrderId(), orderMessage.getCustomerId(),
+                          orderMessage.getAmount(), sqsMessage.messageId());
+
+               // Validate message
+               if (!orderMessage.isValid()) {
+                   String errorMsg = "Invalid order message format";
+                   logger.error("PROCESSING_VALIDATION_FAILED - OrderId: {}, Reason: {}",
+                              orderMessage.getOrderId(), errorMsg);
+                   return new ProcessingResult(false, errorMsg, System.currentTimeMillis() - startTime);
+               }
+
+               // Simulate order processing steps
+               logger.debug("PROCESSING_STEP_1 - Validating inventory for OrderId: {}", orderMessage.getOrderId());
+               simulateProcessingStep("inventory_validation", 100);
+
+               logger.debug("PROCESSING_STEP_2 - Processing payment for OrderId: {} Amount: ${:.2f}",
+                           orderMessage.getOrderId(), orderMessage.getAmount());
+               simulateProcessingStep("payment_processing", 300);
+
+               logger.debug("PROCESSING_STEP_3 - Updating database for OrderId: {}", orderMessage.getOrderId());
+               simulateProcessingStep("database_update", 100);
+
+               long processingTime = System.currentTimeMillis() - startTime;
+
+               logger.info("PROCESSING_SUCCESS - OrderId: {} processed successfully in {}ms",
+                          orderMessage.getOrderId(), processingTime);
+
+               return new ProcessingResult(true, "Order processed successfully", processingTime);
+
+           } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               long processingTime = System.currentTimeMillis() - startTime;
+               logger.warn("PROCESSING_INTERRUPTED - OrderId: {} processing interrupted after {}ms",
+                          orderMessage.getOrderId(), processingTime);
+               return new ProcessingResult(false, "Processing interrupted", processingTime, e);
+
+           } catch (Exception e) {
+               long processingTime = System.currentTimeMillis() - startTime;
+               logger.error("PROCESSING_FAILED - OrderId: {} failed after {}ms. Error: {}",
+                           orderMessage.getOrderId(), processingTime, e.getMessage(), e);
+               return new ProcessingResult(false, "Processing failed: " + e.getMessage(), processingTime, e);
+
+           } finally {
+               clearMDCContext();
+           }
+       }
+
+       private void simulateProcessingStep(String stepName, long durationMs) throws InterruptedException {
+           logger.trace("PROCESSING_SUBSTEP_START - Step: {}, Duration: {}ms", stepName, durationMs);
+           Thread.sleep(durationMs);
+           logger.trace("PROCESSING_SUBSTEP_COMPLETE - Step: {}", stepName);
+       }
+
+       @Override
+       public int getThreadPoolSize() { return threadPoolSize; }
+
+       @Override
+       public boolean isEnabled() { return enabled; }
+
+       @Override
+       public boolean isRetryEnabled() { return retryEnabled; }
+   }
+
+   // Analytics Processing Consumer Group
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.enums.ConsumerPriority;
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.model.ProcessingResult;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Component;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   @Component
+   public class AnalyticsProcessingGroup extends BaseConsumerGroup {
+
+       private static final Logger logger = LoggerFactory.getLogger(AnalyticsProcessingGroup.class);
+
+       @Value("${consumer.groups.analytics.thread-pool-size:3}")
+       private int threadPoolSize;
+
+       @Value("${consumer.groups.analytics.enabled:true}")
+       private boolean enabled;
+
+       @Value("${consumer.groups.analytics.retry-enabled:false}")
+       private boolean retryEnabled;
+
+       @Override
+       public String getGroupName() {
+           return "ANALYTICS";
+       }
+
+       @Override
+       public ConsumerPriority getPriority() {
+           return ConsumerPriority.MEDIUM;
+       }
+
+       @Override
+       public boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage) {
+           setMDCContext();
+           try {
+               String messageGroup = orderMessage.getMessageGroup();
+               boolean isAnalyticsGroup = "ANALYTICS".equals(messageGroup) || "ALL".equals(messageGroup);
+               boolean isHighValueOrder = orderMessage.getAmount() != null && orderMessage.getAmount() > 100.0;
+               boolean shouldProcess = isAnalyticsGroup || isHighValueOrder;
+
+               logger.debug("MESSAGE_FILTER - OrderId: {}, MessageGroup: {}, Amount: ${:.2f}, HighValue: {}, ShouldProcess: {}",
+                           orderMessage.getOrderId(), messageGroup, orderMessage.getAmount(), isHighValueOrder, shouldProcess);
+
+               return shouldProcess;
+           } finally {
+               clearMDCContext();
+           }
+       }
+
+       @Override
+       public ProcessingResult processMessage(OrderMessage orderMessage, Message sqsMessage) {
+           setMDCContext();
+           long startTime = System.currentTimeMillis();
+
+           try {
+               logger.info("ANALYTICS_START - OrderId: {}, Amount: ${:.2f}, MessageId: {}",
+                          orderMessage.getOrderId(), orderMessage.getAmount(), sqsMessage.messageId());
+
+               // Simulate analytics processing
+               logger.debug("ANALYTICS_STEP_1 - Extracting metrics for OrderId: {}", orderMessage.getOrderId());
+               simulateAnalyticsStep("metric_extraction", 50);
+
+               logger.debug("ANALYTICS_STEP_2 - Updating dashboard for OrderId: {}", orderMessage.getOrderId());
+               simulateAnalyticsStep("dashboard_update", 100);
+
+               logger.debug("ANALYTICS_STEP_3 - Generating insights for OrderId: {}", orderMessage.getOrderId());
+               simulateAnalyticsStep("insight_generation", 50);
+
+               long processingTime = System.currentTimeMillis() - startTime;
+
+               logger.info("ANALYTICS_SUCCESS - Analytics completed for OrderId: {} in {}ms",
+                          orderMessage.getOrderId(), processingTime);
+
+               return new ProcessingResult(true, "Analytics processed successfully", processingTime);
+
+           } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               long processingTime = System.currentTimeMillis() - startTime;
+               logger.warn("ANALYTICS_INTERRUPTED - OrderId: {} analytics interrupted after {}ms",
+                          orderMessage.getOrderId(), processingTime);
+               return new ProcessingResult(false, "Analytics interrupted", processingTime, e);
+
+           } catch (Exception e) {
+               long processingTime = System.currentTimeMillis() - startTime;
+               logger.error("ANALYTICS_FAILED - OrderId: {} analytics failed after {}ms. Error: {}",
+                           orderMessage.getOrderId(), processingTime, e.getMessage(), e);
+               return new ProcessingResult(false, "Analytics failed: " + e.getMessage(), processingTime, e);
+
+           } finally {
+               clearMDCContext();
+           }
+       }
+
+       private void simulateAnalyticsStep(String stepName, long durationMs) throws InterruptedException {
+           logger.trace("ANALYTICS_SUBSTEP_START - Step: {}, Duration: {}ms", stepName, durationMs);
+           Thread.sleep(durationMs);
+           logger.trace("ANALYTICS_SUBSTEP_COMPLETE - Step: {}", stepName);
+       }
+
+       @Override
+       public int getThreadPoolSize() { return threadPoolSize; }
+
+       @Override
+       public boolean isEnabled() { return enabled; }
+
+       @Override
+       public boolean isRetryEnabled() { return retryEnabled; }
+   }
+
+   // Notification Processing Consumer Group
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.enums.ConsumerPriority;
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.model.ProcessingResult;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Component;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   import java.util.concurrent.CompletableFuture;
+
+   @Component
+   public class NotificationProcessingGroup extends BaseConsumerGroup {
+
+       private static final Logger logger = LoggerFactory.getLogger(NotificationProcessingGroup.class);
+
+       @Value("${consumer.groups.notification.thread-pool-size:8}")
+       private int threadPoolSize;
+
+       @Value("${consumer.groups.notification.enabled:true}")
+       private boolean enabled;
+
+       @Value("${consumer.groups.notification.retry-enabled:true}")
+       private boolean retryEnabled;
+
+       @Override
+       public String getGroupName() {
+           return "NOTIFICATION";
+       }
+
+       @Override
+       public ConsumerPriority getPriority() {
+           return ConsumerPriority.LOW;
+       }
+
+       @Override
+       public boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage) {
+           setMDCContext();
+           try {
+               String messageGroup = orderMessage.getMessageGroup();
+               boolean shouldProcess = "NOTIFICATION".equals(messageGroup) || "ALL".equals(messageGroup);
+
+               logger.debug("MESSAGE_FILTER - OrderId: {}, MessageGroup: {}, ShouldProcess: {}",
+                           orderMessage.getOrderId(), messageGroup, shouldProcess);
+
+               return shouldProcess;
+           } finally {
+               clearMDCContext();
+           }
+       }
+
+       @Override
+       public ProcessingResult processMessage(OrderMessage orderMessage, Message sqsMessage) {
+           setMDCContext();
+           long startTime = System.currentTimeMillis();
+
+           try {
+               logger.info("NOTIFICATION_START - OrderId: {}, CustomerId: {}, MessageId: {}",
+                          orderMessage.getOrderId(), orderMessage.getCustomerId(), sqsMessage.messageId());
+
+               // Async notification processing
+               CompletableFuture<Void> notificationFuture = CompletableFuture.runAsync(() -> {
+                   try {
+                       setMDCContext();
+
+                       logger.debug("NOTIFICATION_STEP_1 - Preparing email for OrderId: {}", orderMessage.getOrderId());
+                       simulateNotificationStep("email_preparation", 100);
+
+                       logger.debug("NOTIFICATION_STEP_2 - Sending email for OrderId: {}", orderMessage.getOrderId());
+                       simulateNotificationStep("email_sending", 150);
+
+                       logger.debug("NOTIFICATION_STEP_3 - Sending SMS for OrderId: {}", orderMessage.getOrderId());
+                       simulateNotificationStep("sms_sending", 50);
+
+                       logger.info("NOTIFICATION_ASYNC_SUCCESS - All notifications sent for OrderId: {}",
+                                  orderMessage.getOrderId());
+
+                   } catch (InterruptedException e) {
+                       Thread.currentThread().interrupt();
+                       logger.warn("NOTIFICATION_ASYNC_INTERRUPTED - OrderId: {} notification interrupted",
+                                  orderMessage.getOrderId());
+                   } catch (Exception e) {
+                       logger.error("NOTIFICATION_ASYNC_FAILED - OrderId: {} notification failed: {}",
+                                   orderMessage.getOrderId(), e.getMessage(), e);
+                   } finally {
+                       clearMDCContext();
+                   }
+               });
+
+               long processingTime = System.currentTimeMillis() - startTime;
+
+               logger.info("NOTIFICATION_INITIATED - Async notifications initiated for OrderId: {} in {}ms",
+                          orderMessage.getOrderId(), processingTime);
+
+               return new ProcessingResult(true, "Notifications initiated successfully", processingTime);
+
+           } catch (Exception e) {
+               long processingTime = System.currentTimeMillis() - startTime;
+               logger.error("NOTIFICATION_FAILED - OrderId: {} notification initiation failed after {}ms. Error: {}",
+                           orderMessage.getOrderId(), processingTime, e.getMessage(), e);
+               return new ProcessingResult(false, "Notification initiation failed: " + e.getMessage(), processingTime, e);
+
+           } finally {
+               clearMDCContext();
+           }
+       }
+
+       private void simulateNotificationStep(String stepName, long durationMs) throws InterruptedException {
+           logger.trace("NOTIFICATION_SUBSTEP_START - Step: {}, Duration: {}ms", stepName, durationMs);
+           Thread.sleep(durationMs);
+           logger.trace("NOTIFICATION_SUBSTEP_COMPLETE - Step: {}", stepName);
+       }
+
+       @Override
+       public int getThreadPoolSize() { return threadPoolSize; }
+
+       @Override
+       public boolean isEnabled() { return enabled; }
+
+       @Override
+       public boolean isRetryEnabled() { return retryEnabled; }
+   }
+
+   // Dead Letter Queue Service
+   package com.example.sqs.service;
+
+   import com.example.sqs.model.OrderMessage;
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.slf4j.MDC;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Service;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+   import software.amazon.awssdk.services.sqs.model.Message;
+   import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+
+   import java.util.HashMap;
+   import java.util.Map;
+
+   @Service
+   public class DeadLetterQueueService {
+
+       private static final Logger logger = LoggerFactory.getLogger(DeadLetterQueueService.class);
+
+       @Autowired
+       private SqsClient sqsClient;
+
+       @Autowired
+       private ObjectMapper objectMapper;
+
+       @Value("${aws.sqs.dlq-url:}")
+       private String dlqUrl;
+
+       public void sendToDLQ(String consumerGroup, Message originalMessage, OrderMessage orderMessage,
+                            Exception exception, int retryCount) {
+
+           if (dlqUrl == null || dlqUrl.trim().isEmpty()) {
+               logger.warn("DLQ_NOT_CONFIGURED - No DLQ URL configured, message will be logged only. OrderId: {}, ConsumerGroup: {}",
+                          orderMessage.getOrderId(), consumerGroup);
+               return;
+           }
+
+           try {
+               MDC.put("consumerGroup", consumerGroup);
+
+               logger.error("DLQ_SEND_START - Sending message to DLQ. OrderId: {}, ConsumerGroup: {}, RetryCount: {}, Error: {}",
+                           orderMessage.getOrderId(), consumerGroup, retryCount, exception.getMessage());
+
+               // Create DLQ message with metadata
+               Map<String, Object> dlqPayload = new HashMap<>();
+               dlqPayload.put("stackTrace", getStackTrace(exception));
+
+               String dlqMessageBody = objectMapper.writeValueAsString(dlqPayload);
+
+               SendMessageRequest dlqRequest = SendMessageRequest.builder()
+                       .queueUrl(dlqUrl)
+                       .messageBody(dlqMessageBody)
+                       .build();
+
+               sqsClient.sendMessage(dlqRequest);
+
+               logger.info("DLQ_SEND_SUCCESS - Message sent to DLQ successfully. OrderId: {}, ConsumerGroup: {}",
+                          orderMessage.getOrderId(), consumerGroup);
+
+           } catch (Exception e) {
+               logger.error("DLQ_SEND_FAILED - Failed to send message to DLQ. OrderId: {}, ConsumerGroup: {}, Error: {}",
+                           orderMessage.getOrderId(), consumerGroup, e.getMessage(), e);
+           } finally {
+               MDC.remove("consumerGroup");
+           }
+       }
+
+       private String getStackTrace(Exception exception) {
+           java.io.StringWriter sw = new java.io.StringWriter();
+           java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+           exception.printStackTrace(pw);
+           return sw.toString();
+       }
+   }
+
+   // Metrics Service
+   package com.example.sqs.service;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import io.micrometer.core.instrument.Counter;
+   import io.micrometer.core.instrument.Gauge;
+   import io.micrometer.core.instrument.MeterRegistry;
+   import io.micrometer.core.instrument.Timer;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.stereotype.Service;
+
+   import javax.annotation.PostConstruct;
+   import java.util.List;
+   import java.util.concurrent.ConcurrentHashMap;
+   import java.util.concurrent.atomic.AtomicLong;
+
+   @Service
+   public class MetricsService {
+
+       @Autowired
+       private MeterRegistry meterRegistry;
+
+       @Autowired
+       private List<ConsumerGroup> consumerGroups;
+
+       private final ConcurrentHashMap<String, Counter> processedCounters = new ConcurrentHashMap<>();
+       private final ConcurrentHashMap<String, Counter> failedCounters = new ConcurrentHashMap<>();
+       private final ConcurrentHashMap<String, Timer> processingTimers = new ConcurrentHashMap<>();
+       private final AtomicLong totalMessagesReceived = new AtomicLong(0);
+       private final AtomicLong totalMessagesProcessed = new AtomicLong(0);
+       private final AtomicLong totalMessagesFailed = new AtomicLong(0);
+
+       @PostConstruct
+       public void initializeMetrics() {
+           // Initialize counters and timers for each consumer group
+           for (ConsumerGroup group : consumerGroups) {
+               String groupName = group.getGroupName().toLowerCase();
+
+               processedCounters.put(groupName,
+                   Counter.builder("sqs.messages.processed")
+                       .tag("consumer_group", groupName)
+                       .description("Total number of messages processed successfully")
+                       .register(meterRegistry));
+
+               failedCounters.put(groupName,
+                   Counter.builder("sqs.messages.failed")
+                       .tag("consumer_group", groupName)
+                       .description("Total number of messages that failed processing")
+                       .register(meterRegistry));
+
+               processingTimers.put(groupName,
+                   Timer.builder("sqs.processing.duration")
+                       .tag("consumer_group", groupName)
+                       .description("Time taken to process messages")
+                       .register(meterRegistry));
+
+               // Gauge for current processing metrics
+               Gauge.builder("sqs.consumer.processed.count")
+                   .tag("consumer_group", groupName)
+                   .description("Current processed count for consumer group")
+                   .register(meterRegistry, group, ConsumerGroup::getProcessedCount);
+
+               Gauge.builder("sqs.consumer.failed.count")
+                   .tag("consumer_group", groupName)
+                   .description("Current failed count for consumer group")
+                   .register(meterRegistry, group, ConsumerGroup::getFailedCount);
+
+               Gauge.builder("sqs.consumer.average.processing.time")
+                   .tag("consumer_group", groupName)
+                   .description("Average processing time for consumer group")
+                   .register(meterRegistry, group, ConsumerGroup::getAverageProcessingTime);
+           }
+
+           // Global metrics
+           Gauge.builder("sqs.messages.received.total")
+               .description("Total messages received from SQS")
+               .register(meterRegistry, totalMessagesReceived, AtomicLong::get);
+
+           Gauge.builder("sqs.messages.processed.total")
+               .description("Total messages processed successfully")
+               .register(meterRegistry, totalMessagesProcessed, AtomicLong::get);
+
+           Gauge.builder("sqs.messages.failed.total")
+               .description("Total messages that failed processing")
+               .register(meterRegistry, totalMessagesFailed, AtomicLong::get);
+       }
+
+       public void recordMessageReceived() {
+           totalMessagesReceived.incrementAndGet();
+       }
+
+       public void recordMessageProcessed(String consumerGroup, long processingTimeMs) {
+           processedCounters.get(consumerGroup.toLowerCase()).increment();
+           processingTimers.get(consumerGroup.toLowerCase()).record(processingTimeMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+           totalMessagesProcessed.incrementAndGet();
+       }
+
+       public void recordMessageFailed(String consumerGroup, long processingTimeMs) {
+           failedCounters.get(consumerGroup.toLowerCase()).increment();
+           processingTimers.get(consumerGroup.toLowerCase()).record(processingTimeMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+           totalMessagesFailed.incrementAndGet();
+       }
+   }
+
+   // Enhanced SQS Consumer Service with Circuit Breaker Pattern
+   package com.example.sqs.service;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import com.example.sqs.enums.ConsumerGroupStatus;
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.model.ProcessingResult;
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.slf4j.MDC;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Service;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+   import software.amazon.awssdk.services.sqs.model.*;
+
+   import javax.annotation.PostConstruct;
+   import javax.annotation.PreDestroy;
+   import java.util.List;
+   import java.util.concurrent.*;
+   import java.util.concurrent.atomic.AtomicBoolean;
+   import java.util.concurrent.atomic.AtomicInteger;
+
+   @Service
+   public class SqsConsumerService {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsConsumerService.class);
+
+       @Autowired
+       private SqsClient sqsClient;
+
+       @Autowired
+       private List<ConsumerGroup> consumerGroups;
+
+       @Autowired
+       private ObjectMapper objectMapper;
+
+       @Autowired
+       private DeadLetterQueueService dlqService;
+
+       @Autowired
+       private MetricsService metricsService;
+
+       @Value("${aws.sqs.queue-url}")
+       private String queueUrl;
+
+       @Value("${aws.sqs.max-messages:10}")
+       private int maxMessages;
+
+       @Value("${aws.sqs.wait-time-seconds:20}")
+       private int waitTimeSeconds;
+
+       @Value("${aws.sqs.max-retry-attempts:3}")
+       private int maxRetryAttempts;
+
+       @Value("${aws.sqs.error-backoff-seconds:5}")
+       private int errorBackoffSeconds;
+
+       @Value("${consumer.shutdown-timeout-seconds:60}")
+       private int shutdownTimeoutSeconds;
+
+       @Value("${consumer.health-check-interval-seconds:30}")
+       private int healthCheckIntervalSeconds;
+
+       private final AtomicBoolean running = new AtomicBoolean(false);
+       private ExecutorService mainExecutor;
+       private ScheduledExecutorService healthCheckExecutor;
+       private final ConcurrentHashMap<String, ExecutorService> groupExecutors = new ConcurrentHashMap<>();
+       private final ConcurrentHashMap<String, AtomicInteger> consecutiveErrors = new ConcurrentHashMap<>();
+
+       @PostConstruct
+       public void startConsumers() {
+           logger.info("CONSUMER_SERVICE_INIT - Starting SQS consumer service with {} consumer groups", consumerGroups.size());
+
+           if (consumerGroups.isEmpty()) {
+               logger.warn("CONSUMER_SERVICE_NO_GROUPS - No consumer groups found, service will not start");
+               return;
+           }
+
+           running.set(true);
+
+           // Initialize executors
+           mainExecutor = Executors.newFixedThreadPool(consumerGroups.size(),
+               new ThreadFactory() {
+                   private final AtomicInteger counter = new AtomicInteger(0);
+                   @Override
+                   public Thread newThread(Runnable r) {
+                       Thread t = new Thread(r, "sqs-main-consumer-" + counter.incrementAndGet());
+                       t.setDaemon(false);
+                       return t;
+                   }
+               });
+
+           healthCheckExecutor = Executors.newScheduledThreadPool(1,
+               new ThreadFactory() {
+                   @Override
+                   public Thread newThread(Runnable r) {
+                       Thread t = new Thread(r, "sqs-health-check");
+                       t.setDaemon(true);
+                       return t;
+                   }
+               });
+
+           // Start consumer groups
+           for (ConsumerGroup group : consumerGroups) {
+               if (group.isEnabled()) {
+                   startConsumerGroup(group);
+               } else {
+                   logger.info("CONSUMER_GROUP_DISABLED - Consumer group {} is disabled", group.getGroupName());
+                   group.setStatus(ConsumerGroupStatus.STOPPED);
+               }
+           }
+
+           // Start health check
+           startHealthCheck();
+
+           logger.info("CONSUMER_SERVICE_STARTED - SQS consumer service started successfully");
+       }
+
+       private void startConsumerGroup(ConsumerGroup consumerGroup) {
+           try {
+               logger.info("CONSUMER_GROUP_STARTING - Starting consumer group: {} with {} threads, priority: {}",
+                          consumerGroup.getGroupName(), consumerGroup.getThreadPoolSize(), consumerGroup.getPriority());
+
+               consumerGroup.setStatus(ConsumerGroupStatus.STARTING);
+               consecutiveErrors.put(consumerGroup.getGroupName(), new AtomicInteger(0));
+
+               // Create dedicated executor for this group
+               ExecutorService groupExecutor = Executors.newFixedThreadPool(
+                   consumerGroup.getThreadPoolSize(),
+                   new ThreadFactory() {
+                       private final AtomicInteger counter = new AtomicInteger(0);
+                       @Override
+                       public Thread newThread(Runnable r) {
+                           Thread t = new Thread(r, "sqs-" + consumerGroup.getGroupName().toLowerCase() +
+                                                "-worker-" + counter.incrementAndGet());
+                           t.setDaemon(false);
+                           return t;
+                       }
+                   });
+
+               groupExecutors.put(consumerGroup.getGroupName(), groupExecutor);
+
+               // Start the consumer group polling
+               mainExecutor.submit(() -> {
+                   try {
+                       consumerGroupPollingLoop(consumerGroup, groupExecutor);
+                   } catch (Exception e) {
+                       logger.error("CONSUMER_GROUP_FATAL_ERROR - Fatal error in consumer group {}: {}",
+                                   consumerGroup.getGroupName(), e.getMessage(), e);
+                       consumerGroup.setStatus(ConsumerGroupStatus.ERROR);
+                   }
+               });
+
+               consumerGroup.setStatus(ConsumerGroupStatus.RUNNING);
+               logger.info("CONSUMER_GROUP_STARTED - Consumer group {} started successfully", consumerGroup.getGroupName());
+
+           } catch (Exception e) {
+               logger.error("CONSUMER_GROUP_START_FAILED - Failed to start consumer group {}: {}",
+                           consumerGroup.getGroupName(), e.getMessage(), e);
+               consumerGroup.setStatus(ConsumerGroupStatus.ERROR);
+           }
+       }
+
+       private void consumerGroupPollingLoop(ConsumerGroup consumerGroup, ExecutorService groupExecutor) {
+           String groupName = consumerGroup.getGroupName();
+           AtomicInteger errorCounter = consecutiveErrors.get(groupName);
+
+           while (running.get() && consumerGroup.isEnabled()) {
+               try {
+                   MDC.put("consumerGroup", groupName);
+
+                   // Check if group is in error state (circuit breaker pattern)
+                   if (errorCounter.get() >= 10) {
+                       logger.warn("CONSUMER_GROUP_CIRCUIT_BREAKER - Group {} in circuit breaker mode, sleeping for {}s",
+                                  groupName, errorBackoffSeconds * 2);
+                       consumerGroup.setStatus(ConsumerGroupStatus.DEGRADED);
+                       Thread.sleep(errorBackoffSeconds * 2000L);
+                       errorCounter.set(0); // Reset after cooling down
+                       consumerGroup.setStatus(ConsumerGroupStatus.RUNNING);
+                   }
+
+                   // Receive messages from SQS
+                   logger.debug("POLLING_START - Group {} polling for messages", groupName);
+
+                   ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
+                           .queueUrl(queueUrl)
+                           .maxNumberOfMessages(maxMessages)
+                           .waitTimeSeconds(waitTimeSeconds)
+                           .messageAttributeNames("All")
+                           .attributeNames("All")
+                           .build();
+
+                   ReceiveMessageResponse receiveResponse = sqsClient.receiveMessage(receiveRequest);
+                   List<Message> messages = receiveResponse.messages();
+
+                   if (!messages.isEmpty()) {
+                       logger.info("POLLING_SUCCESS - Group {} received {} messages", groupName, messages.size());
+
+                       for (Message message : messages) {
+                           metricsService.recordMessageReceived();
+                           groupExecutor.submit(() -> processMessage(consumerGroup, message));
+                       }
+
+                       // Reset error counter on successful polling
+                       errorCounter.set(0);
+
+                   } else {
+                       logger.trace("POLLING_NO_MESSAGES - Group {} received no messages, continuing poll", groupName);
+                       Thread.sleep(1000); // Short sleep when no messages
+                   }
+
+               } catch (InterruptedException e) {
+                   Thread.currentThread().interrupt();
+                   logger.info("POLLING_INTERRUPTED - Group {} polling interrupted", groupName);
+                   break;
+
+               } catch (Exception e) {
+                   int currentErrors = errorCounter.incrementAndGet();
+                   logger.error("POLLING_ERROR - Group {} polling error #{}: {}", groupName, currentErrors, e.getMessage(), e);
+
+                   try {
+                       Thread.sleep(errorBackoffSeconds * 1000L);
+                   } catch (InterruptedException ie) {
+                       Thread.currentThread().interrupt();
+                       break;
+                   }
+               } finally {
+                   MDC.remove("consumerGroup");
+               }
+           }
+
+           logger.info("POLLING_STOPPED - Group {} polling loop stopped", groupName);
+       }
+
+       private void processMessage(ConsumerGroup consumerGroup, Message message) {
+           String groupName = consumerGroup.getGroupName();
+           String messageId = message.messageId();
+
+           try {
+               MDC.put("consumerGroup", groupName);
+               MDC.put("messageId", messageId);
+
+               logger.debug("MESSAGE_PROCESSING_START - Group {} processing message {}", groupName, messageId);
+
+               // Parse message body
+               OrderMessage orderMessage = parseMessage(message);
+               if (orderMessage == null) {
+                   logger.error("MESSAGE_PARSE_FAILED - Group {} failed to parse message {}", groupName, messageId);
+                   deleteMessage(message, groupName);
+                   return;
+               }
+
+               // Check if this group should process this message
+               if (!consumerGroup.shouldProcess(orderMessage, message)) {
+                   logger.debug("MESSAGE_FILTERED - Group {} skipping message {} for OrderId {}",
+                              groupName, messageId, orderMessage.getOrderId());
+                   deleteMessage(message, groupName);
+                   return;
+               }
+
+               // Process the message
+               ProcessingResult result = consumerGroup.processMessage(orderMessage, message);
+
+               // Record metrics
+               consumerGroup.recordProcessingMetric(result.getProcessingTimeMs(), result.isSuccess());
+
+               if (result.isSuccess()) {
+                   logger.info("MESSAGE_PROCESSING_SUCCESS - Group {} successfully processed message {} for OrderId {} in {}ms",
+                              groupName, messageId, orderMessage.getOrderId(), result.getProcessingTimeMs());
+
+                   deleteMessage(message, groupName);
+                   metricsService.recordMessageProcessed(groupName, result.getProcessingTimeMs());
+
+               } else {
+                   logger.error("MESSAGE_PROCESSING_FAILED - Group {} failed to process message {} for OrderId {}: {}",
+                               groupName, messageId, orderMessage.getOrderId(), result.getMessage());
+
+                   handleFailedMessage(consumerGroup, message, orderMessage, result);
+                   metricsService.recordMessageFailed(groupName, result.getProcessingTimeMs());
+               }
+
+           } catch (Exception e) {
+               logger.error("MESSAGE_PROCESSING_EXCEPTION - Group {} unexpected error processing message {}: {}",
+                           groupName, messageId, e.getMessage(), e);
+
+               try {
+                   OrderMessage orderMessage = parseMessage(message);
+                   if (orderMessage != null) {
+                       ProcessingResult failureResult = new ProcessingResult(false, "Unexpected error: " + e.getMessage(), 0, e);
+                       handleFailedMessage(consumerGroup, message, orderMessage, failureResult);
+                   }
+               } catch (Exception parseError) {
+                   logger.error("MESSAGE_ERROR_HANDLING_FAILED - Group {} failed to handle error for message {}: {}",
+                               groupName, messageId, parseError.getMessage(), parseError);
+                   deleteMessage(message, groupName); // Delete unparseable message
+               }
+
+           } finally {
+               MDC.remove("consumerGroup");
+               MDC.remove("messageId");
+           }
+       }
+
+       private OrderMessage parseMessage(Message message) {
+           try {
+               return objectMapper.readValue(message.body(), OrderMessage.class);
+           } catch (Exception e) {
+               logger.error("MESSAGE_PARSE_ERROR - Failed to parse message body: {}. Error: {}",
+                           message.body(), e.getMessage());
+               return null;
+           }
+       }
+
+       private void deleteMessage(Message message, String groupName) {
+           try {
+               DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                       .queueUrl(queueUrl)
+                       .receiptHandle(message.receiptHandle())
+                       .build();
+
+               sqsClient.deleteMessage(deleteRequest);
+               logger.debug("MESSAGE_DELETED - Group {} deleted message {}", groupName, message.messageId());
+
+           } catch (Exception e) {
+               logger.error("MESSAGE_DELETE_FAILED - Group {} failed to delete message {}: {}",
+                           groupName, message.messageId(), e.getMessage(), e);
+           }
+       }
+
+       private void handleFailedMessage(ConsumerGroup consumerGroup, Message message,
+                                      OrderMessage orderMessage, ProcessingResult result) {
+
+           String groupName = consumerGroup.getGroupName();
+
+           // Get retry count
+           String receiveCountStr = message.attributes().get("ApproximateReceiveCount");
+           int retryCount = receiveCountStr != null ? Integer.parseInt(receiveCountStr) : 0;
+
+           logger.error("MESSAGE_FAILURE_HANDLING - Group {} handling failed message. OrderId: {}, RetryCount: {}, Error: {}",
+                       groupName, orderMessage.getOrderId(), retryCount, result.getMessage());
+
+           if (retryCount >= maxRetryAttempts || !consumerGroup.isRetryEnabled()) {
+               logger.error("MESSAGE_RETRY_EXHAUSTED - Group {} retry exhausted for OrderId {}. RetryCount: {}, MaxRetries: {}, RetryEnabled: {}",
+                           groupName, orderMessage.getOrderId(), retryCount, maxRetryAttempts, consumerGroup.isRetryEnabled());
+
+               // Send to DLQ
+               dlqService.sendToDLQ(groupName, message, orderMessage,
+                                  result.getException() != null ? result.getException() : new RuntimeException(result.getMessage()),
+                                  retryCount);
+
+               // Delete message to prevent infinite retries
+               deleteMessage(message, groupName);
+
+           } else {
+               logger.info("MESSAGE_RETRY_SCHEDULED - Group {} will retry message for OrderId {}. Current retry: {}/{}",
+                          groupName, orderMessage.getOrderId(), retryCount, maxRetryAttempts);
+               // Message will be retried automatically due to visibility timeout
+           }
+       }
+
+       private void startHealthCheck() {
+           healthCheckExecutor.scheduleAtFixedRate(() -> {
+               try {
+                   logger.debug("HEALTH_CHECK_START - Performing health check");
+
+                   for (ConsumerGroup group : consumerGroups) {
+                       if (group.isEnabled()) {
+                           String groupName = group.getGroupName();
+                           ConsumerGroupStatus status = group.getStatus();
+                           long processed = group.getProcessedCount();
+                           long failed = group.getFailedCount();
+                           double avgTime = group.getAverageProcessingTime();
+
+                           logger.info("HEALTH_CHECK_GROUP - Group: {}, Status: {}, Processed: {}, Failed: {}, AvgTime: {:.2f}ms",
+                                      groupName, status, processed, failed, avgTime);
+
+                           // Check if group is healthy
+                           if (status == ConsumerGroupStatus.ERROR) {
+                               logger.warn("HEALTH_CHECK_UNHEALTHY - Group {} is in ERROR state", groupName);
+                           } else if (status == ConsumerGroupStatus.DEGRADED) {
+                               logger.warn("HEALTH_CHECK_DEGRADED - Group {} is in DEGRADED state", groupName);
+                           }
+                       }
+                   }
+
+                   logger.debug("HEALTH_CHECK_COMPLETE - Health check completed");
+
+               } catch (Exception e) {
+                   logger.error("HEALTH_CHECK_ERROR - Health check failed: {}", e.getMessage(), e);
+               }
+           }, healthCheckIntervalSeconds, healthCheckIntervalSeconds, TimeUnit.SECONDS);
+       }
+
+       @PreDestroy
+       public void stopConsumers() {
+           logger.info("CONSUMER_SERVICE_SHUTDOWN_START - Stopping SQS consumer service...");
+
+           running.set(false);
+
+           // Stop health check
+           if (healthCheckExecutor != null) {
+               healthCheckExecutor.shutdown();
+           }
+
+           // Set all groups to stopping status
+           for (ConsumerGroup group : consumerGroups) {
+               group.setStatus(ConsumerGroupStatus.STOPPING);
+           }
+
+           // Shutdown group executors
+           for (Map.Entry<String, ExecutorService> entry : groupExecutors.entrySet()) {
+               String groupName = entry.getKey();
+               ExecutorService executor = entry.getValue();
+
+               logger.info("CONSUMER_GROUP_SHUTDOWN - Stopping consumer group: {}", groupName);
+               executor.shutdown();
+
+               try {
+                   if (!executor.awaitTermination(shutdownTimeoutSeconds / 2, TimeUnit.SECONDS)) {
+                       logger.warn("CONSUMER_GROUP_FORCE_SHUTDOWN - Force stopping consumer group: {}", groupName);
+                       executor.shutdownNow();
+                   }
+               } catch (InterruptedException e) {
+                   logger.warn("CONSUMER_GROUP_SHUTDOWN_INTERRUPTED - Shutdown interrupted for group: {}", groupName);
+                   executor.shutdownNow();
+               }
+           }
+
+           // Shutdown main executor
+           if (mainExecutor != null) {
+               mainExecutor.shutdown();
+               try {
+                   if (!mainExecutor.awaitTermination(shutdownTimeoutSeconds, TimeUnit.SECONDS)) {
+                       logger.warn("CONSUMER_SERVICE_FORCE_SHUTDOWN - Force stopping main executor");
+                       mainExecutor.shutdownNow();
+                   }
+               } catch (InterruptedException e) {
+                   logger.warn("CONSUMER_SERVICE_SHUTDOWN_INTERRUPTED - Main executor shutdown interrupted");
+                   mainExecutor.shutdownNow();
+               }
+           }
+
+           // Set all groups to stopped status
+           for (ConsumerGroup group : consumerGroups) {
+               group.setStatus(ConsumerGroupStatus.STOPPED);
+           }
+
+           logger.info("CONSUMER_SERVICE_SHUTDOWN_COMPLETE - SQS consumer service stopped successfully");
+       }
+
+       // Health check endpoint data
+       public ConsumerServiceHealth getHealthStatus() {
+           ConsumerServiceHealth health = new ConsumerServiceHealth();
+           health.setRunning(running.get());
+           health.setQueueUrl(queueUrl);
+
+           for (ConsumerGroup group : consumerGroups) {
+               ConsumerServiceHealth.GroupHealth groupHealth = new ConsumerServiceHealth.GroupHealth();
+               groupHealth.setGroupName(group.getGroupName());
+               groupHealth.setStatus(group.getStatus());
+               groupHealth.setEnabled(group.isEnabled());
+               groupHealth.setThreadPoolSize(group.getThreadPoolSize());
+               groupHealth.setProcessedCount(group.getProcessedCount());
+               groupHealth.setFailedCount(group.getFailedCount());
+               groupHealth.setAverageProcessingTime(group.getAverageProcessingTime());
+
+               health.addGroupHealth(groupHealth);
+           }
+
+           return health;
+       }
+   }
+
+   // Consumer Service Health Model
+   package com.example.sqs.model;
+
+   import com.example.sqs.enums.ConsumerGroupStatus;
+   import com.fasterxml.jackson.annotation.JsonProperty;
+
+   import java.util.ArrayList;
+   import java.util.List;
+
+   public class ConsumerServiceHealth {
+
+       @JsonProperty("running")
+       private boolean running;
+
+       @JsonProperty("queueUrl")
+       private String queueUrl;
+
+       @JsonProperty("groups")
+       private List<GroupHealth> groups = new ArrayList<>();
+
+       public static class GroupHealth {
+           @JsonProperty("groupName")
+           private String groupName;
+
+           @JsonProperty("status")
+           private ConsumerGroupStatus status;
+
+           @JsonProperty("enabled")
+           private boolean enabled;
+
+           @JsonProperty("threadPoolSize")
+           private int threadPoolSize;
+
+           @JsonProperty("processedCount")
+           private long processedCount;
+
+           @JsonProperty("failedCount")
+           private long failedCount;
+
+           @JsonProperty("averageProcessingTime")
+           private double averageProcessingTime;
+
+           // Getters and setters
+           public String getGroupName() { return groupName; }
+           public void setGroupName(String groupName) { this.groupName = groupName; }
+
+           public ConsumerGroupStatus getStatus() { return status; }
+           public void setStatus(ConsumerGroupStatus status) { this.status = status; }
+
+           public boolean isEnabled() { return enabled; }
+           public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+           public int getThreadPoolSize() { return threadPoolSize; }
+           public void setThreadPoolSize(int threadPoolSize) { this.threadPoolSize = threadPoolSize; }
+
+           public long getProcessedCount() { return processedCount; }
+           public void setProcessedCount(long processedCount) { this.processedCount = processedCount; }
+
+           public long getFailedCount() { return failedCount; }
+           public void setFailedCount(long failedCount) { this.failedCount = failedCount; }
+
+           public double getAverageProcessingTime() { return averageProcessingTime; }
+           public void setAverageProcessingTime(double averageProcessingTime) { this.averageProcessingTime = averageProcessingTime; }
+       }
+
+       // Getters and setters
+       public boolean isRunning() { return running; }
+       public void setRunning(boolean running) { this.running = running; }
+
+       public String getQueueUrl() { return queueUrl; }
+       public void setQueueUrl(String queueUrl) { this.queueUrl = queueUrl; }
+
+       public List<GroupHealth> getGroups() { return groups; }
+       public void setGroups(List<GroupHealth> groups) { this.groups = groups; }
+
+       public void addGroupHealth(GroupHealth groupHealth) { this.groups.add(groupHealth); }
+   }
+
+   // Enhanced Producer Service
+   package com.example.sqs.producer;
+
+   import com.example.sqs.model.OrderMessage;
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.slf4j.MDC;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Service;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+   import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+   import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+
+   @Service
+   public class SqsProducerService {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsProducerService.class);
+
+       @Autowired
+       private SqsClient sqsClient;
+
+       @Autowired
+       private ObjectMapper objectMapper;
+
+       @Value("${aws.sqs.queue-url}")
+       private String queueUrl;
+
+       public String sendMessage(OrderMessage orderMessage) {
+           String traceId = java.util.UUID.randomUUID().toString().substring(0, 8);
+
+           try {
+               MDC.put("traceId", traceId);
+               MDC.put("operation", "SEND_MESSAGE");
+
+               logger.info("MESSAGE_SEND_START - Sending message for OrderId: {}, CustomerId: {}, Amount: ${:.2f}, Group: {}",
+                          orderMessage.getOrderId(), orderMessage.getCustomerId(),
+                          orderMessage.getAmount(), orderMessage.getMessageGroup());
+
+               // Validate message
+               if (!orderMessage.isValid()) {
+                   String errorMsg = "Invalid message format: " + orderMessage;
+                   logger.error("MESSAGE_SEND_VALIDATION_FAILED - {}", errorMsg);
+                   throw new IllegalArgumentException(errorMsg);
+               }
+
+               // Set timestamp if not provided
+               if (orderMessage.getTimestamp() == null) {
+                   orderMessage.setTimestamp(System.currentTimeMillis());
+               }
+
+               String messageBody = objectMapper.writeValueAsString(orderMessage);
+               logger.debug("MESSAGE_SEND_SERIALIZED - OrderId: {}, MessageBody: {}",
+                           orderMessage.getOrderId(), messageBody);
+
+               SendMessageRequest sendRequest = SendMessageRequest.builder()
+                       .queueUrl(queueUrl)
+                       .messageBody(messageBody)
+                       .build();
+
+               SendMessageResponse response = sqsClient.sendMessage(sendRequest);
+
+               logger.info("MESSAGE_SEND_SUCCESS - OrderId: {} sent successfully. MessageId: {}, QueueUrl: {}",
+                          orderMessage.getOrderId(), response.messageId(), queueUrl);
+
+               return response.messageId();
+
+           } catch (Exception e) {
+               logger.error("MESSAGE_SEND_FAILED - Failed to send message for OrderId: {}. Error: {}",
+                           orderMessage.getOrderId(), e.getMessage(), e);
+               throw new RuntimeException("Failed to send message: " + e.getMessage(), e);
+
+           } finally {
+               MDC.remove("traceId");
+               MDC.remove("operation");
+           }
+       }
+
+       public void sendBatchMessages(int count, String messageGroup) {
+           String batchId = java.util.UUID.randomUUID().toString().substring(0, 8);
+
+           try {
+               MDC.put("batchId", batchId);
+               MDC.put("operation", "SEND_BATCH");
+
+               logger.info("BATCH_SEND_START - Sending {} messages for group: {}, BatchId: {}",
+                          count, messageGroup, batchId);
+
+               for (int i = 1; i <= count; i++) {
+                   try {
+                       OrderMessage message = new OrderMessage(
+                           "ORDER-" + System.currentTimeMillis() + "-" + i,
+                           "CUSTOMER-" + (1000 + i),
+                           50.0 + (i * 25.0),
+                           messageGroup
+                       );
+
+                       sendMessage(message);
+
+                       // Small delay between messages to avoid overwhelming
+                       if (i % 10 == 0) {
+                           Thread.sleep(100);
+                       }
+
+                   } catch (Exception e) {
+                       logger.error("BATCH_SEND_ITEM_FAILED - Failed to send message {} of {}: {}",
+                                   i, count, e.getMessage());
+                   }
+               }
+
+               logger.info("BATCH_SEND_COMPLETE - Batch {} completed. Sent {} messages for group: {}",
+                          batchId, count, messageGroup);
+
+           } catch (Exception e) {
+               logger.error("BATCH_SEND_FAILED - Batch {} failed: {}", batchId, e.getMessage(), e);
+               throw new RuntimeException("Batch send failed: " + e.getMessage(), e);
+
+           } finally {
+               MDC.remove("batchId");
+               MDC.remove("operation");
+           }
+       }
+   }
+
+   // Enhanced REST Controller with Comprehensive Endpoints
+   package com.example.sqs.controller;
+
+   import com.example.sqs.model.ConsumerServiceHealth;
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.producer.SqsProducerService;
+   import com.example.sqs.service.SqsConsumerService;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.http.ResponseEntity;
+   import org.springframework.web.bind.annotation.*;
+
+   import javax.validation.Valid;
+   import java.util.HashMap;
+   import java.util.Map;
+   import java.util.UUID;
+
+   @RestController
+   @RequestMapping("/api/sqs")
+   public class SqsTestController {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsTestController.class);
+
+       @Autowired
+       private SqsProducerService producerService;
+
+       @Autowired
+       private SqsConsumerService consumerService;
+
+       // Send a single custom message
+       @PostMapping("/send")
+       public ResponseEntity<Map<String, Object>> sendMessage(@Valid @RequestBody OrderMessage orderMessage) {
+           try {
+               logger.info("API_SEND_REQUEST - Received request to send message for OrderId: {}", orderMessage.getOrderId());
+
+               // Set timestamp if not provided
+               if (orderMessage.getTimestamp() == null) {
+                   orderMessage.setTimestamp(System.currentTimeMillis());
+               }
+
+               String messageId = producerService.sendMessage(orderMessage);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageId", messageId);
+               response.put("orderMessage", orderMessage);
+               response.put("message", "Order message sent successfully");
+
+               logger.info("API_SEND_SUCCESS - Message sent successfully. OrderId: {}, MessageId: {}",
+                          orderMessage.getOrderId(), messageId);
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("API_SEND_FAILED - Failed to send message: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+               response.put("message", "Failed to send message");
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Send a quick test message
+       @PostMapping("/send/quick")
+       public ResponseEntity<Map<String, Object>> sendQuickMessage(
+               @RequestParam(defaultValue = "ALL") String messageGroup,
+               @RequestParam(defaultValue = "100.0") Double amount,
+               @RequestParam(defaultValue = "NORMAL") String priority) {
+
+           try {
+               logger.info("API_QUICK_SEND_REQUEST - MessageGroup: {}, Amount: {}, Priority: {}",
+                          messageGroup, amount, priority);
+
+               OrderMessage orderMessage = new OrderMessage(
+                   "ORDER-" + UUID.randomUUID().toString().substring(0, 8),
+                   "CUSTOMER-" + System.currentTimeMillis(),
+                   amount,
+                   messageGroup
+               );
+               orderMessage.setPriority(priority);
+               orderMessage.setSource("QUICK_API");
+
+               String messageId = producerService.sendMessage(orderMessage);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageId", messageId);
+               response.put("orderMessage", orderMessage);
+               response.put("message", "Quick test message sent successfully");
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("API_QUICK_SEND_FAILED - Error sending quick message: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Send multiple test messages
+       @PostMapping("/send/batch")
+       public ResponseEntity<Map<String, Object>> sendBatchMessages(
+               @RequestParam(defaultValue = "5") int count,
+               @RequestParam(defaultValue = "ALL") String messageGroup) {
+
+           try {
+               logger.info("API_BATCH_SEND_REQUEST - Count: {}, MessageGroup: {}", count, messageGroup);
+
+               if (count > 100) {
+                   Map<String, Object> response = new HashMap<>();
+                   response.put("success", false);
+                   response.put("error", "Maximum 100 messages allowed in batch");
+                   return ResponseEntity.badRequest().body(response);
+               }
+
+               producerService.sendBatchMessages(count, messageGroup);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageCount", count);
+               response.put("messageGroup", messageGroup);
+               response.put("message", count + " messages sent successfully");
+
+               logger.info("API_BATCH_SEND_SUCCESS - Sent {} messages for group {}", count, messageGroup);
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("API_BATCH_SEND_FAILED - Error sending batch messages: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Test different message groups
+       @PostMapping("/test/groups")
+       public ResponseEntity<Map<String, Object>> testAllGroups() {
+           try {
+               logger.info("API_TEST_GROUPS_REQUEST - Testing all consumer groups");
+
+               // Send messages for each group
+               String[] groups = {"ORDER", "ANALYTICS", "NOTIFICATION", "ALL"};
+               int totalMessages = 0;
+
+               for (String group : groups) {
+                   OrderMessage orderMessage = new OrderMessage(
+                       "TEST-" + group + "-" + System.currentTimeMillis(),
+                       "CUSTOMER-TEST-" + group,
+                       150.0, // High amount to trigger analytics
+                       group
+                   );
+                   orderMessage.setSource("GROUP_TEST_API");
+                   orderMessage.setPriority("HIGH");
+
+                   producerService.sendMessage(orderMessage);
+                   totalMessages++;
+               }
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("totalMessages", totalMessages);
+               response.put("testedGroups", groups);
+               response.put("message", "Test messages sent for all consumer groups");
+
+               logger.info("API_TEST_GROUPS_SUCCESS - Sent {} test messages for all groups", totalMessages);
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("API_TEST_GROUPS_FAILED - Error testing groups: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Consumer service health endpoint
+       @GetMapping("/health")
+       public ResponseEntity<ConsumerServiceHealth> healthCheck() {
+           try {
+               logger.debug("API_HEALTH_CHECK - Retrieving consumer service health");
+
+               ConsumerServiceHealth health = consumerService.getHealthStatus();
+               return ResponseEntity.ok(health);
+
+           } catch (Exception e) {
+               logger.error("API_HEALTH_CHECK_FAILED - Error retrieving health status: {}", e.getMessage(), e);
+
+               ConsumerServiceHealth errorHealth = new ConsumerServiceHealth();
+               errorHealth.setRunning(false);
+               errorHealth.setQueueUrl("ERROR: " + e.getMessage());
+
+               return ResponseEntity.status(500).body(errorHealth);
+           }
+       }
+
+       // Get sample message format
+       @GetMapping("/sample")
+       public ResponseEntity<Map<String, Object>> getSampleMessage() {
+           OrderMessage sample = new OrderMessage(
+               "ORDER-12345",
+               "CUSTOMER-67890",
+               199.99,
+               "ALL"
+           );
+           sample.setPriority("HIGH");
+           sample.setSource("API");
+
+           Map<String, Object> response = new HashMap<>();
+           response.put("sampleMessage", sample);
+           response.put("messageGroups", new String[]{"ORDER", "ANALYTICS", "NOTIFICATION", "ALL"});
+           response.put("priorities", new String[]{"HIGH", "MEDIUM", "LOW", "NORMAL"});
+           response.put("description", "Use this format for POST /api/sqs/send");
+           response.put("validation", Map.of(
+               "orderId", "Required, non-blank string",
+               "customerId", "Required, non-blank string",
+               "amount", "Required, positive number",
+               "messageGroup", "Optional, determines which consumer groups process the message",
+               "priority", "Optional, message priority level",
+               "source", "Optional, message source identifier"
+           ));
+
+           return ResponseEntity.ok(response);
+       }
+
+       // Performance test endpoint
+       @PostMapping("/test/performance")
+       public ResponseEntity<Map<String, Object>> performanceTest(
+               @RequestParam(defaultValue = "100") int messageCount,
+               @RequestParam(defaultValue = "10") int concurrency,
+               @RequestParam(defaultValue = "ALL") String messageGroup) {
+
+           try {
+               logger.info("API_PERFORMANCE_TEST_START - Messages: {}, Concurrency: {}, Group: {}",
+                          messageCount, concurrency, messageGroup);
+
+               if (messageCount > 1000) {
+                   Map<String, Object> response = new HashMap<>();
+                   response.put("success", false);
+                   response.put("error", "Maximum 1000 messages allowed for performance test");
+                   return ResponseEntity.badRequest().body(response);
+               }
+
+               long startTime = System.currentTimeMillis();
+
+               // Send messages in batches
+               int batchSize = messageCount / concurrency;
+               for (int i = 0; i < concurrency; i++) {
+                   int startIndex = i * batchSize;
+                   int endIndex = (i == concurrency - 1) ? messageCount : (i + 1) * batchSize;
+                   int currentBatchSize = endIndex - startIndex;
+
+                   if (currentBatchSize > 0) {
+                       producerService.sendBatchMessages(currentBatchSize, messageGroup);
+                   }
+               }
+
+               long endTime = System.currentTimeMillis();
+               long totalTime = endTime - startTime;
+               double messagesPerSecond = messageCount / (totalTime / 1000.0);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageCount", messageCount);
+               response.put("concurrency", concurrency);
+               response.put("totalTimeMs", totalTime);
+               response.put("messagesPerSecond", messagesPerSecond);
+               response.put("messageGroup", messageGroup);
+
+               logger.info("API_PERFORMANCE_TEST_SUCCESS - Sent {} messages in {}ms ({:.2f} msg/sec)",
+                          messageCount, totalTime, messagesPerSecond);
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("API_PERFORMANCE_TEST_FAILED - Error in performance test: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // API documentation endpoint
+       @GetMapping("/docs")
+       public ResponseEntity<Map<String, Object>> getApiDocumentation() {
+           Map<String, Object> docs = new HashMap<>();
+
+           docs.put("title", "SQS Multi-Group Consumer API");
+           docs.put("version", "1.0.0");
+           docs.put("description", "Production-ready SQS consumer with multiple consumer groups");
+
+           Map<String, Object> endpoints = new HashMap<>();
+           endpoints.put("POST /api/sqs/send", "Send custom message to SQS queue");
+           endpoints.put("POST /api/sqs/send/quick", "Send quick test message with parameters");
+           endpoints.put("POST /api/sqs/send/batch", "Send multiple test messages");
+           endpoints.put("POST /api/sqs/test/groups", "Test all consumer groups");
+           endpoints.put("POST /api/sqs/test/performance", "Performance test with configurable load");
+           endpoints.put("GET /api/sqs/health", "Get consumer service health status");
+           endpoints.put("GET /api/sqs/sample", "Get sample message format");
+           endpoints.put("GET /api/sqs/docs", "API documentation");
+
+           docs.put("endpoints", endpoints);
+
+           Map<String, Object> monitoring = new HashMap<>();
+           monitoring.put("metrics", "Available at /actuator/metrics");
+           monitoring.put("prometheus", "Available at /actuator/prometheus");
+           monitoring.put("health", "Available at /actuator/health");
+
+           docs.put("monitoring", monitoring);
+
+           return ResponseEntity.ok(docs);
+       }
+   }
+
+   // Main Application Class
+   package com.example.sqs;
+
+   import org.springframework.boot.SpringApplication;
+   import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+   @SpringBootApplication
+   public class SqsProductionConsumerApplication {
+
+       public static void main(String[] args) {
+           SpringApplication.run(SqsProductionConsumerApplication.class, args);
+       }
+   }
+
+   // Jackson Configuration
+   package com.example.sqs.config;
+
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+   import com.fasterxml.jackson.databind.DeserializationFeature;
+   import com.fasterxml.jackson.databind.SerializationFeature;
+   import org.springframework.context.annotation.Bean;
+   import org.springframework.context.annotation.Configuration;
+
+   @Configuration
+   public class JacksonConfig {
+
+       @Bean
+       public ObjectMapper objectMapper() {
+           ObjectMapper mapper = new ObjectMapper();
+           mapper.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
+           mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+           mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+           mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+           return mapper;
+       }
+   }originalMessage", orderMessage);
+               dlqPayload.put("consumerGroup", consumerGroup);
+               dlqPayload.put("failureReason", exception.getMessage());
+               dlqPayload.put("retryCount", retryCount);
+               dlqPayload.put("originalMessageId", originalMessage.messageId());
+               dlqPayload.put("failureTimestamp", System.currentTimeMillis());
+               dlqPayload.put("
