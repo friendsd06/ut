@@ -4443,3 +4443,895 @@ Performance Comparison:
    Monitor Logs: Watch console for consumer group processing
 
    This setup allows you to easily test your multi-group SQS consumer implementation and see how different message groups are processed by different consumer groups! 🚀
+
+
+   ===============
+
+   // pom.xml dependencies
+   /*
+   <dependencies>
+       <dependency>
+           <groupId>org.springframework.boot</groupId>
+           <artifactId>spring-boot-starter</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>software.amazon.awssdk</groupId>
+           <artifactId>sqs</artifactId>
+           <version>2.20.68</version>
+       </dependency>
+       <dependency>
+           <groupId>com.fasterxml.jackson.core</groupId>
+           <artifactId>jackson-databind</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>org.springframework.boot</groupId>
+           <artifactId>spring-boot-starter-logging</artifactId>
+       </dependency>
+       <dependency>
+           <groupId>org.springframework.boot</groupId>
+           <artifactId>spring-boot-starter-web</artifactId>
+       </dependency>
+   </dependencies>
+   */
+
+   // application.yml
+   /*
+   aws:
+     region: us-east-1
+     access-key: your-access-key
+     secret-key: your-secret-key
+     sqs:
+       queue-url: https://sqs.us-east-1.amazonaws.com/123456789012/my-main-queue
+       max-messages: 10
+       wait-time-seconds: 20
+       visibility-timeout-seconds: 30
+
+   consumer:
+     groups:
+       order-processing:
+         thread-pool-size: 5
+         enabled: true
+       analytics:
+         thread-pool-size: 3
+         enabled: true
+       notification:
+         thread-pool-size: 8
+         enabled: true
+   */
+
+   // Message Model
+   package com.example.sqs.model;
+
+   import com.fasterxml.jackson.annotation.JsonProperty;
+
+   public class OrderMessage {
+       @JsonProperty("orderId")
+       private String orderId;
+
+       @JsonProperty("customerId")
+       private String customerId;
+
+       @JsonProperty("amount")
+       private Double amount;
+
+       @JsonProperty("messageGroup")
+       private String messageGroup;
+
+       @JsonProperty("timestamp")
+       private Long timestamp;
+
+       // Default constructor
+       public OrderMessage() {}
+
+       // Constructor
+       public OrderMessage(String orderId, String customerId, Double amount, String messageGroup) {
+           this.orderId = orderId;
+           this.customerId = customerId;
+           this.amount = amount;
+           this.messageGroup = messageGroup;
+           this.timestamp = System.currentTimeMillis();
+       }
+
+       // Getters and setters
+       public String getOrderId() { return orderId; }
+       public void setOrderId(String orderId) { this.orderId = orderId; }
+
+       public String getCustomerId() { return customerId; }
+       public void setCustomerId(String customerId) { this.customerId = customerId; }
+
+       public Double getAmount() { return amount; }
+       public void setAmount(Double amount) { this.amount = amount; }
+
+       public String getMessageGroup() { return messageGroup; }
+       public void setMessageGroup(String messageGroup) { this.messageGroup = messageGroup; }
+
+       public Long getTimestamp() { return timestamp; }
+       public void setTimestamp(Long timestamp) { this.timestamp = timestamp; }
+
+       @Override
+       public String toString() {
+           return "OrderMessage{" +
+                   "orderId='" + orderId + '\'' +
+                   ", customerId='" + customerId + '\'' +
+                   ", amount=" + amount +
+                   ", messageGroup='" + messageGroup + '\'' +
+                   ", timestamp=" + timestamp +
+                   '}';
+       }
+   }
+
+   // AWS SQS Configuration
+   package com.example.sqs.config;
+
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.context.annotation.Bean;
+   import org.springframework.context.annotation.Configuration;
+   import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+   import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+   import software.amazon.awssdk.regions.Region;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+
+   @Configuration
+   public class SqsConfig {
+
+       @Value("${aws.access-key}")
+       private String accessKey;
+
+       @Value("${aws.secret-key}")
+       private String secretKey;
+
+       @Value("${aws.region}")
+       private String region;
+
+       @Bean
+       public SqsClient sqsClient() {
+           return SqsClient.builder()
+                   .region(Region.of(region))
+                   .credentialsProvider(StaticCredentialsProvider.create(
+                           AwsBasicCredentials.create(accessKey, secretKey)))
+                   .build();
+       }
+   }
+
+   // Consumer Group Interface
+   package com.example.sqs.consumer;
+
+   import com.example.sqs.model.OrderMessage;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   public interface ConsumerGroup {
+       String getGroupName();
+       boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage);
+       void processMessage(OrderMessage orderMessage, Message sqsMessage);
+       int getThreadPoolSize();
+       boolean isEnabled();
+   }
+
+   // Order Processing Consumer Group
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import com.example.sqs.model.OrderMessage;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Component;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   @Component
+   public class OrderProcessingGroup implements ConsumerGroup {
+
+       private static final Logger logger = LoggerFactory.getLogger(OrderProcessingGroup.class);
+
+       @Value("${consumer.groups.order-processing.thread-pool-size:5}")
+       private int threadPoolSize;
+
+       @Value("${consumer.groups.order-processing.enabled:true}")
+       private boolean enabled;
+
+       @Override
+       public String getGroupName() {
+           return "ORDER_PROCESSING";
+       }
+
+       @Override
+       public boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage) {
+           String messageGroup = orderMessage.getMessageGroup();
+           return messageGroup == null || "ORDER".equals(messageGroup) || "ALL".equals(messageGroup);
+       }
+
+       @Override
+       public void processMessage(OrderMessage orderMessage, Message sqsMessage) {
+           try {
+               logger.info("[{}] Processing order: {} for customer: {} with amount: ${}",
+                       getGroupName(), orderMessage.getOrderId(),
+                       orderMessage.getCustomerId(), orderMessage.getAmount());
+
+               // Simulate order processing
+               Thread.sleep(500);
+
+               // Add your order processing logic here
+               // e.g., update database, call external services, etc.
+
+               logger.info("[{}] Successfully processed order: {}",
+                          getGroupName(), orderMessage.getOrderId());
+
+           } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               throw new RuntimeException("Order processing interrupted", e);
+           } catch (Exception e) {
+               logger.error("[{}] Error processing order: {}", getGroupName(), e.getMessage(), e);
+               throw new RuntimeException("Failed to process order", e);
+           }
+       }
+
+       @Override
+       public int getThreadPoolSize() {
+           return threadPoolSize;
+       }
+
+       @Override
+       public boolean isEnabled() {
+           return enabled;
+       }
+   }
+
+   // Analytics Processing Consumer Group
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import com.example.sqs.model.OrderMessage;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Component;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   @Component
+   public class AnalyticsProcessingGroup implements ConsumerGroup {
+
+       private static final Logger logger = LoggerFactory.getLogger(AnalyticsProcessingGroup.class);
+
+       @Value("${consumer.groups.analytics.thread-pool-size:3}")
+       private int threadPoolSize;
+
+       @Value("${consumer.groups.analytics.enabled:true}")
+       private boolean enabled;
+
+       @Override
+       public String getGroupName() {
+           return "ANALYTICS";
+       }
+
+       @Override
+       public boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage) {
+           String messageGroup = orderMessage.getMessageGroup();
+           return "ANALYTICS".equals(messageGroup) || "ALL".equals(messageGroup) ||
+                  (orderMessage.getAmount() != null && orderMessage.getAmount() > 100.0);
+       }
+
+       @Override
+       public void processMessage(OrderMessage orderMessage, Message sqsMessage) {
+           try {
+               logger.info("[{}] Processing analytics for order: {} with amount: ${}",
+                       getGroupName(), orderMessage.getOrderId(), orderMessage.getAmount());
+
+               // Simulate analytics processing
+               Thread.sleep(200);
+
+               // Add your analytics logic here
+               // e.g., update metrics, send to data warehouse, etc.
+
+               logger.info("[{}] Successfully processed analytics for order: {}",
+                          getGroupName(), orderMessage.getOrderId());
+
+           } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               logger.warn("[{}] Analytics processing interrupted for order: {}",
+                          getGroupName(), orderMessage.getOrderId());
+           } catch (Exception e) {
+               logger.error("[{}] Error processing analytics: {}", getGroupName(), e.getMessage(), e);
+               // For analytics, we might want to continue processing other messages
+           }
+       }
+
+       @Override
+       public int getThreadPoolSize() {
+           return threadPoolSize;
+       }
+
+       @Override
+       public boolean isEnabled() {
+           return enabled;
+       }
+   }
+
+   // Notification Processing Consumer Group
+   package com.example.sqs.consumer.groups;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import com.example.sqs.model.OrderMessage;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Component;
+   import software.amazon.awssdk.services.sqs.model.Message;
+
+   import java.util.concurrent.CompletableFuture;
+
+   @Component
+   public class NotificationProcessingGroup implements ConsumerGroup {
+
+       private static final Logger logger = LoggerFactory.getLogger(NotificationProcessingGroup.class);
+
+       @Value("${consumer.groups.notification.thread-pool-size:8}")
+       private int threadPoolSize;
+
+       @Value("${consumer.groups.notification.enabled:true}")
+       private boolean enabled;
+
+       @Override
+       public String getGroupName() {
+           return "NOTIFICATION";
+       }
+
+       @Override
+       public boolean shouldProcess(OrderMessage orderMessage, Message sqsMessage) {
+           String messageGroup = orderMessage.getMessageGroup();
+           return "NOTIFICATION".equals(messageGroup) || "ALL".equals(messageGroup);
+       }
+
+       @Override
+       public void processMessage(OrderMessage orderMessage, Message sqsMessage) {
+           try {
+               logger.info("[{}] Processing notification for order: {} to customer: {}",
+                       getGroupName(), orderMessage.getOrderId(), orderMessage.getCustomerId());
+
+               // Async notification processing
+               CompletableFuture.runAsync(() -> {
+                   try {
+                       // Simulate notification processing
+                       Thread.sleep(300);
+
+                       // Add your notification logic here
+                       // e.g., send email, SMS, push notification, etc.
+
+                       logger.info("[{}] Notification sent for order: {}",
+                                  getGroupName(), orderMessage.getOrderId());
+                   } catch (InterruptedException e) {
+                       Thread.currentThread().interrupt();
+                       logger.warn("[{}] Notification processing interrupted for order: {}",
+                                  getGroupName(), orderMessage.getOrderId());
+                   } catch (Exception e) {
+                       logger.error("[{}] Error sending notification: {}",
+                                   getGroupName(), e.getMessage(), e);
+                   }
+               });
+
+               logger.info("[{}] Async notification initiated for order: {}",
+                          getGroupName(), orderMessage.getOrderId());
+
+           } catch (Exception e) {
+               logger.error("[{}] Error initiating notification: {}", getGroupName(), e.getMessage(), e);
+               throw new RuntimeException("Failed to process notification", e);
+           }
+       }
+
+       @Override
+       public int getThreadPoolSize() {
+           return threadPoolSize;
+       }
+
+       @Override
+       public boolean isEnabled() {
+           return enabled;
+       }
+   }
+
+   // SQS Consumer Service
+   package com.example.sqs.service;
+
+   import com.example.sqs.consumer.ConsumerGroup;
+   import com.example.sqs.model.OrderMessage;
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Service;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+   import software.amazon.awssdk.services.sqs.model.*;
+
+   import javax.annotation.PostConstruct;
+   import javax.annotation.PreDestroy;
+   import java.util.List;
+   import java.util.concurrent.ExecutorService;
+   import java.util.concurrent.Executors;
+   import java.util.concurrent.TimeUnit;
+   import java.util.concurrent.atomic.AtomicBoolean;
+
+   @Service
+   public class SqsConsumerService {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsConsumerService.class);
+
+       @Autowired
+       private SqsClient sqsClient;
+
+       @Autowired
+       private List<ConsumerGroup> consumerGroups;
+
+       @Autowired
+       private ObjectMapper objectMapper;
+
+       @Value("${aws.sqs.queue-url}")
+       private String queueUrl;
+
+       @Value("${aws.sqs.max-messages:10}")
+       private int maxMessages;
+
+       @Value("${aws.sqs.wait-time-seconds:20}")
+       private int waitTimeSeconds;
+
+       @Value("${aws.sqs.visibility-timeout-seconds:30}")
+       private int visibilityTimeoutSeconds;
+
+       private final AtomicBoolean running = new AtomicBoolean(false);
+       private ExecutorService mainExecutor;
+
+       @PostConstruct
+       public void startConsumers() {
+           logger.info("Starting SQS consumers for {} groups", consumerGroups.size());
+
+           running.set(true);
+           mainExecutor = Executors.newFixedThreadPool(consumerGroups.size());
+
+           for (ConsumerGroup group : consumerGroups) {
+               if (group.isEnabled()) {
+                   mainExecutor.submit(() -> startConsumerGroup(group));
+                   logger.info("Started consumer group: {} with {} threads",
+                              group.getGroupName(), group.getThreadPoolSize());
+               } else {
+                   logger.info("Consumer group {} is disabled", group.getGroupName());
+               }
+           }
+       }
+
+       private void startConsumerGroup(ConsumerGroup consumerGroup) {
+           ExecutorService groupExecutor = Executors.newFixedThreadPool(consumerGroup.getThreadPoolSize());
+
+           while (running.get()) {
+               try {
+                   // Receive messages from SQS
+                   ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
+                           .queueUrl(queueUrl)
+                           .maxNumberOfMessages(maxMessages)
+                           .waitTimeSeconds(waitTimeSeconds)
+                           .messageAttributeNames("All")
+                           .attributeNames("All")
+                           .build();
+
+                   ReceiveMessageResponse receiveResponse = sqsClient.receiveMessage(receiveRequest);
+                   List<Message> messages = receiveResponse.messages();
+
+                   if (!messages.isEmpty()) {
+                       logger.debug("[{}] Received {} messages", consumerGroup.getGroupName(), messages.size());
+
+                       for (Message message : messages) {
+                           groupExecutor.submit(() -> processMessage(consumerGroup, message));
+                       }
+                   } else {
+                       // No messages received, continue polling
+                       Thread.sleep(1000);
+                   }
+
+               } catch (InterruptedException e) {
+                   Thread.currentThread().interrupt();
+                   logger.info("[{}] Consumer interrupted", consumerGroup.getGroupName());
+                   break;
+               } catch (Exception e) {
+                   logger.error("[{}] Error in consumer loop: {}", consumerGroup.getGroupName(), e.getMessage(), e);
+                   try {
+                       Thread.sleep(5000); // Wait before retrying
+                   } catch (InterruptedException ie) {
+                       Thread.currentThread().interrupt();
+                       break;
+                   }
+               }
+           }
+
+           groupExecutor.shutdown();
+           try {
+               if (!groupExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                   groupExecutor.shutdownNow();
+               }
+           } catch (InterruptedException e) {
+               groupExecutor.shutdownNow();
+           }
+       }
+
+       private void processMessage(ConsumerGroup consumerGroup, Message message) {
+           try {
+               // Parse message body
+               OrderMessage orderMessage = objectMapper.readValue(message.body(), OrderMessage.class);
+
+               // Check if this group should process this message
+               if (consumerGroup.shouldProcess(orderMessage, message)) {
+                   logger.debug("[{}] Processing message: {}", consumerGroup.getGroupName(), message.messageId());
+
+                   // Process the message
+                   consumerGroup.processMessage(orderMessage, message);
+
+                   // Delete message after successful processing
+                   deleteMessage(message);
+
+                   logger.debug("[{}] Successfully processed and deleted message: {}",
+                               consumerGroup.getGroupName(), message.messageId());
+               } else {
+                   logger.debug("[{}] Skipping message: {}", consumerGroup.getGroupName(), message.messageId());
+                   // Still delete the message since this group doesn't need to process it
+                   // In a real scenario, you might want to handle this differently
+                   deleteMessage(message);
+               }
+
+           } catch (Exception e) {
+               logger.error("[{}] Error processing message {}: {}",
+                           consumerGroup.getGroupName(), message.messageId(), e.getMessage(), e);
+
+               // Handle failed message (could implement retry logic or send to DLQ)
+               handleFailedMessage(consumerGroup, message, e);
+           }
+       }
+
+       private void deleteMessage(Message message) {
+           try {
+               DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                       .queueUrl(queueUrl)
+                       .receiptHandle(message.receiptHandle())
+                       .build();
+
+               sqsClient.deleteMessage(deleteRequest);
+           } catch (Exception e) {
+               logger.error("Error deleting message {}: {}", message.messageId(), e.getMessage(), e);
+           }
+       }
+
+       private void handleFailedMessage(ConsumerGroup consumerGroup, Message message, Exception exception) {
+           // Get the approximate receive count
+           String receiveCountStr = message.attributes().get("ApproximateReceiveCount");
+           int receiveCount = receiveCountStr != null ? Integer.parseInt(receiveCountStr) : 0;
+
+           logger.error("[{}] Message {} failed processing (attempt {}): {}",
+                       consumerGroup.getGroupName(), message.messageId(), receiveCount, exception.getMessage());
+
+           if (receiveCount >= 3) {
+               logger.error("[{}] Message {} exceeded retry limit, requires manual intervention",
+                           consumerGroup.getGroupName(), message.messageId());
+
+               // In a real scenario, you might want to:
+               // 1. Send to a Dead Letter Queue
+               // 2. Store in a database for manual processing
+               // 3. Send alerts
+
+               // For now, we'll delete the message to prevent infinite retries
+               deleteMessage(message);
+           }
+           // If receiveCount < 3, the message will be retried automatically due to visibility timeout
+       }
+
+       @PreDestroy
+       public void stopConsumers() {
+           logger.info("Stopping SQS consumers...");
+           running.set(false);
+
+           if (mainExecutor != null) {
+               mainExecutor.shutdown();
+               try {
+                   if (!mainExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                       mainExecutor.shutdownNow();
+                   }
+               } catch (InterruptedException e) {
+                   mainExecutor.shutdownNow();
+               }
+           }
+
+           logger.info("SQS consumers stopped");
+       }
+   }
+
+   // Main Application Class
+   package com.example.sqs;
+
+   import org.springframework.boot.SpringApplication;
+   import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+   @SpringBootApplication
+   public class SdkSqsConsumerApplication {
+
+       public static void main(String[] args) {
+           SpringApplication.run(SdkSqsConsumerApplication.class, args);
+       }
+   }
+
+   // Jackson Configuration
+   package com.example.sqs.config;
+
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+   import org.springframework.context.annotation.Bean;
+   import org.springframework.context.annotation.Configuration;
+
+   @Configuration
+   public class JacksonConfig {
+
+       @Bean
+       public ObjectMapper objectMapper() {
+           ObjectMapper mapper = new ObjectMapper();
+           mapper.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
+           return mapper;
+       }
+   }
+
+   // Message Producer (for testing)
+   package com.example.sqs.producer;
+
+   import com.example.sqs.model.OrderMessage;
+   import com.fasterxml.jackson.databind.ObjectMapper;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.beans.factory.annotation.Value;
+   import org.springframework.stereotype.Service;
+   import software.amazon.awssdk.services.sqs.SqsClient;
+   import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+   import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+
+   @Service
+   public class SqsProducerService {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsProducerService.class);
+
+       @Autowired
+       private SqsClient sqsClient;
+
+       @Autowired
+       private ObjectMapper objectMapper;
+
+       @Value("${aws.sqs.queue-url}")
+       private String queueUrl;
+
+       public String sendMessage(OrderMessage orderMessage) {
+           try {
+               String messageBody = objectMapper.writeValueAsString(orderMessage);
+
+               SendMessageRequest sendRequest = SendMessageRequest.builder()
+                       .queueUrl(queueUrl)
+                       .messageBody(messageBody)
+                       .build();
+
+               SendMessageResponse response = sqsClient.sendMessage(sendRequest);
+
+               logger.info("Message sent successfully. MessageId: {}, Order: {}",
+                          response.messageId(), orderMessage.getOrderId());
+
+               return response.messageId();
+
+           } catch (Exception e) {
+               logger.error("Error sending message for order {}: {}",
+                           orderMessage.getOrderId(), e.getMessage(), e);
+               throw new RuntimeException("Failed to send message", e);
+           }
+       }
+
+       public void sendBatchMessages(int count, String messageGroup) {
+           for (int i = 1; i <= count; i++) {
+               OrderMessage message = new OrderMessage(
+                   "ORDER-" + System.currentTimeMillis() + "-" + i,
+                   "CUSTOMER-" + (1000 + i),
+                   50.0 + (i * 25.0),
+                   messageGroup
+               );
+               sendMessage(message);
+           }
+       }
+   }
+
+   // REST Controller for Testing
+   package com.example.sqs.controller;
+
+   import com.example.sqs.model.OrderMessage;
+   import com.example.sqs.producer.SqsProducerService;
+   import org.slf4j.Logger;
+   import org.slf4j.LoggerFactory;
+   import org.springframework.beans.factory.annotation.Autowired;
+   import org.springframework.http.ResponseEntity;
+   import org.springframework.web.bind.annotation.*;
+
+   import java.util.HashMap;
+   import java.util.Map;
+   import java.util.UUID;
+
+   @RestController
+   @RequestMapping("/api/sqs")
+   public class SqsTestController {
+
+       private static final Logger logger = LoggerFactory.getLogger(SqsTestController.class);
+
+       @Autowired
+       private SqsProducerService producerService;
+
+       // Send a single custom message
+       @PostMapping("/send")
+       public ResponseEntity<Map<String, Object>> sendMessage(@RequestBody OrderMessage orderMessage) {
+           try {
+               // Set timestamp if not provided
+               if (orderMessage.getTimestamp() == null) {
+                   orderMessage.setTimestamp(System.currentTimeMillis());
+               }
+
+               String messageId = producerService.sendMessage(orderMessage);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageId", messageId);
+               response.put("orderMessage", orderMessage);
+               response.put("message", "Order message sent successfully");
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("Error sending message via API: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+               response.put("message", "Failed to send message");
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Send a quick test message
+       @PostMapping("/send/quick")
+       public ResponseEntity<Map<String, Object>> sendQuickMessage(
+               @RequestParam(defaultValue = "ALL") String messageGroup,
+               @RequestParam(defaultValue = "100.0") Double amount) {
+
+           try {
+               OrderMessage orderMessage = new OrderMessage(
+                   "ORDER-" + UUID.randomUUID().toString().substring(0, 8),
+                   "CUSTOMER-" + System.currentTimeMillis(),
+                   amount,
+                   messageGroup
+               );
+
+               String messageId = producerService.sendMessage(orderMessage);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageId", messageId);
+               response.put("orderMessage", orderMessage);
+               response.put("message", "Quick test message sent successfully");
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("Error sending quick message: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Send multiple test messages
+       @PostMapping("/send/batch")
+       public ResponseEntity<Map<String, Object>> sendBatchMessages(
+               @RequestParam(defaultValue = "5") int count,
+               @RequestParam(defaultValue = "ALL") String messageGroup) {
+
+           try {
+               if (count > 50) {
+                   Map<String, Object> response = new HashMap<>();
+                   response.put("success", false);
+                   response.put("error", "Maximum 50 messages allowed in batch");
+                   return ResponseEntity.badRequest().body(response);
+               }
+
+               producerService.sendBatchMessages(count, messageGroup);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("messageCount", count);
+               response.put("messageGroup", messageGroup);
+               response.put("message", count + " messages sent successfully");
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("Error sending batch messages: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Test different message groups
+       @PostMapping("/test/groups")
+       public ResponseEntity<Map<String, Object>> testAllGroups() {
+           try {
+               // Send messages for each group
+               String[] groups = {"ORDER", "ANALYTICS", "NOTIFICATION", "ALL"};
+               int totalMessages = 0;
+
+               for (String group : groups) {
+                   OrderMessage orderMessage = new OrderMessage(
+                       "TEST-" + group + "-" + System.currentTimeMillis(),
+                       "CUSTOMER-TEST-" + group,
+                       150.0, // High amount to trigger analytics
+                       group
+                   );
+                   producerService.sendMessage(orderMessage);
+                   totalMessages++;
+               }
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", true);
+               response.put("totalMessages", totalMessages);
+               response.put("testedGroups", groups);
+               response.put("message", "Test messages sent for all consumer groups");
+
+               return ResponseEntity.ok(response);
+
+           } catch (Exception e) {
+               logger.error("Error testing groups: {}", e.getMessage(), e);
+
+               Map<String, Object> response = new HashMap<>();
+               response.put("success", false);
+               response.put("error", e.getMessage());
+
+               return ResponseEntity.status(500).body(response);
+           }
+       }
+
+       // Health check endpoint
+       @GetMapping("/health")
+       public ResponseEntity<Map<String, Object>> healthCheck() {
+           Map<String, Object> response = new HashMap<>();
+           response.put("status", "UP");
+           response.put("service", "SQS Test Controller");
+           response.put("timestamp", System.currentTimeMillis());
+           response.put("availableEndpoints", Map.of(
+               "POST /api/sqs/send", "Send custom message",
+               "POST /api/sqs/send/quick", "Send quick test message",
+               "POST /api/sqs/send/batch", "Send batch messages",
+               "POST /api/sqs/test/groups", "Test all consumer groups",
+               "GET /api/sqs/health", "Health check"
+           ));
+
+           return ResponseEntity.ok(response);
+       }
+
+       // Get sample message format
+       @GetMapping("/sample")
+       public ResponseEntity<Map<String, Object>> getSampleMessage() {
+           OrderMessage sample = new OrderMessage(
+               "ORDER-12345",
+               "CUSTOMER-67890",
+               199.99,
+               "ALL"
+           );
+
+           Map<String, Object> response = new HashMap<>();
+           response.put("sampleMessage", sample);
+           response.put("messageGroups", new String[]{"ORDER", "ANALYTICS", "NOTIFICATION", "ALL"});
+           response.put("description", "Use this format for POST /api/sqs/send");
+
+           return ResponseEntity.ok(response);
+       }
+   }
