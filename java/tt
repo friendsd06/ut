@@ -3230,3 +3230,243 @@ Performance Comparison:
            }
        }
    }
+
+   =============
+   This implementation uses the AWS SDK directly instead of Spring Cloud SQS. Here are the key differences and features:
+   Key Features:
+
+   Direct AWS SDK Usage: Uses SqsClient from AWS SDK v2 for all SQS operations
+   Custom Consumer Groups: Each consumer group is a separate component implementing the ConsumerGroup interface
+   Manual Message Polling: Implements custom polling logic with configurable parameters
+   Thread Pool Management: Each consumer group has its own thread pool with configurable size
+   Manual Message Deletion: Explicitly deletes messages after successful processing
+
+   Architecture Benefits:
+   More Control:
+
+   Custom polling intervals and batch sizes
+   Manual visibility timeout management
+   Custom error handling and retry logic
+   Direct control over message deletion
+
+   Consumer Group Pattern:
+
+   Each group can have different thread pool sizes
+   Independent filtering logic per group
+   Easy to enable/disable groups
+   Scalable architecture
+
+   Error Handling:
+
+   Retry logic based on ApproximateReceiveCount
+   Failed message handling with DLQ support
+   Graceful shutdown with proper thread cleanup
+
+   Configuration:
+   The configuration allows you to:
+
+   Set different thread pool sizes per consumer group
+   Configure SQS polling parameters
+   Enable/disable specific consumer groups
+   Set AWS credentials and region
+
+   Usage:
+
+   Start the Application: All enabled consumer groups start automatically
+   Message Processing: Each group polls the same SQS queue independently
+   Filtering: Messages are processed based on each group's filtering logic
+   Scaling: Adjust thread pool sizes based on processing requirements
+
+   Comparison with Spring Cloud SQS:
+   FeatureAWS SDKSpring Cloud SQSSetup ComplexityHigherLowerControl LevelFull ControlAbstractedConfigurationManualAnnotation-basedError HandlingCustomBuilt-inThreadingManual ManagementAuto-managedMessage DeletionManualAutomatic
+   This implementation gives you complete control over the SQS consumption process while maintaining the multi-group pattern for processing the same queue with different business logic.RetryAwhat  is benefit of differnt group explain in simple wayEditLet me explain the benefits of different consumer groups in simple terms with real-world examples:
+   Think of it like a Restaurant Kitchen 🍽️
+   Imagine you have one order queue but different kitchen stations:
+   Single Queue, Multiple Groups
+   📋 Order Queue: [Order #1, Order #2, Order #3, Order #4...]
+        ↓
+   🔀 Same orders go to different stations:
+        ↓
+   👨‍🍳 Cooking Station    → Prepares the food
+   👩‍💼 Billing Station   → Processes payment
+   📦 Delivery Station   → Packages & ships
+   Real Business Benefits:
+   1. Parallel Processing
+   Order #123 arrives:
+   ✅ Order Group:        Validates & reserves inventory
+   ✅ Analytics Group:    Updates sales metrics
+   ✅ Notification Group: Sends confirmation email
+
+   All happen AT THE SAME TIME! ⚡
+   2. Different Speeds, Different Resources
+   📊 Analytics:     3 threads (slower, less critical)
+   📦 Order Processing: 5 threads (medium speed, important)
+   📧 Notifications: 8 threads (fast, high volume)
+   3. Independent Failure Handling
+   If Notification Group fails:
+   ❌ Email not sent
+   ✅ Order still processed
+   ✅ Analytics still updated
+
+   Business continues! 🎯
+   4. Smart Filtering
+   Message: "Small $10 order"
+   ✅ Order Group:      ✓ Processes (all orders)
+   ❌ Analytics Group:  ✗ Skips (only orders >$100)
+   ✅ Notification:     ✓ Sends email (all orders)
+   Simple Example:
+   E-commerce Order Flow:
+   Customer places order → SQS Queue
+                              ↓
+   ┌─────────────────┬─────────────────┬─────────────────┐
+   │   Order Team    │  Analytics Team │   Email Team    │
+   │                 │                 │                 │
+   │ • Update DB     │ • Track metrics │ • Send receipt  │
+   │ • Reserve stock │ • Generate reports│ • Send shipping│
+   │ • Process payment│ • Update dashboard│ • Send delivery│
+   └─────────────────┴─────────────────┴─────────────────┘
+   Key Benefits:
+
+   🚀 Faster Processing: Multiple teams work simultaneously
+   🔧 Flexibility: Each team can have different rules and speeds
+   💪 Reliability: If one team fails, others continue
+   📈 Scalability: Scale each team independently based on load
+   🎯 Specialization: Each team focuses on what they do best
+
+   Without Groups (Bad):
+   One consumer processes:
+   Step 1: Update order → Step 2: Analytics → Step 3: Send email
+   Takes 5 seconds total, processes 1 at a time
+   With Groups (Good):
+   Three groups process simultaneously:
+   All 3 steps happen in parallel
+   Takes 2 seconds total, processes 3x faster!
+   Bottom Line: It's like having multiple specialized teams working on the same task list, making everything faster and more reliable! 🎉RetryAwhat if we dont use group what is challengesEditGreat question! Let me explain the challenges of NOT using groups with simple examples:
+   Without Groups - Single Consumer Approach 😰
+   📋 Queue: [Order1, Order2, Order3, Order4...]
+                 ↓
+            🤖 One Consumer
+                 ↓
+       Step 1 → Step 2 → Step 3 → Step 4
+      (Sequential Processing)
+   Major Challenges:
+   1. Slow Sequential Processing ⏱️
+   ❌ Without Groups:
+   Order Processing: 2 sec → Analytics: 1 sec → Email: 1 sec → SMS: 1 sec
+   Total: 5 seconds per order
+
+   ✅ With Groups:
+   All happen simultaneously: Max 2 seconds per order
+   Impact: If you have 1000 orders, single consumer takes 83 minutes vs groups take 33 minutes!
+   2. Single Point of Failure 💥
+   ❌ Without Groups:
+   Analytics code crashes → EVERYTHING stops
+   Email service down → NO orders processed
+   Database slow → ENTIRE pipeline blocked
+
+   ✅ With Groups:
+   Analytics fails → Orders still process, emails still send
+   Email fails → Orders process, analytics continue
+   3. Resource Waste 💸
+   ❌ Without Groups:
+   Order processing (CPU heavy): Uses 80% CPU, 20% memory
+   But also doing:
+   - Email sending (network I/O): Wastes CPU waiting
+   - Analytics (memory heavy): Not optimized
+
+   ✅ With Groups:
+   Each group optimized for its task:
+   - Order: High CPU threads
+   - Email: High network threads
+   - Analytics: High memory allocation
+   4. Scaling Nightmare 📈
+   ❌ Without Groups:
+   Black Friday traffic surge:
+   - Need to scale EVERYTHING together
+   - Even if only emails are slow
+   - Expensive and inefficient
+
+   ✅ With Groups:
+   - Scale only the bottleneck
+   - Email slow? Add more email threads
+   - Analytics backup? Scale analytics only
+   5. Different Processing Requirements 🔄
+   ❌ Without Groups:
+   All messages processed the same way:
+   - High priority orders wait behind analytics
+   - Small orders get same treatment as large orders
+   - No smart filtering
+
+   ✅ With Groups:
+   - Order group: All orders
+   - Analytics: Only orders >$100
+   - VIP notifications: Only premium customers
+   6. Development & Deployment Issues 👨‍💻
+   ❌ Without Groups:
+   - One team working on same codebase
+   - Deploy email fix → Restart entire consumer
+   - Bug in analytics → Breaks order processing
+   - Testing becomes complex
+
+   ✅ With Groups:
+   - Different teams, different codebases
+   - Deploy independently
+   - Isolated failures
+   - Easy to test individual components
+   7. Monitoring & Debugging Chaos 🔍
+   ❌ Without Groups:
+   "Orders are slow" - Is it:
+   - Database issue?
+   - Email service?
+   - Analytics?
+   - Network problem?
+
+   Hard to pinpoint! 😵
+
+   ✅ With Groups:
+   Clear visibility:
+   - Order group: 100 msg/sec ✅
+   - Analytics: 50 msg/sec ✅
+   - Email: 10 msg/sec ❌ ← Found the problem!
+   Real-World Example:
+   E-commerce Black Friday Scenario:
+   Without Groups:
+   🛒 Order comes in
+   │
+   ├─ 1. Validate order (2 sec)
+   ├─ 2. Process payment (3 sec)
+   ├─ 3. Update inventory (1 sec)
+   ├─ 4. Send confirmation email (2 sec)
+   ├─ 5. Update analytics (1 sec)
+   ├─ 6. Send SMS (2 sec)
+   ├─ 7. Log for audit (1 sec)
+   │
+   Total: 12 seconds per order
+   If email service is slow → Everything waits!
+   With Groups:
+   🛒 Order comes in
+   │
+   ├─ Order Group (6 sec):     Validate → Payment → Inventory
+   ├─ Email Group (2 sec):     Send emails (parallel)
+   ├─ Analytics Group (1 sec): Update metrics (parallel)
+   ├─ SMS Group (2 sec):       Send SMS (parallel)
+   └─ Audit Group (1 sec):     Log events (parallel)
+
+   Total: 6 seconds (fastest critical path)
+   Email slow? Order still completes in 6 seconds!
+   Business Impact:
+   MetricWithout GroupsWith GroupsOrder Processing Time12 seconds6 secondsThroughput300 orders/hour600 orders/hourFailure RecoveryHours (everything down)Minutes (isolated)Black Friday HandlingSystem crash likelyGraceful degradationDevelopment SpeedSlow (one team)Fast (parallel teams)
+   Bottom Line:
+   Without groups = Like having one person do everything in a restaurant:
+
+   One chef cooking, taking orders, cleaning, billing
+   If chef gets sick → Restaurant closes
+   Slow, inefficient, risky
+
+   With groups = Proper restaurant with specialized staff:
+
+   Chef cooks, waiter serves, cashier bills
+   If waiter is slow → Food still gets cooked
+   Fast, efficient, reliable
+
+   Groups are essential for any production system that needs to be fast, reliable, and scalable! 🚀
