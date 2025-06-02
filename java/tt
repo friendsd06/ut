@@ -11206,3 +11206,159 @@ Resources:
       MessageRetentionPeriod: 1209600
 
 # ════════════════════════════════════
+
+JSON Payloads for FifoMultiGroupController
+1. Process Order - POST /api/orders/process
+Request:
+json{
+  "orderId": "ORD-12345",
+  "customerId": "CUST-98765",
+  "orderAmount": 299.99,
+  "orderType": "PURCHASE",
+  "priority": "HIGH"
+}
+Response (Success):
+json{
+  "messageId": "12345678-1234-1234-1234-123456789012",
+  "workflow": "ORDER_PROCESSING",
+  "orderId": "ORD-12345",
+  "customerId": "CUST-98765",
+  "messageGroupId": "ORDER-CUST-98765",
+  "timestamp": "2025-06-03T10:30:00.123Z"
+}
+
+2. Send Notifications - POST /api/orders/notify
+Request:
+json{
+  "orderId": "ORD-12346",
+  "customerId": "CUST-11111",
+  "orderAmount": 150.50,
+  "orderType": "PURCHASE",
+  "priority": "NORMAL"
+}
+Response (Success):
+json{
+  "messageId": "87654321-4321-4321-4321-210987654321",
+  "workflow": "NOTIFICATION",
+  "orderId": "ORD-12346",
+  "customerId": "CUST-11111",
+  "messageGroupId": "NOTIFICATION-CUST-11111",
+  "timestamp": "2025-06-03T10:31:00.456Z"
+}
+
+3. Analytics Processing - POST /api/orders/analytics
+Request:
+json{
+  "orderId": "ORD-12347",
+  "customerId": "CUST-22222",
+  "orderAmount": 75.25,
+  "orderType": "REFUND",
+  "priority": "LOW"
+}
+Response (Success):
+json{
+  "messageId": "11111111-2222-3333-4444-555555555555",
+  "workflow": "ANALYTICS",
+  "orderId": "ORD-12347",
+  "customerId": "CUST-22222",
+  "messageGroupId": "ANALYTICS-CUST-22222",
+  "timestamp": "2025-06-03T10:32:00.789Z"
+}
+
+4. All Workflows (Fan-out) - POST /api/orders/all
+Request:
+json{
+  "orderId": "ORD-12348",
+  "customerId": "CUST-33333",
+  "orderAmount": 499.99,
+  "orderType": "PURCHASE",
+  "priority": "URGENT"
+}
+Response (Success):
+json{
+  "orderProcessingMessageId": "msg-001-order",
+  "notificationMessageId": "msg-002-notification",
+  "analyticsMessageId": "msg-003-analytics",
+  "workflows": "ALL",
+  "orderId": "ORD-12348",
+  "customerId": "CUST-33333",
+  "messageGroups": {
+    "order": "ORDER-CUST-33333",
+    "notification": "NOTIFICATION-CUST-33333",
+    "analytics": "ANALYTICS-CUST-33333"
+  },
+  "timestamp": "2025-06-03T10:33:00.012Z"
+}
+
+❌ Error Response Examples
+Validation Error (400):
+json{
+  "timestamp": "2025-06-03T10:30:00.123Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "orderAmount",
+      "message": "Order amount must be positive"
+    },
+    {
+      "field": "customerId",
+      "message": "Customer ID is required"
+    }
+  ]
+}
+Processing Error (500):
+json{
+  "status": "FAILED",
+  "workflow": "ORDER_PROCESSING",
+  "error": "SQS publish failed: Queue not found",
+  "orderId": "ORD-12345",
+  "customerId": "CUST-98765",
+  "timestamp": "2025-06-03T10:30:00.123Z"
+}
+
+🎯 Field Explanations
+Required Fields:
+
+orderId - Unique order identifier (String, NotBlank)
+customerId - Customer identifier (String, NotBlank)
+orderAmount - Order value (BigDecimal, Positive)
+
+Optional Fields:
+
+orderType - Type of order (default: "PURCHASE")
+
+Valid values: "PURCHASE", "REFUND", "EXCHANGE"
+
+
+priority - Processing priority (default: "NORMAL")
+
+Valid values: "LOW", "NORMAL", "HIGH", "URGENT"
+
+
+timestamp - Auto-generated if not provided
+
+
+🧪 cURL Test Commands
+Test Order Processing:
+bashcurl -X POST http://localhost:8080/api/orders/process \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId": "ORD-12345",
+    "customerId": "CUST-98765",
+    "orderAmount": 299.99,
+    "orderType": "PURCHASE",
+    "priority": "HIGH"
+  }'
+Test All Workflows:
+bashcurl -X POST http://localhost:8080/api/orders/all \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId": "ORD-12348",
+    "customerId": "CUST-33333",
+    "orderAmount": 499.99,
+    "orderType": "PURCHASE",
+    "priority": "URGENT"
+  }'
+These payloads will work with your FIFO multi-group SQS implementation!
