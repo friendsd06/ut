@@ -8196,3 +8196,1039 @@ Resources:
       MessageRetentionPeriod: 1209600
 
 # ════════════════════════════════════
+
+======================------------------------------------
+
+package com.example.sqs.service;
+
+import com.example.sqs.config.SqsProps;
+import com.example.sqs.consumer.ConsumerGroup;
+import com.example.sqs.model.OrderMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.SmartLifecycle;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.*;
+
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Single FIFO Queue Consumer with Multiple Message Groups.
+ *
+ * Architecture:
+ * - One shared FIFO queue for all consumer groups
+ * - Message groups: ORDER-{customerId}, NOTIFICATION-{customerId}, ANALYTICS-{customerId}
+ * - Each consumer group filters messages by messageGroupId prefix
+ * - Maintains ordering within each message group
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class FifoMultiGroupConsumerService implements SmartLifecycle {
+
+    private final SqsClient sqsClient;
+    private final ObjectMapper jsonMapper;
+    private final List<ConsumerGroup> consumerGroups;
+    private final TaskExecutor taskExecutor;
+    private final SqsProps sqsConfig;
+
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicLong totalProcessed = new AtomicLong(0);
+    private final AtomicLong totalFailed = new AtomicLong(0);
+
+    private Semaphore flowController;
+
+    @Override
+    public void start() {
+        if (!running.compareAndSet(false, true)) {
+            log.warn("FIFO multi-group consumer already running");
+            return;
+        }
+
+        initializeFlowControl();
+        startConsumerGroups();
+        logStartupInfo();
+    }
+
+    @Override
+    public void stop() {
+        if (running.compareAndSet(true, false)) {
+            log.info("FIFO multi-group consumer stopping - processed: {}, failed: {}",
+                    totalProcessed.get(), totalFailed.get());
+        }
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running.get();
+    }
+
+    @Override
+    public int getPhase() {
+        return Integer.MAX_VALUE;
+    }
+
+    private void initializeFlowControl() {
+        int enabledGroups = (int) consumerGroups.stream().filter(ConsumerGroup::isEnabled).count();
+        int maxConcurrent = sqsConfig.getMaxMessagesPerPoll() * enabledGroups * 2;
+        this.flowController = new Semaphore(maxConcurrent);
+        log.info("Flow control initialized: {} max concurrent messages", maxConcurrent);
+    }
+
+    private void startConsumerGroups() {
+        consumerGroups.stream()
+                .filter(ConsumerGroup::isEnabled)
+                .forEach(this::startWorkerThreads);
+    }
+
+    private void startWorkerThreads(ConsumerGroup group) {
+        for (int i = 0; i < group.getWorkerThreads(); i++) {
+            taskExecutor.execute(() -> sharedQueuePollingLoop(group));
+        }
+        log.info("Started {} worker threads for group: {}",
+                group.getWorkerThreads(), group.getGroupName());
+    }
+
+    private void logStartupInfo() {
+        int enabledGroups = (int) consumerGroups.stream().filter(ConsumerGroup::isEnabled).count();
+        int totalWorkers = consumerGroups.stream()
+                .filter(ConsumerGroup::isEnabled)
+                .mapToInt(ConsumerGroup::getWorkerThreads)
+                .sum();
+
+        log.info("FIFO multi-group consumer ONLINE - {} groups, {} workers, queue: {}",
+                enabledGroups, totalWorkers, sqsConfig.getSharedQueueUrl());
+    }
+
+    private void sharedQueuePollingLoop(ConsumerGroup group) {
+        log.debug("Starting polling loop for group: {}", group.getGroupName());
+
+        while (running.get()) {
+            try {
+                pollAndProcessMessages(group);
+            } catch (InterruptedException e) {
+                log.info("Polling interrupted for group: {}", group.getGroupName());
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                log.error("Polling error for group: {} - will retry", group.getGroupName(), e);
+                sleepSafely(sqsConfig.getIdleBackoffMillis());
+            }
+        }
+    }
+
+    private void pollAndProcessMessages(ConsumerGroup group) throws InterruptedException {
+        ReceiveMessageResponse response = sqsClient.receiveMessage(buildReceiveRequest());
+        List<Message> messages = response.messages();
+
+        if (messages.isEmpty()) {
+            Thread.sleep(sqsConfig.getIdleBackoffMillis());
+            return;
+        }
+
+        log.debug("Group {} received {} messages from shared queue",
+                group.getGroupName(), messages.size());
+
+        for (Message message : messages) {
+            processMessageIfRelevant(group, message);
+        }
+    }
+
+    private ReceiveMessageRequest buildReceiveRequest() {
+        return ReceiveMessageRequest.builder()
+                .queueUrl(sqsConfig.getSharedQueueUrl())
+                .maxNumberOfMessages(sqsConfig.getMaxMessagesPerPoll())
+                .waitTimeSeconds(sqsConfig.getLongPollSeconds())
+                .visibilityTimeout(sqsConfig.getVisibilitySeconds())
+                .attributeNames("ApproximateReceiveCount", "MessageGroupId")
+                .build();
+    }
+
+    private void processMessageIfRelevant(ConsumerGroup group, Message message) {
+        String messageGroupId = message.attributes().get("MessageGroupId");
+
+        if (!group.shouldProcessMessageGroup(messageGroupId)) {
+            log.trace("Group {} skipping messageGroupId: {}", group.getGroupName(), messageGroupId);
+            return;
+        }
+
+        try {
+            flowController.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+
+        CompletableFuture
+                .runAsync(() -> processMessage(group, message), taskExecutor)
+                .whenComplete((result, throwable) -> {
+                    flowController.release();
+                    if (throwable != null) {
+                        log.error("Async processing failed for message: {}",
+                                message.messageId(), throwable);
+                    }
+                });
+    }
+
+    private void processMessage(ConsumerGroup group, Message message) {
+        String messageId = message.messageId();
+        String messageGroupId = message.attributes().get("MessageGroupId");
+
+        try {
+            OrderMessage orderMessage = jsonMapper.readValue(message.body(), OrderMessage.class);
+
+            log.debug("Processing message {} in group {} for messageGroupId: {}",
+                     messageId, group.getGroupName(), messageGroupId);
+
+            group.processMessage(orderMessage, message);
+
+            acknowledgeMessage(message);
+            totalProcessed.incrementAndGet();
+
+            log.debug("Message {} processed successfully by {}", messageId, group.getGroupName());
+
+        } catch (Exception e) {
+            handleProcessingFailure(group, message, e);
+        }
+    }
+
+    private void handleProcessingFailure(ConsumerGroup group, Message message, Exception error) {
+        String messageId = message.messageId();
+        int attemptCount = getAttemptCount(message);
+
+        totalFailed.incrementAndGet();
+
+        log.error("Processing failed - messageId: {}, group: {}, attempt: {}",
+                 messageId, group.getGroupName(), attemptCount, error);
+
+        if (attemptCount >= sqsConfig.getMaxRetryAttempts()) {
+            log.warn("Message {} exceeded max retries ({}), moving to DLQ",
+                    messageId, sqsConfig.getMaxRetryAttempts());
+
+            sendToDeadLetterQueue(message);
+            acknowledgeMessage(message);
+        }
+    }
+
+    private void acknowledgeMessage(Message message) {
+        try {
+            sqsClient.deleteMessage(DeleteMessageRequest.builder()
+                    .queueUrl(sqsConfig.getSharedQueueUrl())
+                    .receiptHandle(message.receiptHandle())
+                    .build());
+        } catch (Exception e) {
+            log.error("Failed to acknowledge message: {}", message.messageId(), e);
+        }
+    }
+
+    private int getAttemptCount(Message message) {
+        String countStr = message.attributes()
+                .getOrDefault("ApproximateReceiveCount", "1");
+        try {
+            return Integer.parseInt(countStr);
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    private void sendToDeadLetterQueue(Message message) {
+        log.warn("DLQ transfer not implemented for message: {}", message.messageId());
+    }
+
+    private static void sleepSafely(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
+import jakarta.validation.constraints.*;
+
+@Validated
+@ConfigurationProperties("aws.sqs")
+@Getter @Setter
+public class SqsProps {
+
+    @NotBlank(message = "Shared FIFO queue URL is required")
+    private String sharedQueueUrl;
+
+    @Min(1) @Max(10)
+    private int maxMessagesPerPoll = 10;
+
+    @Min(1) @Max(20)
+    private int longPollSeconds = 20;
+
+    @Min(1)
+    private int visibilitySeconds = 30;
+
+    @Min(1)
+    private int maxRetryAttempts = 3;
+
+    @Positive
+    private long idleBackoffMillis = 1_000L;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.consumer;
+
+import com.example.sqs.model.OrderMessage;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+public interface ConsumerGroup {
+    String getGroupName();
+    boolean isEnabled();
+    int getWorkerThreads();
+    boolean shouldProcessMessageGroup(String messageGroupId);
+    void processMessage(OrderMessage orderMessage, Message rawMessage) throws Exception;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.consumer.impl;
+
+import com.example.sqs.consumer.ConsumerGroup;
+import com.example.sqs.model.OrderMessage;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+@Slf4j
+@Component
+@ConfigurationProperties("consumer.groups.order-processing")
+@Getter @Setter
+public class OrderProcessingGroup implements ConsumerGroup {
+
+    private boolean enabled = true;
+    private int workerThreads = 5;
+
+    @Override
+    public String getGroupName() {
+        return "ORDER_PROCESSING";
+    }
+
+    @Override
+    public boolean shouldProcessMessageGroup(String messageGroupId) {
+        return messageGroupId != null && messageGroupId.startsWith("ORDER-");
+    }
+
+    @Override
+    public void processMessage(OrderMessage order, Message rawMessage) throws Exception {
+        String messageGroupId = rawMessage.attributes().get("MessageGroupId");
+        log.info("Processing order {} for customer {} (messageGroupId: {}, amount: ${})",
+                order.getOrderId(), order.getCustomerId(), messageGroupId, order.getOrderAmount());
+
+        validateOrder(order);
+        processPayment(order);
+        reserveInventory(order);
+        updateOrderStatus(order);
+
+        log.info("Order {} completed successfully", order.getOrderId());
+    }
+
+    private void validateOrder(OrderMessage order) throws Exception {
+        Thread.sleep(25);
+        if (order.getOrderAmount().doubleValue() <= 0) {
+            throw new IllegalArgumentException("Invalid order amount");
+        }
+        log.debug("Order validated: {}", order.getOrderId());
+    }
+
+    private void processPayment(OrderMessage order) throws Exception {
+        Thread.sleep(150);
+        if (order.getOrderId().contains("PAYMENT_FAIL")) {
+            throw new RuntimeException("Payment failed");
+        }
+        log.debug("Payment processed: {}", order.getOrderId());
+    }
+
+    private void reserveInventory(OrderMessage order) throws Exception {
+        Thread.sleep(100);
+        if (order.getOrderId().contains("OUT_OF_STOCK")) {
+            throw new RuntimeException("Out of stock");
+        }
+        log.debug("Inventory reserved: {}", order.getOrderId());
+    }
+
+    private void updateOrderStatus(OrderMessage order) throws Exception {
+        Thread.sleep(30);
+        log.debug("Order status updated: {}", order.getOrderId());
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.consumer.impl;
+
+import com.example.sqs.consumer.ConsumerGroup;
+import com.example.sqs.model.OrderMessage;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+@Slf4j
+@Component
+@ConfigurationProperties("consumer.groups.notification")
+@Getter @Setter
+public class NotificationGroup implements ConsumerGroup {
+
+    private boolean enabled = true;
+    private int workerThreads = 3;
+
+    @Override
+    public String getGroupName() {
+        return "NOTIFICATION";
+    }
+
+    @Override
+    public boolean shouldProcessMessageGroup(String messageGroupId) {
+        return messageGroupId != null && messageGroupId.startsWith("NOTIFICATION-");
+    }
+
+    @Override
+    public void processMessage(OrderMessage order, Message rawMessage) throws Exception {
+        String messageGroupId = rawMessage.attributes().get("MessageGroupId");
+        log.info("Processing notifications for order {} to customer {} (messageGroupId: {})",
+                order.getOrderId(), order.getCustomerId(), messageGroupId);
+
+        sendOrderConfirmationEmail(order);
+        sendPaymentConfirmationSms(order);
+        logNotificationHistory(order);
+
+        log.info("Notifications completed for order {}", order.getOrderId());
+    }
+
+    private void sendOrderConfirmationEmail(OrderMessage order) throws Exception {
+        Thread.sleep(200);
+        if (order.getOrderId().contains("EMAIL_FAIL")) {
+            throw new RuntimeException("Email service unavailable");
+        }
+        log.debug("Order confirmation email sent: {}", order.getOrderId());
+    }
+
+    private void sendPaymentConfirmationSms(OrderMessage order) throws Exception {
+        Thread.sleep(120);
+        log.debug("Payment confirmation SMS sent: {}", order.getOrderId());
+    }
+
+    private void logNotificationHistory(OrderMessage order) throws Exception {
+        Thread.sleep(40);
+        log.debug("Notification history logged: {}", order.getOrderId());
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.consumer.impl;
+
+import com.example.sqs.consumer.ConsumerGroup;
+import com.example.sqs.model.OrderMessage;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+@Slf4j
+@Component
+@ConfigurationProperties("consumer.groups.analytics")
+@Getter @Setter
+public class AnalyticsGroup implements ConsumerGroup {
+
+    private boolean enabled = true;
+    private int workerThreads = 2;
+
+    @Override
+    public String getGroupName() {
+        return "ANALYTICS";
+    }
+
+    @Override
+    public boolean shouldProcessMessageGroup(String messageGroupId) {
+        return messageGroupId != null && messageGroupId.startsWith("ANALYTICS-");
+    }
+
+    @Override
+    public void processMessage(OrderMessage order, Message rawMessage) throws Exception {
+        String messageGroupId = rawMessage.attributes().get("MessageGroupId");
+        log.info("Processing analytics for order {} from customer {} (messageGroupId: {}, amount: ${})",
+                order.getOrderId(), order.getCustomerId(), messageGroupId, order.getOrderAmount());
+
+        updateRealTimeMetrics(order);
+        updateCustomerProfile(order);
+        generateBusinessInsights(order);
+
+        log.info("Analytics completed for order {}", order.getOrderId());
+    }
+
+    private void updateRealTimeMetrics(OrderMessage order) throws Exception {
+        Thread.sleep(90);
+        log.debug("Real-time metrics updated: {}", order.getOrderId());
+    }
+
+    private void updateCustomerProfile(OrderMessage order) throws Exception {
+        Thread.sleep(130);
+        log.debug("Customer profile updated: {}", order.getCustomerId());
+    }
+
+    private void generateBusinessInsights(OrderMessage order) throws Exception {
+        Thread.sleep(110);
+        log.debug("Business insights generated: {}", order.getOrderId());
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.model;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+@Data
+public class OrderMessage {
+
+    @NotBlank(message = "Order ID is required")
+    @JsonProperty("orderId")
+    private String orderId;
+
+    @NotBlank(message = "Customer ID is required")
+    @JsonProperty("customerId")
+    private String customerId;
+
+    @NotNull(message = "Order amount is required")
+    @Positive(message = "Order amount must be positive")
+    @JsonProperty("orderAmount")
+    private BigDecimal orderAmount;
+
+    @JsonProperty("orderType")
+    private String orderType = "PURCHASE";
+
+    @JsonProperty("priority")
+    private String priority = "NORMAL";
+
+    @JsonProperty("timestamp")
+    private Instant timestamp = Instant.now();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.producer;
+
+import com.example.sqs.config.SqsProps;
+import com.example.sqs.model.OrderMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+
+import java.util.concurrent.CompletableFuture;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class FifoMultiGroupProducerService {
+
+    private final SqsClient sqsClient;
+    private final ObjectMapper jsonMapper;
+    private final SqsProps sqsConfig;
+
+    public String publishForOrderProcessing(OrderMessage order) {
+        String messageGroupId = "ORDER-" + order.getCustomerId();
+        return publishToSharedQueue(order, messageGroupId, "ORDER_PROCESSING");
+    }
+
+    public String publishForNotification(OrderMessage order) {
+        String messageGroupId = "NOTIFICATION-" + order.getCustomerId();
+        return publishToSharedQueue(order, messageGroupId, "NOTIFICATION");
+    }
+
+    public String publishForAnalytics(OrderMessage order) {
+        String messageGroupId = "ANALYTICS-" + order.getCustomerId();
+        return publishToSharedQueue(order, messageGroupId, "ANALYTICS");
+    }
+
+    public PublishAllResult publishToAllWorkflows(OrderMessage order) {
+        try {
+            String orderMsgId = publishForOrderProcessing(order);
+            String notificationMsgId = publishForNotification(order);
+            String analyticsMsgId = publishForAnalytics(order);
+
+            log.info("Published to all workflows - order: {}, customer: {}, messageIds: [{}, {}, {}]",
+                    order.getOrderId(), order.getCustomerId(),
+                    orderMsgId, notificationMsgId, analyticsMsgId);
+
+            return new PublishAllResult(orderMsgId, notificationMsgId, analyticsMsgId, true, null);
+
+        } catch (Exception e) {
+            log.error("Failed to publish to all workflows for order: {}", order.getOrderId(), e);
+            return new PublishAllResult(null, null, null, false, e.getMessage());
+        }
+    }
+
+    public CompletableFuture<PublishAllResult> publishToAllWorkflowsAsync(OrderMessage order) {
+        return CompletableFuture.supplyAsync(() -> publishToAllWorkflows(order));
+    }
+
+    private String publishToSharedQueue(OrderMessage order, String messageGroupId, String workflow) {
+        validateOrder(order);
+
+        try {
+            String messageBody = jsonMapper.writeValueAsString(order);
+            String deduplicationId = generateDeduplicationId(order, workflow);
+
+            SendMessageRequest request = SendMessageRequest.builder()
+                    .queueUrl(sqsConfig.getSharedQueueUrl())
+                    .messageBody(messageBody)
+                    .messageGroupId(messageGroupId)
+                    .messageDeduplicationId(deduplicationId)
+                    .build();
+
+            String messageId = sqsClient.sendMessage(request).messageId();
+
+            log.debug("Published to shared FIFO queue - workflow: {}, messageGroupId: {}, " +
+                     "orderId: {}, messageId: {}",
+                     workflow, messageGroupId, order.getOrderId(), messageId);
+
+            return messageId;
+
+        } catch (Exception e) {
+            log.error("Failed to publish {} workflow for order: {}", workflow, order.getOrderId(), e);
+            throw new RuntimeException("Failed to publish " + workflow + " workflow", e);
+        }
+    }
+
+    private void validateOrder(OrderMessage order) {
+        if (order == null) {
+            throw new IllegalArgumentException("Order message cannot be null");
+        }
+        if (order.getOrderId() == null || order.getOrderId().trim().isEmpty()) {
+            throw new IllegalArgumentException("Order ID is required");
+        }
+        if (order.getCustomerId() == null || order.getCustomerId().trim().isEmpty()) {
+            throw new IllegalArgumentException("Customer ID is required for message grouping");
+        }
+        if (order.getOrderAmount() == null || order.getOrderAmount().doubleValue() <= 0) {
+            throw new IllegalArgumentException("Valid order amount is required");
+        }
+    }
+
+    private String generateDeduplicationId(OrderMessage order, String workflow) {
+        return String.format("%s-%s-%s-%d",
+                order.getOrderId(),
+                workflow,
+                order.getOrderType(),
+                order.getTimestamp().toEpochMilli());
+    }
+
+    public record PublishAllResult(
+            String orderProcessingMessageId,
+            String notificationMessageId,
+            String analyticsMessageId,
+            boolean success,
+            String errorMessage
+    ) {}
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+package com.example.sqs.controller;
+
+import com.example.sqs.model.OrderMessage;
+import com.example.sqs.producer.FifoMultiGroupProducerService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+
+import java.time.Instant;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/orders")
+@RequiredArgsConstructor
+@Slf4j
+public class FifoMultiGroupController {
+
+    private final FifoMultiGroupProducerService producerService;
+
+    @PostMapping("/process")
+    public ResponseEntity<?> processOrder(@Valid @RequestBody OrderMessage order) {
+        try {
+            String messageId = producerService.publishForOrderProcessing(order);
+
+            return ResponseEntity.ok(Map.of(
+                    "messageId", messageId,
+                    "workflow", "ORDER_PROCESSING",
+                    "orderId", order.getOrderId(),
+                    "customerId", order.getCustomerId(),
+                    "messageGroupId", "ORDER-" + order.getCustomerId(),
+                    "timestamp", Instant.now()
+            ));
+
+        } catch (Exception e) {
+            return buildErrorResponse("ORDER_PROCESSING", order, e);
+        }
+    }
+
+    @PostMapping("/notify")
+    public ResponseEntity<?> notifyOrder(@Valid @RequestBody OrderMessage order) {
+        try {
+            String messageId = producerService.publishForNotification(order);
+
+            return ResponseEntity.ok(Map.of(
+                    "messageId", messageId,
+                    "workflow", "NOTIFICATION",
+                    "orderId", order.getOrderId(),
+                    "customerId", order.getCustomerId(),
+                    "messageGroupId", "NOTIFICATION-" + order.getCustomerId(),
+                    "timestamp", Instant.now()
+            ));
+
+        } catch (Exception e) {
+            return buildErrorResponse("NOTIFICATION", order, e);
+        }
+    }
+
+    @PostMapping("/analytics")
+    public ResponseEntity<?> analyticsOrder(@Valid @RequestBody OrderMessage order) {
+        try {
+            String messageId = producerService.publishForAnalytics(order);
+
+            return ResponseEntity.ok(Map.of(
+                    "messageId", messageId,
+                    "workflow", "ANALYTICS",
+                    "orderId", order.getOrderId(),
+                    "customerId", order.getCustomerId(),
+                    "messageGroupId", "ANALYTICS-" + order.getCustomerId(),
+                    "timestamp", Instant.now()
+            ));
+
+        } catch (Exception e) {
+            return buildErrorResponse("ANALYTICS", order, e);
+        }
+    }
+
+    @PostMapping("/all")
+    public ResponseEntity<?> submitToAllWorkflows(@Valid @RequestBody OrderMessage order) {
+        try {
+            FifoMultiGroupProducerService.PublishAllResult result =
+                    producerService.publishToAllWorkflows(order);
+
+            if (result.success()) {
+                return ResponseEntity.ok(Map.of(
+                        "orderProcessingMessageId", result.orderProcessingMessageId(),
+                        "notificationMessageId", result.notificationMessageId(),
+                        "analyticsMessageId", result.analyticsMessageId(),
+                        "workflows", "ALL",
+                        "orderId", order.getOrderId(),
+                        "customerId", order.getCustomerId(),
+                        "messageGroups", Map.of(
+                                "order", "ORDER-" + order.getCustomerId(),
+                                "notification", "NOTIFICATION-" + order.getCustomerId(),
+                                "analytics", "ANALYTICS-" + order.getCustomerId()
+                        ),
+                        "timestamp", Instant.now()
+                ));
+            } else {
+                return ResponseEntity.internalServerError().body(Map.of(
+                        "status", "FAILED",
+                        "workflows", "ALL",
+                        "error", result.errorMessage(),
+                        "orderId", order.getOrderId(),
+                        "customerId", order.getCustomerId(),
+                        "timestamp", Instant.now()
+                ));
+            }
+
+        } catch (Exception e) {
+            return buildErrorResponse("ALL_WORKFLOWS", order, e);
+        }
+    }
+
+    private ResponseEntity<?> buildErrorResponse(String workflow, OrderMessage order, Exception e) {
+        log.error("Failed to submit order {} to {} workflow", order.getOrderId(), workflow, e);
+
+        return ResponseEntity.internalServerError().body(Map.of(
+                "status", "FAILED",
+                "workflow", workflow,
+                "error", e.getMessage(),
+                "orderId", order.getOrderId(),
+                "customerId", order.getCustomerId(),
+                "timestamp", Instant.now()
+        ));
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+# Configuration (application.yml)
+
+aws:
+  sqs:
+    shared-queue-url: "https://sqs.us-east-1.amazonaws.com/123456789/orders-multi-group.fifo"
+    max-messages-per-poll: 10
+    long-poll-seconds: 20
+    visibility-seconds: 30
+    max-retry-attempts: 3
+    idle-backoff-millis: 1000
+
+consumer:
+  groups:
+    order-processing:
+      enabled: true
+      worker-threads: 5
+    notification:
+      enabled: true
+      worker-threads: 3
+    analytics:
+      enabled: true
+      worker-threads: 2
+
+spring:
+  task:
+    execution:
+      pool:
+        core-size: 15
+        max-size: 30
+        queue-capacity: 100
+
+logging:
+  level:
+    com.example.sqs: INFO
+    root: WARN
+
+# Additional Constants Class (Optional - For Better Code Organization)
+
+package com.example.sqs.constant;
+
+/**
+ * Constants for SQS attribute names to avoid magic strings.
+ */
+public final class SqsAttributeNames {
+
+    // Message attributes
+    public static final String APPROXIMATE_RECEIVE_COUNT = "ApproximateReceiveCount";
+    public static final String MESSAGE_GROUP_ID = "MessageGroupId";
+    public static final String SENT_TIMESTAMP = "SentTimestamp";
+    public static final String MESSAGE_DEDUPLICATION_ID = "MessageDeduplicationId";
+
+    // Queue attributes
+    public static final String QUEUE_ARN = "QueueArn";
+    public static final String APPROXIMATE_NUMBER_OF_MESSAGES = "ApproximateNumberOfMessages";
+    public static final String APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE = "ApproximateNumberOfMessagesNotVisible";
+
+    private SqsAttributeNames() {
+        // Utility class - prevent instantiation
+    }
+}
+
+# Usage Example (Optional Enhancement):
+
+import static com.example.sqs.constant.SqsAttributeNames.*;
+
+// In your service class:
+private ReceiveMessageRequest buildReceiveRequest() {
+    return ReceiveMessageRequest.builder()
+            .queueUrl(sqsConfig.getSharedQueueUrl())
+            .maxNumberOfMessages(sqsConfig.getMaxMessagesPerPoll())
+            .waitTimeSeconds(sqsConfig.getLongPollSeconds())
+            .visibilityTimeout(sqsConfig.getVisibilitySeconds())
+            .attributeNames(APPROXIMATE_RECEIVE_COUNT, MESSAGE_GROUP_ID)
+            .build();
+}
+
+private int getAttemptCount(Message message) {
+    String countStr = message.attributes().getOrDefault(APPROXIMATE_RECEIVE_COUNT, "1");
+    try {
+        return Integer.parseInt(countStr);
+    } catch (NumberFormatException e) {
+        return 1;
+    }
+}
+
+# ════════════════════════════════════════════════════════════════════════════════════════
+
+<properties>
+    <java.version>17</java.version>
+    <aws.sdk.version>2.26.11</aws.sdk.version>
+    <spring.boot.version>3.2.5</spring.boot.version>
+</properties>
+
+<dependencies>
+    <!-- Spring Boot Starters -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-configuration-processor</artifactId>
+        <optional>true</optional>
+    </dependency>
+
+    <!-- AWS SDK v2.26.11 -->
+    <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>sqs</artifactId>
+        <version>${aws.sdk.version}</version>
+    </dependency>
+
+    <!-- Jackson for JSON -->
+    <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- Lombok -->
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <scope>provided</scope>
+    </dependency>
+</dependencies>
+
+# Alternative Gradle (build.gradle)
+
+plugins {
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'java'
+}
+
+java {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+}
+
+ext {
+    awsSdkVersion = '2.26.11'
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation "software.amazon.awssdk:sqs:${awsSdkVersion}"
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+}
+
+# Configuration Properties Fix (application.yml)
+
+aws:
+  sqs:
+    shared-queue-url: "https://sqs.us-east-1.amazonaws.com/123456789/orders-multi-group.fifo"
+    max-messages-per-poll: 10
+    long-poll-seconds: 20
+    visibility-seconds: 30
+    max-retry-attempts: 3
+    idle-backoff-millis: 1000
+
+consumer:
+  groups:
+    order-processing:
+      enabled: true
+      worker-threads: 5
+    notification:
+      enabled: true
+      worker-threads: 3
+    analytics:
+      enabled: true
+      worker-threads: 2
+
+spring:
+  task:
+    execution:
+      pool:
+        core-size: 15
+        max-size: 30
+        queue-capacity: 100
+
+logging:
+  level:
+    com.example.sqs: INFO
+    root: WARN
+
+# Main Application Class (to enable configuration properties)
+
+package com.example.sqs;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+
+@SpringBootApplication
+@ConfigurationPropertiesScan
+public class SqsApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SqsApplication.class, args);
+    }
+}
+
+# ════════════════════════════════════════════════════════════════════════════════════════
+
+# AWS Infrastructure (CloudFormation)
+
+Resources:
+  OrdersMultiGroupQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: orders-multi-group.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeoutSeconds: 30
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrdersMultiGroupDLQ.Arn
+        maxReceiveCount: 3
+
+  OrdersMultiGroupDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: orders-multi-group-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+# ════════════════════════════════════
