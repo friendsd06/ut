@@ -1,0 +1,25 @@
+aws:
+  region: us-east-1
+  localstack:
+    enabled: true
+    endpoint: http://localhost.localstack.cloud:4566
+  sqs:
+    shared-queue-url: "${aws.localstack.endpoint}/000000000000/data-requests.fifo"
+    max-messages-per-poll: 10
+    long-poll-seconds: 20
+    visibility-seconds: 90
+    max-retry-attempts: 3
+    idle-backoff-millis: 1000
+
+# ??????????????? Consumer groups ???????????????
+consumer:
+  groups:
+    dataprep:
+      enabled: true
+      worker-threads: 3
+    datapipeline:
+      enabled: true
+      worker-threads: 4
+    approval:
+      enabled: true
+      worker-threads: 2
