@@ -1,0 +1,1297 @@
+package com.example.s3upload.config;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsClient;
+
+import java.net.URI;
+
+/**
+ * AWS SDK configuration for LocalStack.
+ * Enabled when 'aws.localstack.enabled=true' (default is true for dev).
+ */
+@Configuration
+@Slf4j
+@ConditionalOnProperty(name = "aws.localstack.enabled", havingValue = "true", matchIfMissing = true)
+public class LocalStackAwsConfig {
+
+    /** Local region defaults to us-east-1 so you don’t need to override it. */
+    @Value("${aws.region:us-east-1}")
+    private String awsRegion;
+
+    /** Base URI of LocalStack; tweak if you mapped a different port or host. */
+    @Value("${aws.localstack.endpoint:http://localhost.localstack.cloud:4566}")
+    private String localstackEndpoint;
+
+    @Bean
+    public SqsClient localSqsClient() {
+
+        log.info("Creating LocalStack SQS client → {}", localstackEndpoint);
+
+        return SqsClient.builder()
+                // LocalStack endpoint
+                .endpointOverride(URI.create(localstackEndpoint))
+                // Any region works, but keep it consistent with your queue URLs
+                .region(Region.of(awsRegion))
+                // Static dummy creds – LocalStack ignores them but the SDK insists
+                .credentialsProvider(
+                        StaticCredentialsProvider.create(
+                                AwsBasicCredentials.create("test", "test")))
+                .build();
+    }
+}
+==================================================
+package com.example.s3upload.sqs;
+
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+/**
+ * Consumer group that processes approval requests
+ * Handles messages with messageGroupId starting with "APPROVAL-"
+ */
+@Slf4j
+@Component
+@ConfigurationProperties("consumer.groups.approval")
+@Data
+public class ApprovalCallbackHandler implements ConsumerGroup {
+
+    // Step 1: Configuration properties (loaded from application.yml)
+    private boolean enabled = true;
+    private int workerThreads = 2; // Not used in FIFO mode but kept for config
+
+    /**
+     * Step 2: Return the name of this consumer group
+     */
+    @Override
+    public String getGroupName() {
+        return "APPROVAL";
+    }
+
+    /**
+     * Step 3: Check if this group should process the given message group ID
+     * This group handles all message groups with ID "APPROVAL"
+     */
+    @Override
+    public boolean shouldProcessMessageGroup(String messageGroupId) {
+
+        if (messageGroupId == null || messageGroupId.trim().isEmpty()) {
+            return false;
+        }
+        return "APPROVAL".equals(messageGroupId);
+    }
+
+    /**
+     * Step 6: Main message processing method
+     * Processes approval requests while maintaining FIFO order
+     */
+    @Override
+    public void processMessage(DataRequest dataRequest, Message rawMessage) throws Exception {
+        // Step 7: Extract metadata from the message
+        String messageGroupId = rawMessage.attributes().get("MessageGroupId");
+        String requestId = dataRequest.getRequestId();
+
+        // Step 8: Log the start of processing
+        log.info("FIFO: Starting approval process - requestId: {}, flowIndicator: {}, messageGroupId: {}",
+                requestId, dataRequest.getFlowIndicator(), messageGroupId);
+
+        try {
+            // Step 9: Execute approval steps in sequence
+
+
+            // Step 10: Log successful completion
+            log.info("FIFO: Approval process completed successfully - requestId: {}, subProduct: {}",
+                    requestId, dataRequest.getSubProduct());
+
+        } catch (Exception e) {
+            // Step 11: Log processing failure and re-throw for retry logic
+            log.error("FIFO: Approval process failed - requestId: {}, subProduct: {}",
+                    requestId, dataRequest.getSubProduct(), e);
+            throw e; // Re-throw to trigger retry mechanism
+        }
+    }
+
+}
+=========================================
+
+package com.example.s3upload.sqs;
+
+
+import software.amazon.awssdk.services.sqs.model.Message;
+
+/**
+ * Interface for consumer groups that process specific types of data requests
+ * Each consumer group handles messages with specific message group ID patterns
+ */
+public interface ConsumerGroup {
+
+    String getGroupName();
+
+
+    boolean isEnabled();
+
+    /**
+     * Step 3: Get worker thread count (kept for compatibility, not used in FIFO mode)
+     */
+    int getWorkerThreads();
+
+
+    boolean shouldProcessMessageGroup(String messageGroupId);
+
+    /**
+     * Step 5: Process a data request message
+     * This method is called synchronously to maintain FIFO ordering within message groups
+     *
+     * @param dataRequest The parsed business object
+     * @param rawMessage The original SQS message (for metadata)
+     * @throws Exception If processing fails (will trigger retry logic)
+     */
+    void processMessage(DataRequest dataRequest, Message rawMessage) throws Exception;
+}
+=======================================
+
+package com.example.s3upload.sqs;
+
+
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+/**
+ * Consumer group that processes data pipeline requests
+ * Handles messages with messageGroupId starting  "DATAPIPELINE"
+ */
+@Slf4j
+@Component
+@ConfigurationProperties("consumer.groups.datapipeline")
+@Data
+public class DataPipelineCallbackHandler implements ConsumerGroup {
+
+    // Step 1: Configuration properties (loaded from application.yml)
+    private boolean enabled = true;
+    private int workerThreads = 4; // Not used in FIFO mode but kept for config
+
+    /**
+     * Step 2: Return the name of this consumer group
+     */
+    @Override
+    public String getGroupName() {
+        return "DATAPIPELINE";
+    }
+
+    /**
+     * Step 3: Check if this group should process the given message group ID
+     * This group handles all message groups with ID "DATAPIPELINE"
+     */
+    @Override
+    public boolean shouldProcessMessageGroup(String messageGroupId) {
+        // Step 4: Validate input
+        if (messageGroupId == null || messageGroupId.trim().isEmpty()) {
+            return false;
+        }
+
+        // Step 5: Check if message group ID matches exactly
+        return "DATAPIPELINE".equals(messageGroupId);
+    }
+
+    /**
+     * Step 6: Main message processing method
+     * Processes data pipeline requests while maintaining FIFO order
+     */
+    @Override
+    public void processMessage(DataRequest dataRequest, Message rawMessage) throws Exception {
+        // Step 7: Extract metadata from the message
+        String messageGroupId = rawMessage.attributes().get("MessageGroupId");
+        String requestId = dataRequest.getRequestId();
+
+        // Step 8: Log the start of processing
+        log.info("FIFO: Starting data pipeline - requestId: {}, frequency: {}, messageGroupId: {}",
+                requestId, dataRequest.getFrequency(), messageGroupId);
+
+        try {
+            // Step 9: Execute data pipeline steps in sequence
+
+            // Step 10: Log successful completion
+            log.info("FIFO: Data pipeline completed successfully - requestId: {}, host: {}",
+                    requestId, dataRequest.getHost());
+
+        } catch (Exception e) {
+            // Step 11: Log processing failure and re-throw for retry logic
+            log.error("FIFO: Data pipeline failed - requestId: {}, host: {}",
+                    requestId, dataRequest.getHost(), e);
+            throw e; // Re-throw to trigger retry mechanism
+        }
+    }
+
+}
+===============================
+package com.example.s3upload.sqs;
+
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+/**
+ * Consumer group that processes data preparation requests
+ * Handles messages with messageGroupId "DATAPREP"
+ */
+@Slf4j
+@Component
+@ConfigurationProperties("consumer.groups.dataprep")
+@Data
+public class DataPrepCallbackHandler implements ConsumerGroup {
+
+    // Step 1: Configuration properties (loaded from application.yml)
+    private boolean enabled = true;
+    private int workerThreads = 3; // Not used in FIFO mode but kept for config
+
+    /**
+     * Step 2: Return the name of this consumer group
+     */
+    @Override
+    public String getGroupName() {
+        return "DATAPREP";
+    }
+
+    /**
+     * Step 3: Check if this group should process the given message group ID
+     * This group handles all message groups with ID "DATAPREP"
+     */
+    @Override
+    public boolean shouldProcessMessageGroup(String messageGroupId) {
+        // Step 4: Validate input
+        if (messageGroupId == null || messageGroupId.trim().isEmpty()) {
+            return false;
+        }
+
+        // Step 5: Check if message group ID matches exactly
+        return "DATAPREP".equals(messageGroupId);
+    }
+
+    /**
+     * Step 6: Main message processing method
+     * Processes data preparation requests while maintaining FIFO order
+     */
+    @Override
+    public void processMessage(DataRequest dataRequest, Message rawMessage) throws Exception {
+        // Step 7: Extract metadata from the message
+        String messageGroupId = rawMessage.attributes().get("MessageGroupId");
+        String requestId = dataRequest.getRequestId();
+
+        // Step 8: Log the start of processing
+        log.info("FIFO: Starting data preparation - requestId: {}, requestType: {}, messageGroupId: {}",
+                requestId, dataRequest.getRequestType(), messageGroupId);
+
+        try {
+            // Step 9: Execute data preparation steps in sequence
+
+            // Step 10: Log successful completion
+            log.info("FIFO: Data preparation completed successfully - requestId: {}, product: {}",
+                    requestId, dataRequest.getProduct());
+
+        } catch (Exception e) {
+            // Step 11: Log processing failure and re-throw for retry logic
+            log.error("FIFO: Data preparation failed - requestId: {}, product: {}",
+                    requestId, dataRequest.getProduct(), e);
+            throw e; // Re-throw to trigger retry mechanism
+        }
+    }
+
+}
+====================================
+package com.example.s3upload.sqs;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.constraints.*;
+import lombok.*;
+
+import java.time.Instant;
+
+/**
+ * Data-request payload used by all data workflows.
+ *
+ * 1.  Validation annotations ensure mandatory values.
+ * 2.  Lombok generates boiler-plate (getters, setters, etc.).
+ * 3.  @JsonInclude omits nulls, keeping the JSON small.
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class DataRequest {
+
+    @NotBlank(message = "Request ID is required")
+    private String requestId;
+
+    @NotBlank(message = "Request type is required")
+    private String requestType;
+
+    @NotBlank(message = "Report date is required")
+    private String reportDate;
+
+    private String product;
+    private String subProduct;
+
+    @NotNull(message = "Iteration count is required")
+    private Integer iterationCount;
+
+    private String frequency;
+    private String flowIndicator;   // dataprep / approval
+    private String flowStatus;      // success / failure
+    private String host;
+
+    /** Creation timestamp (auto-filled on build) */
+    @Builder.Default
+    private Instant timestamp = Instant.now();
+}
+=====================================
+package com.example.s3upload.sqs;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+/**
+ * Service responsible for starting and stopping FIFO SQS consumers
+ * during application lifecycle events
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class FifoConsumerStartupService {
+
+    // Step 1: Inject required services
+    private final FifoSqsConsumerService consumerService;
+    private final List<ConsumerGroup> consumerGroups;
+
+    /**
+     * Step 2: Start FIFO consumers when application is ready
+     * This method is automatically called by Spring Boot
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void startFifoConsumers() {
+        log.info("Application ready - starting FIFO SQS consumers...");
+
+        // Step 3: Check if any consumer groups are enabled
+        if (hasEnabledConsumerGroups()) {
+            // Step 4: Start the FIFO polling process
+            consumerService.startFifoPolling();
+
+            // Step 5: Log startup summary
+            logStartupSummary();
+        } else {
+            log.warn("No consumer groups are enabled - FIFO SQS consumer will not start");
+        }
+    }
+
+    /**
+     * Step 6: Stop FIFO consumers when application is shutting down
+     * This method is automatically called by Spring Boot
+     */
+    @EventListener(ContextClosedEvent.class)
+    public void stopFifoConsumers() {
+        log.info("Application shutting down - stopping FIFO SQS consumers...");
+
+        // Step 7: Request graceful shutdown
+        consumerService.stopPolling();
+    }
+
+    /**
+     * Step 8: Check if any consumer groups are enabled
+     */
+    private boolean hasEnabledConsumerGroups() {
+        return consumerGroups.stream().anyMatch(ConsumerGroup::isEnabled);
+    }
+
+    /**
+     * Step 9: Log startup information for monitoring
+     */
+    private void logStartupSummary() {
+        // Step 10: Count enabled consumer groups
+        int enabledGroupCount = (int) consumerGroups.stream()
+                .filter(ConsumerGroup::isEnabled)
+                .count();
+
+        log.info("FIFO SQS consumer started successfully");
+        log.info("  - Enabled consumer groups: {}", enabledGroupCount);
+        log.info("  - Processing from shared FIFO queue");
+
+        // Step 11: Log details for each enabled consumer group
+        consumerGroups.stream()
+                .filter(ConsumerGroup::isEnabled)
+                .forEach(this::logConsumerGroupInfo);
+    }
+
+    /**
+     * Step 12: Log information about a specific consumer group
+     */
+    private void logConsumerGroupInfo(ConsumerGroup group) {
+        String messageGroupPattern = determineMessageGroupPattern(group);
+        log.info("  - {} handles message groups: {}",
+                group.getGroupName(), messageGroupPattern);
+    }
+
+    /**
+     * Step 13: Determine what message group pattern a consumer group handles
+     */
+    private String determineMessageGroupPattern(ConsumerGroup group) {
+        // Step 14: Test with exact message group IDs to determine pattern
+        if (group.shouldProcessMessageGroup("DATAPREP")) {
+            return "DATAPREP";
+        }
+        if (group.shouldProcessMessageGroup("DATAPIPELINE")) {
+            return "DATAPIPELINE";
+        }
+        if (group.shouldProcessMessageGroup("APPROVAL")) {
+            return "APPROVAL";
+        }
+        return "unknown pattern";
+    }
+}
+================================
+package com.example.s3upload.sqs;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import java.time.Instant;
+import java.util.Map;
+
+/**
+ * REST controller for submitting DataRequest messages to FIFO queue
+ */
+@RestController
+@RequestMapping("/api/data-requests")
+@RequiredArgsConstructor
+@Slf4j
+public class FifoDataRequestController {
+
+    // Step 1: Inject producer service
+    private final FifoDataRequestProducerService producerService;
+
+    /**
+     * Step 2: Submit data request for data preparation workflow
+     */
+    @PostMapping("/dataprep")
+    public ResponseEntity<?> submitForDataPrep(@Valid @RequestBody DataRequest dataRequest) {
+        try {
+            // Step 3: Publish message to data prep workflow
+            String messageId = producerService.publishForDataPrep(dataRequest);
+
+            // Step 4: Return success response
+            return ResponseEntity.ok(Map.of(
+                    "messageId", messageId,
+                    "workflow", "DATAPREP",
+                    "requestId", dataRequest.getRequestId(),
+                    "requestType", dataRequest.getRequestType(),
+                    "messageGroupId", "DATAPREP",
+                    "timestamp", Instant.now()
+            ));
+
+        } catch (Exception e) {
+            // Step 5: Handle error and return error response
+            return buildErrorResponse("DATAPREP", dataRequest, e);
+        }
+    }
+
+    /**
+     * Step 6: Submit data request for data pipeline workflow
+     */
+    @PostMapping("/datapipeline")
+    public ResponseEntity<?> submitForDataPipeline(@Valid @RequestBody DataRequest dataRequest) {
+        try {
+            String messageId = producerService.publishForDataPipeline(dataRequest);
+
+            return ResponseEntity.ok(Map.of(
+                    "messageId", messageId,
+                    "workflow", "DATAPIPELINE",
+                    "requestId", dataRequest.getRequestId(),
+                    "requestType", dataRequest.getRequestType(),
+                    "messageGroupId", "DATAPIPELINE",
+                    "timestamp", Instant.now()
+            ));
+
+        } catch (Exception e) {
+            return buildErrorResponse("DATAPIPELINE", dataRequest, e);
+        }
+    }
+
+    /**
+     * Step 7: Submit data request for approval workflow
+     */
+    @PostMapping("/approval")
+    public ResponseEntity<?> submitForApproval(@Valid @RequestBody DataRequest dataRequest) {
+        try {
+            String messageId = producerService.publishForApproval(dataRequest);
+
+            return ResponseEntity.ok(Map.of(
+                    "messageId", messageId,
+                    "workflow", "APPROVAL",
+                    "requestId", dataRequest.getRequestId(),
+                    "requestType", dataRequest.getRequestType(),
+                    "messageGroupId", "APPROVAL",
+                    "timestamp", Instant.now()
+            ));
+
+        } catch (Exception e) {
+            return buildErrorResponse("APPROVAL", dataRequest, e);
+        }
+    }
+
+    /**
+     * Step 8: Submit data request to all workflows
+     */
+    @PostMapping("/all")
+    public ResponseEntity<?> submitToAllWorkflows(@Valid @RequestBody DataRequest dataRequest) {
+        try {
+            // Step 9: Publish to all three workflows
+            FifoDataRequestProducerService.PublishAllResult result =
+                    producerService.publishToAllWorkflows(dataRequest);
+
+            if (result.success()) {
+                // Step 10: Return success response with all message IDs
+                return ResponseEntity.ok(Map.of(
+                        "dataPrepMessageId", result.dataPrepMessageId(),
+                        "dataPipelineMessageId", result.dataPipelineMessageId(),
+                        "approvalMessageId", result.approvalMessageId(),
+                        "workflows", "ALL",
+                        "requestId", dataRequest.getRequestId(),
+                        "requestType", dataRequest.getRequestType(),
+                        "messageGroups", Map.of(
+                                "dataprep", "DATAPREP",
+                                "datapipeline", "DATAPIPELINE",
+                                "approval", "APPROVAL"
+                        ),
+                        "timestamp", Instant.now()
+                ));
+            } else {
+                // Step 11: Return error response if publishing failed
+                return ResponseEntity.internalServerError().body(Map.of(
+                        "status", "FAILED",
+                        "workflows", "ALL",
+                        "error", result.errorMessage(),
+                        "requestId", dataRequest.getRequestId(),
+                        "requestType", dataRequest.getRequestType(),
+                        "timestamp", Instant.now()
+                ));
+            }
+
+        } catch (Exception e) {
+            return buildErrorResponse("ALL_WORKFLOWS", dataRequest, e);
+        }
+    }
+
+    /**
+     * Step 12: Build error response for failed submissions
+     */
+    private ResponseEntity<?> buildErrorResponse(String workflow, DataRequest dataRequest, Exception e) {
+        // Step 13: Log the error
+        log.error("Failed to submit data request {} to {} workflow", dataRequest.getRequestId(), workflow, e);
+
+        // Step 14: Return error response
+        return ResponseEntity.internalServerError().body(Map.of(
+                "status", "FAILED",
+                "workflow", workflow,
+                "error", e.getMessage(),
+                "requestId", dataRequest.getRequestId(),
+                "requestType", dataRequest.getRequestType(),
+                "timestamp", Instant.now()
+        ));
+    }
+}
+=================================
+package com.example.s3upload.sqs;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * Producer service for publishing DataRequest messages to FIFO queue
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class FifoDataRequestProducerService {
+
+    // Step 1: Inject required dependencies
+    private final SqsClient sqsClient;
+    private final ObjectMapper jsonMapper;
+    private final SqsProps sqsConfig;
+
+    /**
+     * Step 2: Publish message for data preparation workflow
+     */
+    public String publishForDataPrep(DataRequest dataRequest) {
+        String messageGroupId = "DATAPREP";
+        return publishToFifoQueue(dataRequest, messageGroupId, "DATAPREP");
+    }
+
+    /**
+     * Step 3: Publish message for data pipeline workflow
+     */
+    public String publishForDataPipeline(DataRequest dataRequest) {
+        String messageGroupId = "DATAPIPELINE";
+        return publishToFifoQueue(dataRequest, messageGroupId, "DATAPIPELINE");
+    }
+
+    /**
+     * Step 4: Publish message for approval workflow
+     */
+    public String publishForApproval(DataRequest dataRequest) {
+        String messageGroupId = "APPROVAL";
+        return publishToFifoQueue(dataRequest, messageGroupId, "APPROVAL");
+    }
+
+    /**
+     * Step 5: Publish to all workflows for a complete data processing cycle
+     */
+    public PublishAllResult publishToAllWorkflows(DataRequest dataRequest) {
+        try {
+            // Step 6: Publish to all three workflows
+            String dataPrepMsgId = publishForDataPrep(dataRequest);
+            String dataPipelineMsgId = publishForDataPipeline(dataRequest);
+            String approvalMsgId = publishForApproval(dataRequest);
+
+            // Step 7: Log successful publishing
+            log.info("Published to all FIFO workflows - requestId: {}, requestType: {}, messageIds: [{}, {}, {}]",
+                    dataRequest.getRequestId(), dataRequest.getRequestType(),
+                    dataPrepMsgId, dataPipelineMsgId, approvalMsgId);
+
+            return new PublishAllResult(dataPrepMsgId, dataPipelineMsgId, approvalMsgId, true, null);
+
+        } catch (Exception e) {
+            // Step 8: Handle publishing failure
+            log.error("Failed to publish to FIFO workflows for requestId: {}", dataRequest.getRequestId(), e);
+            return new PublishAllResult(null, null, null, false, e.getMessage());
+        }
+    }
+
+    /**
+     * Step 9: Async version of publish to all workflows
+     */
+    public CompletableFuture<PublishAllResult> publishToAllWorkflowsAsync(DataRequest dataRequest) {
+        return CompletableFuture.supplyAsync(() -> publishToAllWorkflows(dataRequest));
+    }
+
+    /**
+     * Step 10: Core method to publish message to FIFO queue
+     */
+    private String publishToFifoQueue(DataRequest dataRequest, String messageGroupId, String workflow) {
+        // Step 11: Validate the data request
+        validateDataRequest(dataRequest);
+
+        try {
+            // Step 12: Convert data request to JSON
+            String messageBody = jsonMapper.writeValueAsString(dataRequest);
+
+            // Step 13: Generate unique deduplication ID
+            String deduplicationId = generateDeduplicationId(dataRequest, workflow);
+
+            // Step 14: Build SQS send message request
+            SendMessageRequest request = SendMessageRequest.builder()
+                    .queueUrl(sqsConfig.getSharedQueueUrl())
+                    .messageBody(messageBody)
+                    .messageGroupId(messageGroupId)
+                    .messageDeduplicationId(deduplicationId)
+                    .build();
+
+            // Step 15: Send message to SQS
+            String messageId = sqsClient.sendMessage(request).messageId();
+
+            // Step 16: Log successful publishing
+            log.debug("Published to FIFO queue - workflow: {}, messageGroupId: {}, " +
+                            "requestId: {}, messageId: {}",
+                    workflow, messageGroupId, dataRequest.getRequestId(), messageId);
+
+            return messageId;
+
+        } catch (Exception e) {
+            // Step 17: Handle publishing error
+            log.error("Failed to publish {} workflow for requestId: {}", workflow, dataRequest.getRequestId(), e);
+            throw new RuntimeException("Failed to publish " + workflow + " workflow", e);
+        }
+    }
+
+    /**
+     * Step 18: Validate data request before publishing
+     */
+    private void validateDataRequest(DataRequest dataRequest) {
+        // Step 19: Check for null request
+        if (dataRequest == null) {
+            throw new IllegalArgumentException("DataRequest cannot be null");
+        }
+
+        // Step 20: Check required fields
+        if (dataRequest.getRequestId() == null || dataRequest.getRequestId().trim().isEmpty()) {
+            throw new IllegalArgumentException("Request ID is required");
+        }
+
+        if (dataRequest.getRequestType() == null || dataRequest.getRequestType().trim().isEmpty()) {
+            throw new IllegalArgumentException("Request type is required for FIFO message grouping");
+        }
+
+        if (dataRequest.getReportDate() == null || dataRequest.getReportDate().trim().isEmpty()) {
+            throw new IllegalArgumentException("Report date is required");
+        }
+
+        if (dataRequest.getIterationCount() == null || dataRequest.getIterationCount() <= 0) {
+            throw new IllegalArgumentException("Valid iteration count is required");
+        }
+    }
+
+    /**
+     * Step 21: Generate unique deduplication ID for FIFO queue
+     */
+    private String generateDeduplicationId(DataRequest dataRequest, String workflow) {
+        // Step 22: Create unique ID using request details and timestamp
+        return String.format("%s-%s-%s-%d",
+                dataRequest.getRequestId(),
+                workflow,
+                dataRequest.getRequestType(),
+                dataRequest.getTimestamp().toEpochMilli());
+    }
+
+    /**
+     * Step 23: Result record for publish all operations
+     */
+    public record PublishAllResult(
+            String dataPrepMessageId,
+            String dataPipelineMessageId,
+            String approvalMessageId,
+            boolean success,
+            String errorMessage
+    ) {}
+}
+==============================
+package com.example.s3upload.sqs;
+
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Production-ready FIFO SQS Consumer Service for DataRequest processing
+ *
+ * This service handles a single FIFO queue with multiple message groups.
+ * It ensures messages within the same group are processed in order (FIFO),
+ * while allowing parallel processing across different message groups.
+ *
+ * Architecture:
+ * - Single shared FIFO queue for all consumer groups
+ * - Message groups: DATAPREP, DATAPIPELINE, APPROVAL
+ * - Sequential processing within each message group
+ * - Parallel processing across different message groups
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class FifoSqsConsumerService {
+
+    // Step 1: Inject required dependencies
+    private final SqsClient sqsClient;
+    private final ObjectMapper jsonMapper;
+    private final List<ConsumerGroup> consumerGroups;
+    private final SqsProps sqsConfig;
+
+    // Step 2: Track processing state per message group to maintain FIFO ordering
+    // Key = messageGroupId (e.g., "DATAPREP")
+    // Value = AtomicBoolean indicating if this group is currently being processed
+    private final Map<String, AtomicBoolean> messageGroupLocks = new ConcurrentHashMap<>();
+
+    // Step 3: Control flag for graceful shutdown
+    private volatile boolean isRunning = true;
+
+    /**
+     * Step 4: Main entry point - starts the FIFO polling loop
+     * This method runs asynchronously using Spring's @Async
+     */
+    @Async("sqsTaskExecutor")
+    public CompletableFuture<Void> startFifoPolling() {
+        log.debug("Starting FIFO SQS polling for shared queue: {}", sqsConfig.getSharedQueueUrl());
+
+        // Step 5: Continue polling until shutdown is requested
+        while (isRunning && hasEnabledConsumerGroups()) {
+            try {
+                // Step 6: Poll messages and process them
+                pollAndProcessMessages();
+
+            } catch (InterruptedException e) {
+                // Step 7: Handle graceful shutdown
+                log.info("FIFO polling interrupted - shutting down gracefully");
+                Thread.currentThread().interrupt();
+                break;
+
+            } catch (Exception e) {
+                // Step 8: Handle unexpected errors and continue
+                log.error("Unexpected error in FIFO polling - will retry", e);
+                waitBeforeRetry();
+            }
+        }
+
+        log.debug("FIFO polling stopped");
+        return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Step 9: Core polling and processing method
+     * Retrieves messages from SQS and processes each one
+     */
+    private void pollAndProcessMessages() throws InterruptedException {
+        // Step 10: Request messages from SQS FIFO queue
+        ReceiveMessageResponse response = receiveMessagesFromQueue();
+        List<Message> messages = response.messages();
+
+        // Step 11: If no messages, wait before next poll
+        if (messages.isEmpty()) {
+            Thread.sleep(sqsConfig.getIdleBackoffMillis());
+            return;
+        }
+
+        log.debug("Received {} messages from FIFO queue", messages.size());
+
+        // Step 12: Process each message individually
+        for (Message message : messages) {
+            processIndividualMessage(message);
+        }
+    }
+
+    /**
+     * Step 13: Process a single message from the queue
+     * Determines which consumer group should handle it and maintains FIFO order
+     */
+    private void processIndividualMessage(Message message) {
+
+        // Step 14: Extract message group ID (e.g., "DATAPREP")
+        String messageGroupId = "DATAPREP";
+
+
+        // Step 15: Validate message has a group ID
+        if (messageGroupId == null || messageGroupId.trim().isEmpty()) {
+            log.warn("Message {} has no MessageGroupId - acknowledging and skipping", message.messageId());
+            deleteMessageFromQueue(message);
+            return;
+        }
+
+        // Step 16: Find which consumer group should handle this message
+        ConsumerGroup targetConsumerGroup = findConsumerGroupForMessage(messageGroupId);
+
+        if (targetConsumerGroup == null) {
+            log.warn("No consumer group found for messageGroupId: {} - acknowledging", messageGroupId);
+            deleteMessageFromQueue(message);
+            return;
+        }
+
+        // Step 17: Process message while maintaining FIFO order within the group
+        processMessageWithFifoOrdering(targetConsumerGroup, message, messageGroupId);
+    }
+
+    /**
+     * Step 18: Process message with FIFO ordering guarantee
+     * Ensures only one message per messageGroupId is processed at a time
+     */
+    private void processMessageWithFifoOrdering(ConsumerGroup consumerGroup, Message message, String messageGroupId) {
+        // Step 19: Get or create a processing lock for this message group
+        AtomicBoolean groupLock = messageGroupLocks.computeIfAbsent(messageGroupId, k -> new AtomicBoolean(false));
+
+        // Step 20: Try to acquire the lock for this message group
+        boolean lockAcquired = groupLock.compareAndSet(false, true);
+
+        if (!lockAcquired) {
+            // Step 21: Another message from this group is being processed
+            // Don't acknowledge - let visibility timeout expire for retry
+            log.debug("Message group {} is busy processing another message. Message {} will be retried",
+                    messageGroupId, message.messageId());
+            return;
+        }
+
+        try {
+            // Step 22: Process the message synchronously to maintain order
+            executeMessageProcessing(consumerGroup, message);
+
+            // Step 23: Message processed successfully - acknowledge it
+            deleteMessageFromQueue(message);
+
+            log.debug("FIFO message {} processed successfully for group {}",
+                    message.messageId(), messageGroupId);
+
+        } catch (Exception e) {
+            // Step 24: Handle processing failure
+            handleMessageProcessingFailure(consumerGroup, message, e);
+
+        } finally {
+            // Step 25: Always release the lock to allow next message in group
+            groupLock.set(false);
+        }
+    }
+
+    /**
+     * Step 26: Execute the actual message processing logic
+     * Converts SQS message to business object and calls consumer group
+     */
+    private void executeMessageProcessing(ConsumerGroup consumerGroup, Message message) throws Exception {
+
+
+
+        String messageId = message.messageId();
+        String messageGroupId = extractMessageGroupId(message);
+
+        // Step 27: Parse JSON message body into DataRequest object
+        DataRequest dataRequest = parseMessageBody(message.body());
+
+        log.debug("Processing FIFO message {} in group {} for messageGroupId: {}",
+                messageId, consumerGroup.getGroupName(), messageGroupId);
+
+        // Step 28: Call the consumer group's processing logic
+        // This is synchronous to maintain FIFO order within the message group
+        consumerGroup.processMessage(dataRequest, message);
+
+        log.debug("FIFO message {} completed by consumer group {}", messageId, consumerGroup.getGroupName());
+    }
+
+    /**
+     * Step 29: Handle message processing failures
+     * Implements retry logic and dead letter queue handling
+     */
+    private void handleMessageProcessingFailure(ConsumerGroup consumerGroup, Message message, Exception error) {
+        String messageId = message.messageId();
+        String messageGroupId = extractMessageGroupId(message);
+        int attemptCount = getMessageAttemptCount(message);
+
+        // Step 30: Log the processing failure with details
+        log.error("FIFO processing failed - messageId: {}, consumerGroup: {}, messageGroupId: {}, attempt: {}",
+                messageId, consumerGroup.getGroupName(), messageGroupId, attemptCount, error);
+
+        // Step 31: Check if message exceeded maximum retry attempts
+        if (attemptCount >= sqsConfig.getMaxRetryAttempts()) {
+            // Step 32: Max retries exceeded - send to dead letter queue
+            log.warn("FIFO message {} exceeded max retries ({}), will go to DLQ",
+                    messageId, sqsConfig.getMaxRetryAttempts());
+            deleteMessageFromQueue(message);
+        } else {
+            // Step 33: Retries remaining - don't acknowledge, let it retry
+            log.info("FIFO message {} will be retried (attempt {}/{})",
+                    messageId, attemptCount, sqsConfig.getMaxRetryAttempts());
+        }
+    }
+
+    /**
+     * Step 34: Graceful shutdown method
+     */
+    public void stopPolling() {
+        log.info("FIFO polling stop requested");
+        isRunning = false;
+    }
+
+    // ========== Helper Methods ==========
+
+    /**
+     * Step 35: Check if any consumer groups are enabled
+     */
+    private boolean hasEnabledConsumerGroups() {
+        boolean hasEnabled = consumerGroups.stream().anyMatch(ConsumerGroup::isEnabled);
+        if (!hasEnabled) {
+            log.warn("No consumer groups are enabled");
+        }
+        return hasEnabled;
+    }
+
+    /**
+     * Step 36: Find the consumer group that should handle a specific message group
+     */
+    private ConsumerGroup findConsumerGroupForMessage(String messageGroupId) {
+        for (ConsumerGroup group : consumerGroups) {
+            if (group.isEnabled() && group.shouldProcessMessageGroup(messageGroupId)) {
+                return group;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Step 37: Receive messages from SQS queue using NEW API
+     */
+    private ReceiveMessageResponse receiveMessagesFromQueue() {
+        ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                .queueUrl(sqsConfig.getSharedQueueUrl())
+                .maxNumberOfMessages(sqsConfig.getMaxMessagesPerPoll())   // 1-10
+                .waitTimeSeconds(sqsConfig.getLongPollSeconds())          // long-poll
+                .visibilityTimeout(sqsConfig.getVisibilitySeconds())
+
+                // ---- NEW API: messageSystemAttributeNames ----
+                .messageSystemAttributeNames(
+                        MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT,
+                        MessageSystemAttributeName.MESSAGE_GROUP_ID,
+                        MessageSystemAttributeName.MESSAGE_DEDUPLICATION_ID)
+                // all *custom* message attributes
+                .messageAttributeNames("All")
+                .messageSystemAttributeNames(MessageSystemAttributeName.ALL)
+                .build();
+        return sqsClient.receiveMessage(request);
+    }
+
+    /**
+     * Step 38: Parse JSON message body into DataRequest object
+     */
+    private DataRequest parseMessageBody(String messageBody) throws Exception {
+        try {
+            return jsonMapper.readValue(messageBody, DataRequest.class);
+        } catch (Exception e) {
+            log.error("Failed to parse message body: {}", messageBody, e);
+            throw new Exception("Invalid message format", e);
+        }
+    }
+
+    /**
+     * Step 39: Delete/acknowledge message from SQS queue
+     */
+    private void deleteMessageFromQueue(Message message) {
+        try {
+            DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                    .queueUrl(sqsConfig.getSharedQueueUrl())
+                    .receiptHandle(message.receiptHandle())
+                    .build();
+
+            sqsClient.deleteMessage(deleteRequest);
+            log.trace("Acknowledged message: {}", message.messageId());
+
+        } catch (Exception e) {
+            log.error("Failed to acknowledge message: {}", message.messageId(), e);
+        }
+    }
+
+    /** Step 40: Extract MessageGroupId (NEW API) */
+    private String extractMessageGroupId(Message msg) {
+        String groupId = msg.attributes()
+                .get(MessageSystemAttributeName.MESSAGE_GROUP_ID);
+        return groupId;   // null if not requested
+    }
+
+    /** Step 41: Read how many times SQS delivered this message (NEW API) */
+    private int getMessageAttemptCount(Message msg) {
+        String raw = msg.attributes()
+                .getOrDefault(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT, "1");
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ex) {
+            log.warn("ApproximateReceiveCount parse error: {}", raw);
+            return 1;
+        }
+    }
+
+    /**
+     * Step 42: Wait before retrying after an error
+     */
+    private void waitBeforeRetry() {
+        try {
+            Thread.sleep(sqsConfig.getIdleBackoffMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+=========================================
+package com.example.s3upload.sqs;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+
+@Configuration
+@Slf4j
+public class JacksonConfig {
+
+    /**
+     * Step 1: Create primary ObjectMapper bean for JSON operations
+     */
+    @Bean
+    @Primary
+    public ObjectMapper createObjectMapper() {
+        log.info("Creating custom ObjectMapper for SQS message processing");
+
+        // Step 2: Create ObjectMapper instance
+        ObjectMapper mapper = new ObjectMapper();
+
+        // Step 3: Register Java Time module for Instant, LocalDateTime support
+        mapper.registerModule(new JavaTimeModule());
+
+        // Step 4: Disable writing dates as timestamps (use ISO-8601 format instead)
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        // Step 5: Don't fail on unknown properties (forward compatibility)
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+
+        // Step 6: Don't fail on null for primitives (use default values)
+        mapper.disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES);
+
+        log.info("ObjectMapper configured successfully with Java Time support and robust parsing");
+
+        return mapper;
+    }
+}
+==============================
+package com.example.s3upload.sqs;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
+
+/**
+ * SQS Asynchronous Processing Configuration
+ */
+@Configuration
+@EnableAsync
+@Slf4j
+public class SqsAsyncConfig {
+
+    /**
+     * Step 1: Create dedicated thread pool executor for SQS message processing
+     * Bean name: sqsTaskExecutor (used in @Async("sqsTaskExecutor"))
+     */
+    @Bean("sqsTaskExecutor")
+    public Executor createSqsTaskExecutor() {
+        log.info("Creating SQS Task Executor with custom thread pool configuration");
+
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+
+        // Step 3: Core pool size - minimum threads always kept alive
+        executor.setCorePoolSize(5);
+
+        // Step 4: Maximum pool size - maximum threads under high load
+        executor.setMaxPoolSize(10);
+
+        // Step 5: Queue capacity - pending tasks before creating new threads
+        executor.setQueueCapacity(100);
+
+        // Step 6: Keep alive time - how long extra threads stay alive when idle
+        executor.setKeepAliveSeconds(60);
+
+        // Step 7: Thread naming pattern for easier debugging and monitoring
+        executor.setThreadNamePrefix("SQS-Consumer-");
+
+        // Step 8: Rejection policy when thread pool and queue are full
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+
+        // Step 9: Graceful shutdown configuration
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+
+        // Step 10: Initialize the executor
+        executor.initialize();
+
+        log.info("SQS Task Executor initialized - Core: {}, Max: {}, Queue: {}",
+                executor.getCorePoolSize(), executor.getMaxPoolSize(), executor.getQueueCapacity());
+
+        return executor;
+    }
+}
+================
+
+package com.example.s3upload.sqs;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+import org.springframework.validation.annotation.Validated;
+import jakarta.validation.constraints.*;
+
+/**
+ * SQS Configuration Properties
+ *
+ * This class holds all SQS-related configuration values loaded from application.yml.
+ * It provides type-safe configuration with validation to ensure proper values.
+ */
+@Component
+@ConfigurationProperties("aws.sqs")
+@Validated
+@Data
+public class SqsProps {
+
+    @NotBlank(message = "Shared FIFO queue URL is required and cannot be empty")
+    private String sharedQueueUrl;
+
+    // Step 2: Maximum messages per poll - SQS allows 1-10 messages per request
+    @Min(value = 1, message = "Max messages per poll must be at least 1")
+    @Max(value = 10, message = "Max messages per poll cannot exceed 10 (SQS limit)")
+    private int maxMessagesPerPoll = 10;
+
+    // Step 3: Long polling wait time - SQS allows 0-20 seconds
+    @Min(value = 0, message = "Long poll seconds must be at least 0")
+    @Max(value = 20, message = "Long poll seconds cannot exceed 20 (SQS limit)")
+    private int longPollSeconds = 20;
+
+    // Step 4: Visibility timeout - How long message stays hidden after being received
+    @Min(value = 1, message = "Visibility seconds must be at least 1")
+    @Max(value = 43200, message = "Visibility seconds cannot exceed 43200 (12 hours)")
+    private int visibilitySeconds = 90;
+
+    // Step 5: Maximum retry attempts before message goes to DLQ
+    @Min(value = 1, message = "Max retry attempts must be at least 1")
+    @Max(value = 10, message = "Max retry attempts should not exceed 10")
+    private int maxRetryAttempts = 3;
+
+    // Step 6: Wait time when no messages are available (backoff strategy)
+    @Positive(message = "Idle backoff must be positive")
+    @Max(value = 30000, message = "Idle backoff should not exceed 30 seconds")
+    private long idleBackoffMillis = 1000L;
+
+    // Step 7: Additional validation method
+    public void validateConfiguration() {
+        // Step 8: Ensure queue URL is a FIFO queue
+        if (sharedQueueUrl != null && !sharedQueueUrl.endsWith(".fifo")) {
+            throw new IllegalArgumentException("Queue URL must end with .fifo for FIFO queues");
+        }
+
+        // Step 9: Ensure visibility timeout is reasonable for processing time
+        if (visibilitySeconds < 30) {
+            throw new IllegalArgumentException("Visibility timeout should be at least 30 seconds for data processing");
+        }
+    }
+}
