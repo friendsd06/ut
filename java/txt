@@ -23,3 +23,1020 @@ consumer:
     approval:
       enabled: true
       worker-threads: 2
+
+      ================================
+      package com.example.sqs.config;
+      import lombok.Data;
+      import org.springframework.boot.context.properties.ConfigurationProperties;
+      import org.springframework.validation.annotation.Validated;
+
+      import jakarta.validation.constraints.*;
+      /**
+       * Configuration properties for SQS connectivity and listener scaling.
+       *
+       * Maps to application.yml properties under 'spring.cloud.aws.sqs' prefix.
+       * Provides centralized control over queue connection, polling behavior,
+       * and per-workflow concurrency limits.
+       */
+      @ConfigurationProperties(prefix = SqsConfigurationProperties.PROPERTY_PREFIX)
+      @Validated
+      @Data
+      public class SqsConfigurationProperties {
+
+          public static final String PROPERTY_PREFIX = "spring.cloud.aws.sqs";
+
+          // Connection Settings
+          @NotBlank(message = "SQS queue URL cannot be blank")
+          private final String sharedQueueUrl;
+
+          @NotBlank(message = "AWS region cannot be blank")
+          private final String awsRegion;
+
+
+          private final int messagePollingTimeoutSeconds;
+
+
+          private final int messageVisibilityTimeoutSeconds;
+
+
+          private final int dataPreparationConcurrency;
+
+
+          private final int dataPipelineConcurrency;
+
+          private final int approvalWorkflowConcurrency;
+      }
+================================================================
+package com.example.sqs.config;
+
+import io.awspring.cloud.sqs.config.SqsMessageListenerContainerFactory;
+import io.awspring.cloud.sqs.listener.acknowledgement.AcknowledgementOrdering;
+import io.awspring.cloud.sqs.listener.acknowledgement.handler.AcknowledgementMode;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+
+import java.time.Duration;
+
+/**
+ * Spring configuration that creates dedicated SQS listener container factories.
+ *
+ * Each workflow group gets its own factory with independent thread pools,
+ * allowing fine-grained scaling control without cross-workflow interference.
+ * All factories share the same SQS client but maintain separate concurrency limits.
+ */
+@Configuration
+@EnableConfigurationProperties(SqsConfigurationProperties.class)
+@RequiredArgsConstructor
+@Slf4j
+public class SqsListenerConfiguration {
+
+    private static final String URI = "";
+    private final SqsConfigurationProperties sqsProperties;
+
+    /**
+     * Creates the shared SQS async client used by all listener factories.
+     * Configured with default AWS credentials and specified region.
+     */
+    @Bean
+    @Primary
+    public SqsAsyncClient localStackSqsAsyncClient() {
+
+
+        return SqsAsyncClient.builder()
+                .region(Region.of(sqsProperties.getAwsRegion()))
+                .endpointOverride(java.net.URI.create("https://sqs.us-east-1.localhost.localstack.cloud:4566"))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create("localstack", "localstack")
+                ))
+                .build();
+    }
+
+
+    /**
+     * Creates a configured SQS listener container factory with specified concurrency.
+     *
+     * @param maxConcurrentMessages Maximum number of messages processed simultaneously
+     * @param factoryName Name of the factory for logging purposes
+     * @return Configured factory ready for listener registration
+     */
+    private SqsMessageListenerContainerFactory<Object> createListenerFactory(
+            int maxConcurrentMessages, String factoryName) {
+
+        log.info("Creating {} with concurrency: {}", factoryName, maxConcurrentMessages);
+        int messagesPerPoll = Math.min(maxConcurrentMessages, 10);
+
+        return SqsMessageListenerContainerFactory.builder()
+                .sqsAsyncClient(localStackSqsAsyncClient())
+                .configure(opts -> opts
+                        .acknowledgementMode(AcknowledgementMode.MANUAL)
+                        .acknowledgementOrdering(AcknowledgementOrdering.ORDERED_BY_GROUP)
+                        .maxConcurrentMessages(maxConcurrentMessages)
+                        .maxMessagesPerPoll(messagesPerPoll)
+                        .pollTimeout(Duration.ofSeconds(sqsProperties.getMessagePollingTimeoutSeconds()))
+                        .messageVisibility(Duration.ofSeconds(sqsProperties.getMessageVisibilityTimeoutSeconds()))
+                ).build();
+    }
+
+    /**
+     * Factory for data preparation workflow listeners.
+     * Scales independently based on data prep workload requirements.
+     */
+    @Bean("dataPreparationListenerFactory")
+    public SqsMessageListenerContainerFactory<Object> dataPreparationListenerFactory() {
+        return createListenerFactory(
+                sqsProperties.getDataPreparationConcurrency(),
+                "DataPreparationListenerFactory"
+        );
+    }
+
+    /**
+     * Factory for data pipeline workflow listeners.
+     * Optimized for main processing workload throughput.
+     */
+    @Bean("dataPipelineListenerFactory")
+    public SqsMessageListenerContainerFactory<Object> dataPipelineListenerFactory() {
+        return createListenerFactory(
+                sqsProperties.getDataPipelineConcurrency(),
+                "DataPipelineListenerFactory"
+        );
+    }
+
+    /**
+     * Factory for approval workflow listeners.
+     * Typically lower concurrency due to human-approval bottlenecks.
+     */
+    @Bean("approvalWorkflowListenerFactory")
+    public SqsMessageListenerContainerFactory<Object> approvalWorkflowListenerFactory() {
+        return createListenerFactory(
+                sqsProperties.getApprovalWorkflowConcurrency(),
+                "ApprovalWorkflowListenerFactory"
+        );
+    }
+}
+=====================================================
+
+package com.example.sqs.controller;
+import com.example.sqs.model.ProcessingRequest;
+import com.example.sqs.model.WorkflowMessageGroup;
+import com.example.sqs.publisher.SqsMessagePublisher;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
+import java.time.Instant;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * REST controller for testing SQS message publishing and system health.
+ * Provides endpoints to manually trigger message processing for different workflows.
+ */
+@RestController
+@RequestMapping("/api/sqs")
+@RequiredArgsConstructor
+@Slf4j
+public class SqsTestController {
+
+    private final SqsMessagePublisher messagePublisher;
+
+    /**
+     * Publishes a test message to the specified workflow.
+     */
+    @PostMapping("/publish/{workflow}")
+    public CompletableFuture<ResponseEntity<String>> publishTestMessage(
+            @PathVariable WorkflowMessageGroup workflow,
+            @Valid @RequestBody ProcessingRequest request) {
+
+        log.info("Received request to publish message to {} workflow: {}", workflow, request.getRequestId());
+
+        return messagePublisher.publishMessage(request, workflow)
+                .thenApply(response -> ResponseEntity.ok(
+                        String.format("Message published successfully. MessageId: %s", response.messageId())
+                ))
+                .exceptionally(throwable -> ResponseEntity.internalServerError()
+                        .body("Failed to publish message: " + throwable.getMessage()));
+    }
+
+    /**
+     * Creates and publishes a sample test message to Data Preparation workflow.
+     */
+    @PostMapping("/test/dataprep")
+    public CompletableFuture<ResponseEntity<String>> testDataPrep() {
+        ProcessingRequest request = createSampleRequest("DATAPREP_TEST");
+        return messagePublisher.publishToDataPrep(request)
+                .thenApply(response -> ResponseEntity.ok("DataPrep test message sent. MessageId: " + response.messageId()))
+                .exceptionally(throwable -> ResponseEntity.internalServerError()
+                        .body("Failed to send test message: " + throwable.getMessage()));
+    }
+
+    /**
+     * Creates and publishes a sample test message to Data Pipeline workflow.
+     */
+    @PostMapping("/test/datapipeline")
+    public CompletableFuture<ResponseEntity<String>> testDataPipeline() {
+        ProcessingRequest request = createSampleRequest("DATAPIPELINE_TEST");
+        return messagePublisher.publishToDataPipeline(request)
+                .thenApply(response -> ResponseEntity.ok("DataPipeline test message sent. MessageId: " + response.messageId()))
+                .exceptionally(throwable -> ResponseEntity.internalServerError()
+                        .body("Failed to send test message: " + throwable.getMessage()));
+    }
+
+    /**
+     * Creates and publishes a sample test message to Approval workflow.
+     */
+    @PostMapping("/test/approval")
+    public CompletableFuture<ResponseEntity<String>> testApproval() {
+        ProcessingRequest request = createSampleRequest("APPROVAL_TEST");
+        return messagePublisher.publishToApproval(request)
+                .thenApply(response -> ResponseEntity.ok("Approval test message sent. MessageId: " + response.messageId()))
+                .exceptionally(throwable -> ResponseEntity.internalServerError()
+                        .body("Failed to send test message: " + throwable.getMessage()));
+    }
+
+    /**
+     * Health check endpoint.
+     */
+    @GetMapping("/health")
+    public ResponseEntity<String> health() {
+        return ResponseEntity.ok("SQS Multi-Listener System is running");
+    }
+
+    /**
+     * Creates a sample processing request for testing.
+     */
+    private ProcessingRequest createSampleRequest(String requestType) {
+        return ProcessingRequest.builder()
+                .requestId(UUID.randomUUID().toString())
+                .requestType(requestType)
+                .reportDate("2025-01-01")
+                .productName("TestProduct")
+                .subProductName("TestSubProduct")
+                .iterationCount(1)
+                .processingFrequency("DAILY")
+                .workflowIndicator("TEST")
+                .currentStatus("PENDING")
+                .originatingHost("localhost")
+                .createdTimestamp(Instant.now())
+                .build();
+    }
+}
+==================================================
+package com.example.sqs.listener;
+
+import com.example.sqs.model.ProcessingRequest;
+import com.example.sqs.model.WorkflowMessageGroup;
+import com.example.sqs.service.SqsMessageProcessingService;
+import com.example.sqs.workflow.ApprovalWorkflowHandler;
+import io.awspring.cloud.sqs.annotation.SqsListener;
+import io.awspring.cloud.sqs.listener.Visibility;
+import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.stereotype.Component;
+
+import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+/**
+ * SQS listener responsible for approval and verification workflows.
+ *
+ * This listener handles APPROVAL message group with conservative concurrency settings
+ * suitable for human-approval bottlenecks. It uses a dedicated thread pool
+ * via approvalWorkflowListenerFactory to manage approval processing efficiently.
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ApprovalWorkflowSqsListener {
+
+    private static final String WORKFLOW_NAME = "ApprovalWorkflow";
+
+    private final ApprovalWorkflowHandler workflowHandler;
+    private final SqsMessageProcessingService messageProcessingService;
+
+    /**
+     * Handles incoming SQS messages for approval workflow.
+     *
+     * Messages are filtered by message group ID and processed only if they
+     * belong to the APPROVAL workflow. This ensures that approval processes
+     * are isolated from other high-throughput workflows.
+     */
+    @SqsListener(
+            value = "${spring.cloud.aws.sqs.shared-queue-url}",
+            factory = "approvalWorkflowListenerFactory"
+    )
+    public void handleApprovalMessage(
+            @Payload ProcessingRequest processingRequest,
+            @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+            @Header(value = SQS_APPROXIMATE_RECEIVE_COUNT, required = false) String rawAttemptCount,
+            Visibility visibility,
+            Acknowledgement acknowledgement) {
+
+        log.info("Received message for {} workflow: requestId={}, groupId={}",
+                WORKFLOW_NAME, processingRequest.getRequestId(), messageGroupId);
+
+        // Validate message routing
+        if (!WorkflowMessageGroup.isMatchingGroup(messageGroupId, WorkflowMessageGroup.APPROVAL)) {
+            log.info("Message with groupId={} does not belong to {} workflow, routing to correct listener",
+                    messageGroupId, WORKFLOW_NAME);
+            messageProcessingService.routeMessageToCorrectListener(visibility, WORKFLOW_NAME);
+            return;
+        }
+
+        // Process the message
+        processMessage(processingRequest, rawAttemptCount, visibility, acknowledgement);
+    }
+
+    /**
+     * Processes a validated approval workflow message.
+     * Handles both successful processing and error scenarios with detailed logging.
+     */
+    private void processMessage(ProcessingRequest processingRequest, String rawAttemptCount,
+                                Visibility visibility, Acknowledgement acknowledgement) {
+
+        int currentAttemptNumber = messageProcessingService.parseAttemptNumber(rawAttemptCount);
+
+        try {
+            log.info("Starting {} processing for requestId={} (attempt {})",
+                    WORKFLOW_NAME, processingRequest.getRequestId(), currentAttemptNumber);
+
+            workflowHandler.executeApproval(processingRequest);
+
+            messageProcessingService.handleSuccessfulProcessing(
+                    processingRequest, currentAttemptNumber, acknowledgement, WORKFLOW_NAME);
+
+        } catch (Exception processingException) {
+            messageProcessingService.handleProcessingFailure(
+                    processingRequest, processingException, currentAttemptNumber,
+                    visibility, acknowledgement, WORKFLOW_NAME);
+        }
+    }
+}
+=====================================
+package com.example.sqs.listener;
+
+import com.example.sqs.model.ProcessingRequest;
+import com.example.sqs.model.WorkflowMessageGroup;
+import com.example.sqs.service.SqsMessageProcessingService;
+import com.example.sqs.workflow.DataPipelineWorkflowHandler;
+import io.awspring.cloud.sqs.annotation.SqsListener;
+import io.awspring.cloud.sqs.listener.Visibility;
+import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.stereotype.Component;
+
+import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+/**
+ * SQS listener responsible for main data processing pipeline workflows.
+ *
+ * This listener handles DATAPIPELINE message group with optimized concurrency for throughput.
+ * It uses a dedicated thread pool via dataPipelineListenerFactory to maximize
+ * processing efficiency for data transformation tasks.
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class DataPipelineSqsListener {
+
+    private static final String WORKFLOW_NAME = "DataPipeline";
+
+    private final DataPipelineWorkflowHandler workflowHandler;
+    private final SqsMessageProcessingService messageProcessingService;
+
+    /**
+     * Handles incoming SQS messages for data pipeline workflow.
+     *
+     * Messages are filtered by message group ID and processed only if they
+     * belong to the DATAPIPELINE workflow. This ensures proper isolation
+     * and prevents cross-workflow interference.
+     */
+    @SqsListener(
+            value = "${spring.cloud.aws.sqs.shared-queue-url}",
+            factory = "dataPipelineListenerFactory"
+    )
+    public void handleDataPipelineMessage(
+            @Payload ProcessingRequest processingRequest,
+            @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+            @Header(value = SQS_APPROXIMATE_RECEIVE_COUNT, required = false) String rawAttemptCount,
+            Visibility visibility,
+            Acknowledgement acknowledgement) {
+
+        log.info("Received message for {} workflow: requestId={}, groupId={}",
+                WORKFLOW_NAME, processingRequest.getRequestId(), messageGroupId);
+
+        // Validate message routing
+        if (!WorkflowMessageGroup.isMatchingGroup(messageGroupId, WorkflowMessageGroup.DATAPIPELINE)) {
+            log.info("Message with groupId={} does not belong to {} workflow, routing to correct listener",
+                    messageGroupId, WORKFLOW_NAME);
+            messageProcessingService.routeMessageToCorrectListener(visibility, WORKFLOW_NAME);
+            return;
+        }
+
+        // Process the message
+        processMessage(processingRequest, rawAttemptCount, visibility, acknowledgement);
+    }
+
+    /**
+     * Processes a validated data pipeline message.
+     * Handles both successful processing and error scenarios with appropriate logging.
+     */
+    private void processMessage(ProcessingRequest processingRequest, String rawAttemptCount,
+                                Visibility visibility, Acknowledgement acknowledgement) {
+
+        int currentAttemptNumber = messageProcessingService.parseAttemptNumber(rawAttemptCount);
+
+        try {
+            log.info("Starting {} processing for requestId={} (attempt {})",
+                    WORKFLOW_NAME, processingRequest.getRequestId(), currentAttemptNumber);
+
+            workflowHandler.executeDataPipeline(processingRequest);
+
+            messageProcessingService.handleSuccessfulProcessing(
+                    processingRequest, currentAttemptNumber, acknowledgement, WORKFLOW_NAME);
+
+        } catch (Exception processingException) {
+            messageProcessingService.handleProcessingFailure(
+                    processingRequest, processingException, currentAttemptNumber,
+                    visibility, acknowledgement, WORKFLOW_NAME);
+        }
+    }
+}
+============================
+package com.example.sqs.model;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NonNull;
+
+import java.time.Instant;
+
+/**
+ * Immutable data transfer object representing a processing request
+ * that flows through the FIFO SQS queue system.
+ *
+ * This class encapsulates all necessary information for data processing
+ * workflows including preparation, pipeline execution, and approval stages.
+ */
+@Data
+@Builder(toBuilder = true)
+public class ProcessingRequest {
+
+    @JsonProperty("requestId")
+    @NonNull
+    private final String requestId;
+
+    @JsonProperty("requestType")
+    @NonNull
+    private final String requestType;
+
+    @JsonProperty("reportDate")
+    @NonNull
+    private final String reportDate;
+
+    @JsonProperty("product")
+    private final String productName;
+
+    @JsonProperty("subProduct")
+    private final String subProductName;
+
+    @JsonProperty("iterationCount")
+    private final Integer iterationCount;
+
+    @JsonProperty("frequency")
+    private final String processingFrequency;
+
+    @JsonProperty("flowIndicator")
+    private final String workflowIndicator;
+
+    @JsonProperty("flowStatus")
+    private final String currentStatus;
+
+    @JsonProperty("host")
+    private final String originatingHost;
+
+    @JsonProperty("timestamp")
+    @Builder.Default
+    private final Instant createdTimestamp = Instant.now();
+}
+============================
+package com.example.sqs.model;
+
+/**
+ * Enumeration of allowed SQS MessageGroupIds for FIFO queue routing.
+ * Each group represents a distinct processing workflow with independent scaling.
+ */
+public enum WorkflowMessageGroup {
+
+    /** Data preparation and validation workflow */
+    DATAPREP,
+
+    /** Main data processing pipeline workflow */
+    DATAPIPELINE,
+
+    /** Final approval and verification workflow */
+    APPROVAL;
+
+    /**
+     * Safely compares a raw string message group ID against an expected enum value.
+     *
+     * @param rawMessageGroupId The message group ID from SQS headers (nullable)
+     * @param expectedGroup The workflow group we expect to handle this message (non-null)
+     * @return true if the raw ID matches the expected group (case-insensitive)
+     */
+    public static boolean isMatchingGroup(String rawMessageGroupId, WorkflowMessageGroup expectedGroup) {
+        if (rawMessageGroupId == null || expectedGroup == null) {
+            return false;
+        }
+        return expectedGroup.name().equalsIgnoreCase(rawMessageGroupId.trim());
+    }
+}
+============================
+package com.example.sqs.publisher;
+
+import com.example.sqs.model.ProcessingRequest;
+import com.example.sqs.model.WorkflowMessageGroup;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * Service for publishing messages to SQS queue for testing and production use.
+ * Provides methods to send messages to specific workflow groups.
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class SqsMessagePublisher {
+
+    private final SqsAsyncClient sqsAsyncClient;
+    private final ObjectMapper objectMapper;
+
+    @Value("${spring.cloud.aws.sqs.shared-queue-url}")
+    private String queueUrl;
+
+    /**
+     * Publishes a processing request to the specified workflow group.
+     *
+     * @param request The processing request to publish
+     * @param workflowGroup The target workflow group
+     * @return CompletableFuture with the send result
+     */
+    public CompletableFuture<SendMessageResponse> publishMessage(
+            ProcessingRequest request, WorkflowMessageGroup workflowGroup) {
+
+        try {
+            String messageBody = objectMapper.writeValueAsString(request);
+            String deduplicationId = generateDeduplicationId(request);
+
+            SendMessageRequest sendRequest = SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(messageBody)
+                    .messageGroupId(workflowGroup.name())
+                    .build();
+
+            log.info("Publishing message to {} workflow: requestId={}, deduplicationId={}",
+                    workflowGroup, request.getRequestId(), deduplicationId);
+
+            return sqsAsyncClient.sendMessage(sendRequest)
+                    .whenComplete((response, throwable) -> {
+                        if (throwable != null) {
+                            log.error("Failed to publish message for requestId={}: {}",
+                                    request.getRequestId(), throwable.getMessage(), throwable);
+                        } else {
+                            log.info("Successfully published message for requestId={}, messageId={}",
+                                    request.getRequestId(), response.messageId());
+                        }
+                    });
+
+        } catch (Exception e) {
+            log.error("Error serializing message for requestId={}: {}",
+                    request.getRequestId(), e.getMessage(), e);
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * Generates a unique deduplication ID for FIFO queue messages.
+     * Uses requestId and timestamp to ensure uniqueness.
+     */
+    private String generateDeduplicationId(ProcessingRequest request) {
+        return request.getRequestId() + "-" + request.getCreatedTimestamp().toEpochMilli();
+    }
+
+    /**
+     * Convenience method to publish to Data Preparation workflow.
+     */
+    public CompletableFuture<SendMessageResponse> publishToDataPrep(ProcessingRequest request) {
+        return publishMessage(request, WorkflowMessageGroup.DATAPREP);
+    }
+
+    /**
+     * Convenience method to publish to Data Pipeline workflow.
+     */
+    public CompletableFuture<SendMessageResponse> publishToDataPipeline(ProcessingRequest request) {
+        return publishMessage(request, WorkflowMessageGroup.DATAPIPELINE);
+    }
+
+    /**
+     * Convenience method to publish to Approval workflow.
+     */
+    public CompletableFuture<SendMessageResponse> publishToApproval(ProcessingRequest request) {
+        return publishMessage(request, WorkflowMessageGroup.APPROVAL);
+    }
+}
+======================================
+
+package com.example.sqs.service;
+
+import com.example.sqs.model.ProcessingRequest;
+import io.awspring.cloud.sqs.listener.Visibility;
+import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+/**
+ * Utility service providing common SQS message processing patterns.
+ *
+ * Centralizes message routing, error handling, and retry logic
+ * that is shared across all workflow-specific listeners.
+ * This service ensures consistent behavior across all workflows.
+ */
+@Service
+@Slf4j
+public class SqsMessageProcessingService {
+
+    private static final int MAX_RETRY_ATTEMPTS = 3;
+    private static final int DEFAULT_ATTEMPT_NUMBER = 1;
+
+    /* -------------------------------------------------------------------- *
+     *  Shared helpers                                                       *
+     * -------------------------------------------------------------------- */
+
+    /**
+     * Safely parses attempt count from SQS header, defaulting to 1 on parse failure.
+     *
+     * @param rawAttemptCount String representation of attempt count from SQS headers
+     * @return Parsed attempt number (1-based), or DEFAULT_ATTEMPT_NUMBER if parsing fails
+     */
+    public int parseAttemptNumber(String rawAttemptCount) {
+        if (!StringUtils.hasText(rawAttemptCount)) {
+            log.debug("Empty attempt count provided, defaulting to {}", DEFAULT_ATTEMPT_NUMBER);
+            return DEFAULT_ATTEMPT_NUMBER;
+        }
+
+        try {
+            int attemptNumber = Integer.parseInt(rawAttemptCount.trim());
+            return Math.max(attemptNumber, DEFAULT_ATTEMPT_NUMBER); // Ensure at least 1
+        } catch (NumberFormatException parseException) {
+            log.debug("Could not parse attempt count '{}', defaulting to {}",
+                    rawAttemptCount, DEFAULT_ATTEMPT_NUMBER);
+            return DEFAULT_ATTEMPT_NUMBER;
+        }
+    }
+
+    /* -------------------------------------------------------------------- *
+     *  Routing / success helpers                                            *
+     * -------------------------------------------------------------------- */
+
+    /**
+     * Routes misdelivered messages back to the queue for correct listener pickup.
+     * Makes message immediately visible to other listeners.
+     *
+     * @param visibility Visibility handle for controlling message visibility
+     * @param workflowName Name of the current workflow for logging
+     */
+    public void routeMessageToCorrectListener(Visibility visibility, String workflowName) {
+        if (visibility == null) {
+            log.error("Cannot route message - visibility is null");
+            return;
+        }
+
+        try {
+            visibility.changeTo(0); // make visible immediately
+            log.debug("Message routed away from {} listener – visibility reset to 0 s", workflowName);
+        } catch (Exception routingException) {
+            log.error("Failed to reset visibility for {} listener: {}",
+                    workflowName, routingException.getMessage(), routingException);
+        }
+    }
+
+    /**
+     * Acknowledges successful message processing and logs the outcome.
+     *
+     * @param request The successfully processed request
+     * @param attemptNumber The attempt number on which success occurred
+     * @param acknowledgement SQS acknowledgement handle
+     * @param workflowName Name of the workflow for logging
+     */
+    public void handleSuccessfulProcessing(ProcessingRequest request, int attemptNumber,
+                                           Acknowledgement acknowledgement, String workflowName) {
+
+        if (request == null || acknowledgement == null || !StringUtils.hasText(workflowName)) {
+            log.error("Cannot handle successful processing - invalid parameters provided");
+            return;
+        }
+
+        try {
+            acknowledgement.acknowledge();
+            log.info("Successfully processed {} message for requestId={} on attempt={}",
+                    workflowName, request.getRequestId(), attemptNumber);
+        } catch (Exception ackException) {
+            log.error("Acknowledge failed for requestId={} in {} workflow: {}",
+                    request.getRequestId(), workflowName, ackException.getMessage(), ackException);
+        }
+    }
+
+    /* -------------------------------------------------------------------- *
+     *  Failure / retry helper                                               *
+     * -------------------------------------------------------------------- */
+
+    /**
+     * Handles processing failures with configurable retry logic and exponential backoff.
+     *
+     * Messages are retried up to MAX_RETRY_ATTEMPTS with exponential backoff,
+     * after which they are acknowledged (removed) to prevent infinite retry loops.
+     *
+     * @param request The processing request that failed
+     * @param exception The exception that occurred during processing
+     * @param attemptNumber Current attempt number (1-based)
+     * @param visibility Visibility handle for controlling retry timing
+     * @param acknowledgement SQS acknowledgement handle
+     * @param workflowName Name of the workflow for logging
+     */
+    public void handleProcessingFailure(ProcessingRequest request, Exception exception,
+                                        int attemptNumber, Visibility visibility,
+                                        Acknowledgement acknowledgement, String workflowName) {
+
+        if (request == null || visibility == null || acknowledgement == null || !StringUtils.hasText(workflowName)) {
+            log.error("Cannot handle processing failure - invalid parameters provided");
+            return;
+        }
+
+        log.error("{} workflow failed for requestId={} on attempt {}: {}",
+                workflowName, request.getRequestId(), attemptNumber,
+                exception != null ? exception.getMessage() : "Unknown error", exception);
+
+        try {
+            if (attemptNumber >= MAX_RETRY_ATTEMPTS) {
+                // Max retries exceeded - acknowledge to remove from queue
+                acknowledgement.acknowledge();
+                log.warn("Max retries ({}) exceeded for requestId={} in {} workflow - message removed",
+                        MAX_RETRY_ATTEMPTS, request.getRequestId(), workflowName);
+            } else {
+                // Transient failure - exponential back-off before retry
+                int backoffSeconds = (int) Math.pow(2, attemptNumber); // 2, 4, 8 seconds...
+                visibility.changeTo(backoffSeconds);
+                log.info("Scheduled retry in {} s for requestId={} in {} workflow (attempt {}/{})",
+                        backoffSeconds, request.getRequestId(), workflowName, attemptNumber, MAX_RETRY_ATTEMPTS);
+            }
+        } catch (Exception ackException) {
+            log.error("Error while handling failure for requestId={} in {} workflow: {}",
+                    request.getRequestId(), workflowName, ackException.getMessage(), ackException);
+        }
+    }
+}
+
+===================================
+package com.example.sqs.workflow;
+
+import com.example.sqs.model.ProcessingRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+/**
+ * Handles approval and verification workflows.
+ * This service contains the business logic for final approval
+ * and verification of processed data.
+ */
+@Service
+@Slf4j
+public class ApprovalWorkflowHandler {
+
+    /**
+     * Executes approval workflow logic for the given request.
+     *
+     * @param request The processing request requiring approval
+     * @throws Exception if approval processing fails
+     */
+    public void executeApproval(ProcessingRequest request) throws Exception {
+        log.info("Executing approval workflow for requestId: {}", request.getRequestId());
+
+        // Simulate approval processing work
+        Thread.sleep(150); // Replace with actual approval logic
+
+        // Example approval logic
+        if (request.getCurrentStatus() != null && "REJECTED".equals(request.getCurrentStatus())) {
+            throw new IllegalStateException("Cannot process request with REJECTED status");
+        }
+
+        log.info("Approval workflow completed for requestId: {}", request.getRequestId());
+    }
+}
+===========================
+package com.example.sqs.workflow;
+import com.example.sqs.model.ProcessingRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+/**
+ * Handles main data processing pipeline workflows.
+ * This service contains the core business logic for processing
+ * data through the main transformation pipeline.
+ */
+@Service
+@Slf4j
+public class DataPipelineWorkflowHandler {
+
+    /**
+     * Executes main data pipeline processing for the given request.
+     *
+     * @param request The processing request containing data to process
+     * @throws Exception if pipeline processing fails
+     */
+    public void executeDataPipeline(ProcessingRequest request) throws Exception {
+        log.info("Executing data pipeline for requestId: {}", request.getRequestId());
+
+        // Simulate pipeline processing work
+        Thread.sleep(200); // Replace with actual pipeline logic
+
+        // Example processing logic
+        if (request.getIterationCount() != null && request.getIterationCount() > 10) {
+            throw new RuntimeException("Iteration count exceeds maximum allowed limit");
+        }
+
+        log.info("Data pipeline completed for requestId: {}", request.getRequestId());
+    }
+}
+=========================
+package com.example.sqs.workflow;
+
+/* =============================================================
+ * WORKFLOW HANDLERS - Business logic implementations
+ * =========================================================== */
+
+import com.example.sqs.model.ProcessingRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+/**
+ * Handles data preparation and validation workflows.
+ * This service contains the business logic for preparing data
+ * before it enters the main processing pipeline.
+ */
+@Service
+@Slf4j
+public class DataPreparationWorkflowHandler {
+
+    /**
+     * Executes data preparation logic for the given request.
+     *
+     * @param request The processing request containing data to prepare
+     * @throws Exception if data preparation fails
+     */
+    public void executeDataPreparation(ProcessingRequest request) throws Exception {
+        log.info("Executing data preparation for requestId: {}", request.getRequestId());
+
+        // Simulate data preparation work
+        Thread.sleep(100); // Replace with actual preparation logic
+
+        // Example validation logic
+        if (request.getProductName() == null || request.getProductName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Product name is required for data preparation");
+        }
+
+        log.info("Data preparation completed for requestId: {}", request.getProductName());
+    }
+}
+==================
+package com.example.sqs;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+/**
+ * Main Spring Boot application class for SQS Multi-Listener System.
+ *
+ * This application provides a production-ready implementation of multiple
+ * SQS listeners processing messages from a single FIFO queue with independent
+ * scaling and error handling capabilities.
+ */
+@SpringBootApplication
+public class SqsMultiListenerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SqsMultiListenerApplication.class, args);
+    }
+}
+================================
+
+spring:
+  application:
+    n: sqs-multilistener-system
+
+  cloud:
+    aws:
+      credentials:
+        access-key: ${AWS_ACCESS_KEY_ID:}
+        secret-key: ${AWS_SECRET_ACCESS_KEY:}
+      region:
+        static: ${AWS_REGION:us-east-1}
+      sqs:
+        # Core connection settings
+        shared-queue-url: "https://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/data-queue.fifo"
+        aws-region: ${AWS_REGION:us-east-1}
+
+        # Polling and message visibility configuration
+        message-polling-timeout-seconds: ${SQS_POLL_TIMEOUT:10}
+        message-visibility-timeout-seconds: ${SQS_VISIBILITY_TIMEOUT:300}
+
+        # Independent scaling per workflow type
+        data-preparation-concurrency: ${DATAPREP_CONCURRENCY:5}
+        data-pipeline-concurrency: ${DATAPIPELINE_CONCURRENCY:5}
+        approval-workflow-concurrency: ${APPROVAL_CONCURRENCY:5}
+
+# Server configuration
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /
+
+# Logging configuration for better observability
+logging:
+  level:
+    com.example.sqs: ${LOG_LEVEL_APP:INFO}
+    software.amazon.awssdk: ${LOG_LEVEL_AWS:WARN}
+    io.awspring.cloud: ${LOG_LEVEL_SPRING_CLOUD:INFO}
+
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# Management endpoints for monitoring
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      cloudwatch:
+        enabled: ${CLOUDWATCH_METRICS_ENABLED:false}
+        namespace: ${CLOUDWATCH_NAMESPACE:SQSMultiListener}
+
+
+---
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+logging:
+  level:
+    com.example.sqs: DEBUG
+    io.awspring.cloud: DEBUG
+    software.amazon.awssdk: DEBUG
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+logging:
+  level:
+    com.example.sqs: INFO
+    io.awspring.cloud: WARN
+
+management:
+  metrics:
+    export:
+      cloudwatch:
+        enabled: true
