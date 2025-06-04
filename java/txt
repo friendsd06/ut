@@ -1040,3 +1040,2404 @@ management:
     export:
       cloudwatch:
         enabled: true
+
+        =====================
+        2/* =============================================================
+          * DATA TRANSFER OBJECTS - Core message structures
+          * =========================================================== */
+
+         package com.example.sqs.model;
+
+         import com.fasterxml.jackson.annotation.JsonInclude;
+         import jakarta.validation.constraints.*;
+         import lombok.*;
+
+         /**
+          * Data-request payload used by all data groups.
+          *
+          * 1. Validation annotations ensure mandatory values.
+          * 2. Lombok generates boiler-plate (getters, setters, etc.).
+          * 3. @JsonInclude omits nulls, keeping the JSON small.
+          */
+         @Data
+         @Builder
+         @NoArgsConstructor
+         @AllArgsConstructor
+         @JsonInclude(JsonInclude.Include.NON_NULL)
+         public class DataRequest {
+
+             @NotBlank(message = "Request ID is required")
+             private String requestId;
+
+             @NotBlank(message = "Request type is required")
+             private String requestType;
+
+             @NotBlank(message = "Report date is required")
+             private String reportDate;
+
+             private String product;
+             private String subProduct;
+
+             @NotNull(message = "Iteration count is required")
+             private Integer iterationCount;
+
+             private String frequency;
+             private String flowIndicator;   // dataprep / approval
+             private String flowStatus;      // success / failure
+             private String host;
+         }
+
+         /* =============================================================
+          * MESSAGE ROUTING - Queue message group definitions
+          * =========================================================== */
+
+         package com.example.sqs.model;
+
+         /**
+          * Enumeration of allowed SQS MessageGroupIds for FIFO queue routing.
+          * Each group represents a distinct processing group with independent scaling.
+          */
+         public enum MessageGroup {
+
+             /** Data preparation and validation group */
+             DATAPREP,
+
+             /** Main data processing pipeline group */
+             DATAPIPELINE,
+
+             /** Final approval and verification group */
+             APPROVAL;
+
+             /**
+              * Safely compares a raw string message group ID against an expected enum value.
+              *
+              * @param rawMessageGroupId The message group ID from SQS headers (nullable)
+              * @param expectedGroup The group we expect to handle this message (non-null)
+              * @return true if the raw ID matches the expected group (case-insensitive)
+              */
+             public static boolean isMatchingGroup(String rawMessageGroupId, MessageGroup expectedGroup) {
+                 if (rawMessageGroupId == null || expectedGroup == null) {
+                     return false;
+                 }
+                 return expectedGroup.name().equalsIgnoreCase(rawMessageGroupId.trim());
+             }
+         }
+
+         /* =============================================================
+          * CONFIGURATION - SQS connection and scaling properties
+          * =========================================================== */
+
+         package com.example.sqs.config;
+
+         import lombok.Data;
+         import org.springframework.boot.context.properties.ConfigurationProperties;
+         import org.springframework.validation.annotation.Validated;
+
+         import jakarta.validation.constraints.*;
+
+         /**
+          * Configuration properties for SQS connectivity and listener scaling.
+          *
+          * Maps to application.yml properties under 'spring.cloud.aws.sqs' prefix.
+          * Provides centralized control over queue connection, polling behavior,
+          * and per-group concurrency limits.
+          */
+         @ConfigurationProperties(prefix = SqsConfigurationProperties.PROPERTY_PREFIX)
+         @Validated
+         @Data
+         public class SqsConfigurationProperties {
+
+             public static final String PROPERTY_PREFIX = "spring.cloud.aws.sqs";
+
+             // Connection Settings
+             @NotBlank(message = "SQS queue URL cannot be blank")
+             private String sharedQueueUrl;
+
+             @NotBlank(message = "AWS region cannot be blank")
+             private String awsRegion;
+
+             // Polling Configuration
+             @Min(value = 0, message = "Polling timeout must be non-negative")
+             @Max(value = 20, message = "Polling timeout cannot exceed 20 seconds")
+             private int messagePollingTimeoutSeconds = 10;
+
+             @Min(value = 1, message = "Visibility timeout must be at least 1 second")
+             @Max(value = 43200, message = "Visibility timeout cannot exceed 12 hours")
+             private int messageVisibilityTimeoutSeconds = 300;
+
+             // Concurrency Controls per Group
+             @Min(value = 1, message = "Data preparation concurrency must be at least 1")
+             @Max(value = 30, message = "Data preparation concurrency cannot exceed 30")
+             private int dataPreparationConcurrency = 5;
+
+             @Min(value = 1, message = "Data pipeline concurrency must be at least 1")
+             @Max(value = 30, message = "Data pipeline concurrency cannot exceed 30")
+             private int dataPipelineConcurrency = 15;
+
+             @Min(value = 1, message = "Approval group concurrency must be at least 1")
+             @Max(value = 30, message = "Approval group concurrency cannot exceed 30")
+             private int approvalGroupConcurrency = 10;
+         }
+
+         /* =============================================================
+          * SPRING CONFIGURATION - SQS client and listener factory setup
+          * =========================================================== */
+
+         package com.example.sqs.config;
+
+         import io.awspring.cloud.sqs.config.SqsMessageListenerContainerFactory;
+         import io.awspring.cloud.sqs.listener.acknowledgement.AcknowledgementMode;
+         import io.awspring.cloud.sqs.listener.acknowledgement.AcknowledgementOrdering;
+         import lombok.RequiredArgsConstructor;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.boot.context.properties.EnableConfigurationProperties;
+         import org.springframework.context.annotation.Bean;
+         import org.springframework.context.annotation.Configuration;
+         import org.springframework.context.annotation.Primary;
+         import org.springframework.context.annotation.Profile;
+         import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+         import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+         import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+         import software.amazon.awssdk.regions.Region;
+         import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+
+         import java.net.URI;
+         import java.time.Duration;
+
+         /**
+          * Spring configuration that creates dedicated SQS listener container factories.
+          *
+          * Each message group gets its own factory with independent thread pools,
+          * allowing fine-grained scaling control without cross-group interference.
+          * All factories share the same SQS client but maintain separate concurrency limits.
+          */
+         @Configuration
+         @EnableConfigurationProperties(SqsConfigurationProperties.class)
+         @RequiredArgsConstructor
+         @Slf4j
+         public class SqsListenerConfiguration {
+
+             private final SqsConfigurationProperties sqsProperties;
+
+             /**
+              * Creates the shared SQS async client for production/AWS environments.
+              */
+             @Bean
+             @Primary
+             @Profile("!localstack")
+             public SqsAsyncClient sqsAsyncClient() {
+                 log.info("Initializing AWS SQS client for region: {}", sqsProperties.getAwsRegion());
+
+                 return SqsAsyncClient.builder()
+                         .region(Region.of(sqsProperties.getAwsRegion()))
+                         .credentialsProvider(DefaultCredentialsProvider.create())
+                         .build();
+             }
+
+             /**
+              * Creates SQS async client specifically configured for LocalStack.
+              */
+             @Bean
+             @Primary
+             @Profile("localstack")
+             public SqsAsyncClient localStackSqsAsyncClient() {
+                 String localStackEndpoint = "http://localhost:4566";
+
+                 String envEndpoint = System.getenv("LOCALSTACK_ENDPOINT");
+                 if (envEndpoint != null && !envEndpoint.isEmpty()) {
+                     localStackEndpoint = envEndpoint;
+                 }
+
+                 String propEndpoint = System.getProperty("localstack.endpoint");
+                 if (propEndpoint != null && !propEndpoint.isEmpty()) {
+                     localStackEndpoint = propEndpoint;
+                 }
+
+                 log.info("Initializing LocalStack SQS client with endpoint: {}", localStackEndpoint);
+
+                 SqsAsyncClient.Builder clientBuilder = SqsAsyncClient.builder()
+                         .region(Region.of(sqsProperties.getAwsRegion()))
+                         .credentialsProvider(StaticCredentialsProvider.create(
+                             AwsBasicCredentials.create("localstack", "localstack")
+                         ));
+
+                 try {
+                     clientBuilder.endpointOverride(URI.create(localStackEndpoint));
+                 } catch (Exception e) {
+                     log.error("Failed to set LocalStack endpoint: {}", e.getMessage());
+                     throw new RuntimeException("Invalid LocalStack endpoint: " + localStackEndpoint, e);
+                 }
+
+                 return clientBuilder.build();
+             }
+
+             /**
+              * Creates a configured SQS listener container factory with specified concurrency.
+              */
+             private SqsMessageListenerContainerFactory<Object> createListenerFactory(
+                     int maxConcurrentMessages, String factoryName) {
+
+                 log.info("Creating {} with concurrency: {}", factoryName, maxConcurrentMessages);
+
+                 int messagesPerPoll = Math.min(maxConcurrentMessages, 10);
+                 SqsAsyncClient sqsClient = sqsAsyncClient();
+
+                 return SqsMessageListenerContainerFactory.builder()
+                         .sqsAsyncClient(sqsClient)
+                         .configure(containerOptions -> containerOptions
+                                 .acknowledgementMode(AcknowledgementMode.MANUAL)
+                                 .acknowledgementOrdering(AcknowledgementOrdering.ORDERED)
+                                 .fifo(true)
+                                 .maxConcurrentMessages(maxConcurrentMessages)
+                                 .messagesPerPoll(messagesPerPoll)
+                                 .pollTimeout(Duration.ofSeconds(sqsProperties.getMessagePollingTimeoutSeconds()))
+                                 .messageVisibility(Duration.ofSeconds(sqsProperties.getMessageVisibilityTimeoutSeconds()))
+                         ).build();
+             }
+
+             /**
+              * Factory for data preparation group listeners.
+              */
+             @Bean("dataPreparationListenerFactory")
+             public SqsMessageListenerContainerFactory<Object> dataPreparationListenerFactory() {
+                 return createListenerFactory(
+                     sqsProperties.getDataPreparationConcurrency(),
+                     "DataPreparationListenerFactory"
+                 );
+             }
+
+             /**
+              * Factory for data pipeline group listeners.
+              */
+             @Bean("dataPipelineListenerFactory")
+             public SqsMessageListenerContainerFactory<Object> dataPipelineListenerFactory() {
+                 return createListenerFactory(
+                     sqsProperties.getDataPipelineConcurrency(),
+                     "DataPipelineListenerFactory"
+                 );
+             }
+
+             /**
+              * Factory for approval group listeners.
+              */
+             @Bean("approvalGroupListenerFactory")
+             public SqsMessageListenerContainerFactory<Object> approvalGroupListenerFactory() {
+                 return createListenerFactory(
+                     sqsProperties.getApprovalGroupConcurrency(),
+                     "ApprovalGroupListenerFactory"
+                 );
+             }
+         }
+
+         /* =============================================================
+          * SIMPLIFIED MESSAGE PROCESSING SERVICE
+          * =========================================================== */
+
+         package com.example.sqs.service;
+
+         import com.example.sqs.model.DataRequest;
+         import io.awspring.cloud.sqs.listener.Visibility;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.stereotype.Service;
+
+         /**
+          * Simplified utility service for SQS message processing.
+          *
+          * Messages are immediately deleted once received by the correct group.
+          * No business logic processing or error handling - just message routing and deletion.
+          */
+         @Service
+         @Slf4j
+         public class SqsMessageProcessingService {
+
+             /**
+              * Routes misdelivered messages back to the queue for correct listener pickup.
+              */
+             public void routeMessageToCorrectListener(Visibility visibility, String groupName) {
+                 if (visibility == null) {
+                     log.error("Cannot route message - visibility is null");
+                     return;
+                 }
+
+                 try {
+                     visibility.changeTo(0); // make visible immediately
+                     log.debug("Message routed away from {} listener – visibility reset to 0 s", groupName);
+                 } catch (Exception routingException) {
+                     log.error("Failed to reset visibility for {} listener: {}",
+                              groupName, routingException.getMessage(), routingException);
+                 }
+             }
+         }
+
+         /* =============================================================
+          * SIMPLIFIED GROUP LISTENERS - Immediate deletion approach
+          * =========================================================== */
+
+         package com.example.sqs.listener;
+
+         import com.example.sqs.model.DataRequest;
+         import com.example.sqs.model.MessageGroup;
+         import com.example.sqs.service.SqsMessageProcessingService;
+         import io.awspring.cloud.sqs.annotation.SqsListener;
+         import io.awspring.cloud.sqs.listener.Visibility;
+         import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+         import lombok.RequiredArgsConstructor;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.messaging.handler.annotation.Header;
+         import org.springframework.messaging.handler.annotation.Payload;
+         import org.springframework.stereotype.Component;
+
+         import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+         /**
+          * Simplified SQS listener for data preparation group.
+          *
+          * Messages are immediately deleted upon receipt by the correct group.
+          * No business logic processing - just receive and delete.
+          */
+         @Component
+         @RequiredArgsConstructor
+         @Slf4j
+         public class DataPreparationSqsListener {
+
+             private static final String GROUP_NAME = "DataPreparation";
+
+             private final SqsMessageProcessingService messageProcessingService;
+
+             @SqsListener(
+                 value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                 factory = "dataPreparationListenerFactory"
+             )
+             public void handleDataPreparationMessage(
+                     @Payload DataRequest dataRequest,
+                     @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                     Visibility visibility,
+                     Acknowledgement acknowledgement) {
+
+                 log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                         GROUP_NAME, dataRequest.getRequestId(), messageGroupId, dataRequest.getRequestType());
+
+                 // 1️⃣ Mis-routed? → make visible for the right listener
+                 if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.DATAPREP)) {
+                     log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                              messageGroupId, GROUP_NAME);
+                     messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                     return;
+                 }
+
+                 // 2️⃣ Correct group → delete the SQS message NOW
+                 acknowledgement.acknowledge();   // <-- PERMANENTLY removes it from the queue
+                 log.info("Message immediately deleted from {} group for requestId={}",
+                         GROUP_NAME, dataRequest.getRequestId());
+             }
+         }
+
+         /* ============================================================= */
+
+         package com.example.sqs.listener;
+
+         import com.example.sqs.model.DataRequest;
+         import com.example.sqs.model.MessageGroup;
+         import com.example.sqs.service.SqsMessageProcessingService;
+         import io.awspring.cloud.sqs.annotation.SqsListener;
+         import io.awspring.cloud.sqs.listener.Visibility;
+         import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+         import lombok.RequiredArgsConstructor;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.messaging.handler.annotation.Header;
+         import org.springframework.messaging.handler.annotation.Payload;
+         import org.springframework.stereotype.Component;
+
+         import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+         /**
+          * Simplified SQS listener for data pipeline group.
+          *
+          * Messages are immediately deleted upon receipt by the correct group.
+          * No business logic processing - just receive and delete.
+          */
+         @Component
+         @RequiredArgsConstructor
+         @Slf4j
+         public class DataPipelineSqsListener {
+
+             private static final String GROUP_NAME = "DataPipeline";
+
+             private final SqsMessageProcessingService messageProcessingService;
+
+             @SqsListener(
+                 value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                 factory = "dataPipelineListenerFactory"
+             )
+             public void handleDataPipelineMessage(
+                     @Payload DataRequest dataRequest,
+                     @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                     Visibility visibility,
+                     Acknowledgement acknowledgement) {
+
+                 log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                         GROUP_NAME, dataRequest.getRequestId(), messageGroupId, dataRequest.getRequestType());
+
+                 // 1️⃣ Mis-routed? → make visible for the right listener
+                 if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.DATAPIPELINE)) {
+                     log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                              messageGroupId, GROUP_NAME);
+                     messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                     return;
+                 }
+
+                 // 2️⃣ Correct group → delete the SQS message NOW
+                 acknowledgement.acknowledge();   // <-- PERMANENTLY removes it from the queue
+                 log.info("Message immediately deleted from {} group for requestId={}",
+                         GROUP_NAME, dataRequest.getRequestId());
+             }
+         }
+
+         /* ============================================================= */
+
+         package com.example.sqs.listener;
+
+         import com.example.sqs.model.DataRequest;
+         import com.example.sqs.model.MessageGroup;
+         import com.example.sqs.service.SqsMessageProcessingService;
+         import io.awspring.cloud.sqs.annotation.SqsListener;
+         import io.awspring.cloud.sqs.listener.Visibility;
+         import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+         import lombok.RequiredArgsConstructor;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.messaging.handler.annotation.Header;
+         import org.springframework.messaging.handler.annotation.Payload;
+         import org.springframework.stereotype.Component;
+
+         import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+         /**
+          * Simplified SQS listener for approval group.
+          *
+          * Messages are immediately deleted upon receipt by the correct group.
+          * No business logic processing - just receive and delete.
+          */
+         @Component
+         @RequiredArgsConstructor
+         @Slf4j
+         public class ApprovalSqsListener {
+
+             private static final String GROUP_NAME = "Approval";
+
+             private final SqsMessageProcessingService messageProcessingService;
+
+             @SqsListener(
+                 value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                 factory = "approvalGroupListenerFactory"
+             )
+             public void handleApprovalMessage(
+                     @Payload DataRequest dataRequest,
+                     @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                     Visibility visibility,
+                     Acknowledgement acknowledgement) {
+
+                 log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                         GROUP_NAME, dataRequest.getRequestId(), messageGroupId, dataRequest.getRequestType());
+
+                 // 1️⃣ Mis-routed? → make visible for the right listener
+                 if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.APPROVAL)) {
+                     log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                              messageGroupId, GROUP_NAME);
+                     messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                     return;
+                 }
+
+                 // 2️⃣ Correct group → delete the SQS message NOW
+                 acknowledgement.acknowledge();   // <-- PERMANENTLY removes it from the queue
+                 log.info("Message immediately deleted from {} group for requestId={}",
+                         GROUP_NAME, dataRequest.getRequestId());
+             }
+         }
+
+         /* =============================================================
+          * MESSAGE PUBLISHER
+          * =========================================================== */
+
+         package com.example.sqs.publisher;
+
+         import com.example.sqs.model.DataRequest;
+         import com.example.sqs.model.MessageGroup;
+         import com.fasterxml.jackson.databind.ObjectMapper;
+         import lombok.RequiredArgsConstructor;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.beans.factory.annotation.Value;
+         import org.springframework.stereotype.Service;
+         import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+         import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+         import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+
+         import java.util.concurrent.CompletableFuture;
+
+         /**
+          * Service for publishing messages to SQS queue for different groups.
+          */
+         @Service
+         @RequiredArgsConstructor
+         @Slf4j
+         public class SqsMessagePublisher {
+
+             private final SqsAsyncClient sqsAsyncClient;
+             private final ObjectMapper objectMapper;
+
+             @Value("${spring.cloud.aws.sqs.shared-queue-url}")
+             private String queueUrl;
+
+             public CompletableFuture<SendMessageResponse> publishMessage(
+                     DataRequest request, MessageGroup messageGroup) {
+
+                 try {
+                     String messageBody = objectMapper.writeValueAsString(request);
+                     String deduplicationId = generateDeduplicationId(request);
+
+                     SendMessageRequest sendRequest = SendMessageRequest.builder()
+                             .queueUrl(queueUrl)
+                             .messageBody(messageBody)
+                             .messageGroupId(messageGroup.name())
+                             .messageDeduplicationId(deduplicationId)
+                             .build();
+
+                     log.info("Publishing message to {} group: requestId={}, deduplicationId={}",
+                             messageGroup, request.getRequestId(), deduplicationId);
+
+                     return sqsAsyncClient.sendMessage(sendRequest)
+                             .whenComplete((response, throwable) -> {
+                                 if (throwable != null) {
+                                     log.error("Failed to publish message for requestId={}: {}",
+                                             request.getRequestId(), throwable.getMessage(), throwable);
+                                 } else {
+                                     log.info("Successfully published message for requestId={}, messageId={}",
+                                             request.getRequestId(), response.messageId());
+                                 }
+                             });
+
+                 } catch (Exception e) {
+                     log.error("Error serializing message for requestId={}: {}",
+                             request.getRequestId(), e.getMessage(), e);
+                     return CompletableFuture.failedFuture(e);
+                 }
+             }
+
+             private String generateDeduplicationId(DataRequest request) {
+                 return request.getRequestId() + "-" + System.currentTimeMillis();
+             }
+
+             public CompletableFuture<SendMessageResponse> publishToDataPrep(DataRequest request) {
+                 return publishMessage(request, MessageGroup.DATAPREP);
+             }
+
+             public CompletableFuture<SendMessageResponse> publishToDataPipeline(DataRequest request) {
+                 return publishMessage(request, MessageGroup.DATAPIPELINE);
+             }
+
+             public CompletableFuture<SendMessageResponse> publishToApproval(DataRequest request) {
+                 return publishMessage(request, MessageGroup.APPROVAL);
+             }
+         }
+
+         /* =============================================================
+          * REST CONTROLLER
+          * =========================================================== */
+
+         package com.example.sqs.controller;
+
+         import com.example.sqs.model.DataRequest;
+         import com.example.sqs.model.MessageGroup;
+         import com.example.sqs.publisher.SqsMessagePublisher;
+         import lombok.RequiredArgsConstructor;
+         import lombok.extern.slf4j.Slf4j;
+         import org.springframework.http.ResponseEntity;
+         import org.springframework.web.bind.annotation.*;
+         import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+
+         import jakarta.validation.Valid;
+         import java.util.UUID;
+         import java.util.concurrent.CompletableFuture;
+
+         @RestController
+         @RequestMapping("/api/sqs")
+         @RequiredArgsConstructor
+         @Slf4j
+         public class SqsTestController {
+
+             private final SqsMessagePublisher messagePublisher;
+
+             @PostMapping("/publish/{group}")
+             public CompletableFuture<ResponseEntity<String>> publishTestMessage(
+                     @PathVariable MessageGroup group,
+                     @Valid @RequestBody DataRequest request) {
+
+                 log.info("Received request to publish message to {} group: {}", group, request.getRequestId());
+
+                 return messagePublisher.publishMessage(request, group)
+                         .thenApply(response -> ResponseEntity.ok(
+                                 String.format("Message published successfully to %s group. MessageId: %s", group, response.messageId())
+                         ))
+                         .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                 .body("Failed to publish message: " + throwable.getMessage()));
+             }
+
+             @PostMapping("/test/dataprep")
+             public CompletableFuture<ResponseEntity<String>> testDataPrep() {
+                 DataRequest request = createSampleRequest("DATAPREP_TEST");
+                 return messagePublisher.publishToDataPrep(request)
+                         .thenApply(response -> ResponseEntity.ok("DataPrep test message sent to group. MessageId: " + response.messageId()))
+                         .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                 .body("Failed to send test message: " + throwable.getMessage()));
+             }
+
+             @PostMapping("/test/datapipeline")
+             public CompletableFuture<ResponseEntity<String>> testDataPipeline() {
+                 DataRequest request = createSampleRequest("DATAPIPELINE_TEST");
+                 return messagePublisher.publishToDataPipeline(request)
+                         .thenApply(response -> ResponseEntity.ok("DataPipeline test message sent to group. MessageId: " + response.messageId()))
+                         .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                 .body("Failed to send test message: " + throwable.getMessage()));
+             }
+
+             @PostMapping("/test/approval")
+             public CompletableFuture<ResponseEntity<String>> testApproval() {
+                 DataRequest request = createSampleRequest("APPROVAL_TEST");
+                 return messagePublisher.publishToApproval(request)
+                         .thenApply(response -> ResponseEntity.ok("Approval test message sent to group. MessageId: " + response.messageId()))
+                         .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                 .body("Failed to send test message: " + throwable.getMessage()));
+             }
+
+             @GetMapping("/health")
+             public ResponseEntity<String> health() {
+                 return ResponseEntity.ok("SQS Multi-Listener Group System is running");
+             }
+
+             private DataRequest createSampleRequest(String requestType) {
+                 return DataRequest.builder()
+                         .requestId(UUID.randomUUID().toString())
+                         .requestType(requestType)
+                         .reportDate("2025-01-15")
+                         .product("TestProduct")
+                         .subProduct("TestSubProduct")
+                         .iterationCount(1)
+                         .frequency("DAILY")
+                         .flowIndicator("TEST")
+                         .flowStatus("PENDING")
+                         .host("localhost")
+                         .build();
+             }
+         }
+
+         /* =============================================================
+          * MAIN APPLICATION CLASS
+          * =========================================================== */
+
+         package com.example.sqs;
+
+         import org.springframework.boot.SpringApplication;
+         import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+         /**
+          * Main Spring Boot application class for SQS Multi-Listener Group System.
+          *
+          * This application provides a production-ready implementation of multiple
+          * SQS listeners processing messages from a single FIFO queue with immediate
+          * message deletion upon receipt by the correct group.
+          */
+         @SpringBootApplication
+         public class SqsMultiListenerApplication {
+
+             public static void main(String[] args) {
+                 SpringApplication.run(SqsMultiListenerApplication.class, args);
+             }
+         }
+
+         /* =============================================================
+          * UPDATED APPLICATION.YML CONFIGURATION
+          * =========================================================== */
+
+         # application.yml
+         spring:
+           application:
+             name: sqs-multilistener-group-system
+
+           cloud:
+             aws:
+               credentials:
+                 access-key: ${AWS_ACCESS_KEY_ID:}
+                 secret-key: ${AWS_SECRET_ACCESS_KEY:}
+               region:
+                 static: ${AWS_REGION:us-east-1}
+               sqs:
+                 # Core connection settings
+                 shared-queue-url: ${SQS_QUEUE_URL:https://sqs.us-east-1.amazonaws.com/123456789/data-processing-queue.fifo}
+                 aws-region: ${AWS_REGION:us-east-1}
+
+                 # Polling and message visibility configuration
+                 message-polling-timeout-seconds: ${SQS_POLL_TIMEOUT:10}
+                 message-visibility-timeout-seconds: ${SQS_VISIBILITY_TIMEOUT:300}
+
+                 # Independent scaling per group type
+                 data-preparation-concurrency: ${DATAPREP_CONCURRENCY:5}
+                 data-pipeline-concurrency: ${DATAPIPELINE_CONCURRENCY:15}
+                 approval-group-concurrency: ${APPROVAL_CONCURRENCY:10}
+
+         # Server configuration
+         server:
+           port: ${SERVER_PORT:8080}
+
+         # Logging configuration
+         logging:
+           level:
+             com.example.sqs: ${LOG_LEVEL_APP:INFO}
+             software.amazon.awssdk: ${LOG_LEVEL_AWS:WARN}
+             io.awspring.cloud: ${LOG_LEVEL_SPRING_CLOUD:INFO}
+
+           pattern:
+             console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+         # Management endpoints
+         management:
+           endpoints:
+             web:
+               exposure:
+                 include: health,info,metrics
+           endpoint:
+             health:
+               show-details: always
+
+         ---
+         # LocalStack Profile for Local Development
+         spring:
+           config:
+             activate:
+               on-profile: localstack
+           cloud:
+             aws:
+               credentials:
+                 access-key: localstack
+                 secret-key: localstack
+               region:
+                 static: us-east-1
+               sqs:
+                 # Windows LocalStack URL
+                 shared-queue-url: "https://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/data-queue.fifo"
+                 aws-region: us-east-1
+
+                 # Local development settings
+                 message-polling-timeout-seconds: 5
+                 message-visibility-timeout-seconds: 30
+
+                 # Higher concurrency for simple deletion
+                 data-preparation-concurrency: 5
+                 data-pipeline-concurrency: 10
+                 approval-group-concurrency: 5
+
+         # LocalStack debug logging
+         logging:
+           level:
+             com.example.sqs: DEBUG
+             io.awspring.cloud: DEBUG
+             software.amazon.awssdk: DEBUG
+
+         ---
+         # Production Profile
+         spring:
+           config:
+             activate:
+               on-profile: prod
+
+         logging:
+           level:
+             com.example.sqs: INFO
+             io.awspring.cloud: WARN
+
+         management:
+           metrics:
+             export:
+               cloudwatch:
+                 enabled: true
+
+         /* =============================================================
+          * UPDATED JSON PAYLOADS FOR TESTING (DataRequest format)
+          * =========================================================== */
+
+         # 1. POST /api/sqs/publish/DATAPREP
+         # Content-Type: application/json
+         {
+           "requestId": "dataprep-req-12345",
+           "requestType": "DATA_PREPARATION",
+           "reportDate": "2025-01-15",
+           "product": "ProductA",
+           "subProduct": "SubProductA1",
+           "iterationCount
+
+           =================================================
+
+           /* =============================================================
+            * EXCEPTION HANDLING - Custom exceptions for different scenarios
+            * =========================================================== */
+
+           package com.example.sqs.exception;
+
+           /**
+            * Base exception for all SQS processing errors
+            */
+           public class SqsProcessingException extends RuntimeException {
+               public SqsProcessingException(String message) {
+                   super(message);
+               }
+
+               public SqsProcessingException(String message, Throwable cause) {
+                   super(message, cause);
+               }
+           }
+
+           /**
+            * Exception for workflow processing errors
+            */
+           public class WorkflowProcessingException extends SqsProcessingException {
+               public WorkflowProcessingException(String message) {
+                   super(message);
+               }
+
+               public WorkflowProcessingException(String message, Throwable cause) {
+                   super(message, cause);
+               }
+           }
+
+           /**
+            * Exception for storage operation errors
+            */
+           public class StorageServiceException extends SqsProcessingException {
+               public StorageServiceException(String message) {
+                   super(message);
+               }
+
+               public StorageServiceException(String message, Throwable cause) {
+                   super(message, cause);
+               }
+           }
+
+           /**
+            * Exception for audit operation errors
+            */
+           public class AuditServiceException extends SqsProcessingException {
+               public AuditServiceException(String message) {
+                   super(message);
+               }
+
+               public AuditServiceException(String message, Throwable cause) {
+                   super(message, cause);
+               }
+           }
+
+           /* =============================================================
+            * AUDIT SERVICE - For tracking message processing
+            * =========================================================== */
+
+           package com.example.sqs.service;
+
+           import com.example.sqs.exception.AuditServiceException;
+           import com.example.sqs.model.DataRequest;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.stereotype.Service;
+
+           import java.time.LocalDateTime;
+           import java.util.Map;
+           import java.util.concurrent.ConcurrentHashMap;
+
+           /**
+            * Service for auditing message processing activities
+            */
+           @Service
+           @Slf4j
+           public class AuditService {
+
+               private final Map<String, AuditRecord> auditLog = new ConcurrentHashMap<>();
+
+               public void logMessageReceived(String requestId, String groupName, String messageGroupId) {
+                   try {
+                       AuditRecord record = auditLog.computeIfAbsent(requestId, k -> new AuditRecord(requestId));
+                       record.setMessageReceived(LocalDateTime.now());
+                       record.setGroupName(groupName);
+                       record.setMessageGroupId(messageGroupId);
+
+                       log.info("Audit: Message received - requestId={}, group={}, timestamp={}",
+                               requestId, groupName, record.getMessageReceived());
+                   } catch (Exception e) {
+                       log.error("Failed to audit message received for requestId={}: {}", requestId, e.getMessage());
+                       throw new AuditServiceException("Failed to log message received", e);
+                   }
+               }
+
+               public void logProcessingStarted(String requestId) {
+                   try {
+                       AuditRecord record = auditLog.get(requestId);
+                       if (record != null) {
+                           record.setProcessingStarted(LocalDateTime.now());
+                           log.info("Audit: Processing started - requestId={}, timestamp={}",
+                                   requestId, record.getProcessingStarted());
+                       }
+                   } catch (Exception e) {
+                       log.error("Failed to audit processing started for requestId={}: {}", requestId, e.getMessage());
+                       throw new AuditServiceException("Failed to log processing started", e);
+                   }
+               }
+
+               public void logProcessingCompleted(String requestId, boolean success, String details) {
+                   try {
+                       AuditRecord record = auditLog.get(requestId);
+                       if (record != null) {
+                           record.setProcessingCompleted(LocalDateTime.now());
+                           record.setSuccess(success);
+                           record.setDetails(details);
+
+                           log.info("Audit: Processing completed - requestId={}, success={}, timestamp={}, details={}",
+                                   requestId, success, record.getProcessingCompleted(), details);
+                       }
+                   } catch (Exception e) {
+                       log.error("Failed to audit processing completed for requestId={}: {}", requestId, e.getMessage());
+                       throw new AuditServiceException("Failed to log processing completed", e);
+                   }
+               }
+
+               public void logError(String requestId, String errorMessage, Throwable throwable) {
+                   try {
+                       AuditRecord record = auditLog.computeIfAbsent(requestId, k -> new AuditRecord(requestId));
+                       record.setErrorOccurred(LocalDateTime.now());
+                       record.setErrorMessage(errorMessage);
+                       record.setSuccess(false);
+
+                       log.error("Audit: Error occurred - requestId={}, error={}, timestamp={}",
+                               requestId, errorMessage, record.getErrorOccurred(), throwable);
+                   } catch (Exception e) {
+                       log.error("Failed to audit error for requestId={}: {}", requestId, e.getMessage());
+                       // Don't throw exception here to avoid masking original error
+                   }
+               }
+
+               public AuditRecord getAuditRecord(String requestId) {
+                   return auditLog.get(requestId);
+               }
+
+               // Inner class for audit record
+               public static class AuditRecord {
+                   private final String requestId;
+                   private LocalDateTime messageReceived;
+                   private LocalDateTime processingStarted;
+                   private LocalDateTime processingCompleted;
+                   private LocalDateTime errorOccurred;
+                   private String groupName;
+                   private String messageGroupId;
+                   private boolean success;
+                   private String details;
+                   private String errorMessage;
+
+                   public AuditRecord(String requestId) {
+                       this.requestId = requestId;
+                   }
+
+                   // Getters and setters
+                   public String getRequestId() { return requestId; }
+                   public LocalDateTime getMessageReceived() { return messageReceived; }
+                   public void setMessageReceived(LocalDateTime messageReceived) { this.messageReceived = messageReceived; }
+                   public LocalDateTime getProcessingStarted() { return processingStarted; }
+                   public void setProcessingStarted(LocalDateTime processingStarted) { this.processingStarted = processingStarted; }
+                   public LocalDateTime getProcessingCompleted() { return processingCompleted; }
+                   public void setProcessingCompleted(LocalDateTime processingCompleted) { this.processingCompleted = processingCompleted; }
+                   public LocalDateTime getErrorOccurred() { return errorOccurred; }
+                   public void setErrorOccurred(LocalDateTime errorOccurred) { this.errorOccurred = errorOccurred; }
+                   public String getGroupName() { return groupName; }
+                   public void setGroupName(String groupName) { this.groupName = groupName; }
+                   public String getMessageGroupId() { return messageGroupId; }
+                   public void setMessageGroupId(String messageGroupId) { this.messageGroupId = messageGroupId; }
+                   public boolean isSuccess() { return success; }
+                   public void setSuccess(boolean success) { this.success = success; }
+                   public String getDetails() { return details; }
+                   public void setDetails(String details) { this.details = details; }
+                   public String getErrorMessage() { return errorMessage; }
+                   public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+               }
+           }
+
+           /* =============================================================
+            * STORAGE SERVICE - For data persistence operations
+            * =========================================================== */
+
+           package com.example.sqs.service;
+
+           import com.example.sqs.exception.StorageServiceException;
+           import com.example.sqs.model.DataRequest;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.stereotype.Service;
+
+           import java.time.LocalDateTime;
+           import java.util.Map;
+           import java.util.concurrent.ConcurrentHashMap;
+
+           /**
+            * Service for handling data storage operations
+            */
+           @Service
+           @Slf4j
+           public class StorageService {
+
+               private final Map<String, StoredData> dataStore = new ConcurrentHashMap<>();
+
+               public void storeDataRequest(DataRequest dataRequest, String groupName) {
+                   try {
+                       StoredData storedData = new StoredData();
+                       storedData.setDataRequest(dataRequest);
+                       storedData.setGroupName(groupName);
+                       storedData.setStoredAt(LocalDateTime.now());
+                       storedData.setStatus("STORED");
+
+                       dataStore.put(dataRequest.getRequestId(), storedData);
+
+                       log.info("Storage: Data stored successfully - requestId={}, group={}, timestamp={}",
+                               dataRequest.getRequestId(), groupName, storedData.getStoredAt());
+                   } catch (Exception e) {
+                       log.error("Failed to store data for requestId={}: {}", dataRequest.getRequestId(), e.getMessage());
+                       throw new StorageServiceException("Failed to store data request", e);
+                   }
+               }
+
+               public void updateProcessingStatus(String requestId, String status, String details) {
+                   try {
+                       StoredData storedData = dataStore.get(requestId);
+                       if (storedData != null) {
+                           storedData.setStatus(status);
+                           storedData.setDetails(details);
+                           storedData.setLastUpdated(LocalDateTime.now());
+
+                           log.info("Storage: Status updated - requestId={}, status={}, details={}",
+                                   requestId, status, details);
+                       } else {
+                           log.warn("Storage: No stored data found for requestId={}", requestId);
+                       }
+                   } catch (Exception e) {
+                       log.error("Failed to update processing status for requestId={}: {}", requestId, e.getMessage());
+                       throw new StorageServiceException("Failed to update processing status", e);
+                   }
+               }
+
+               public StoredData retrieveStoredData(String requestId) {
+                   try {
+                       StoredData storedData = dataStore.get(requestId);
+                       if (storedData != null) {
+                           log.debug("Storage: Data retrieved - requestId={}", requestId);
+                       } else {
+                           log.warn("Storage: No data found for requestId={}", requestId);
+                       }
+                       return storedData;
+                   } catch (Exception e) {
+                       log.error("Failed to retrieve stored data for requestId={}: {}", requestId, e.getMessage());
+                       throw new StorageServiceException("Failed to retrieve stored data", e);
+                   }
+               }
+
+               public void deleteStoredData(String requestId) {
+                   try {
+                       StoredData removed = dataStore.remove(requestId);
+                       if (removed != null) {
+                           log.info("Storage: Data deleted - requestId={}", requestId);
+                       } else {
+                           log.warn("Storage: No data found to delete for requestId={}", requestId);
+                       }
+                   } catch (Exception e) {
+                       log.error("Failed to delete stored data for requestId={}: {}", requestId, e.getMessage());
+                       throw new StorageServiceException("Failed to delete stored data", e);
+                   }
+               }
+
+               // Inner class for stored data
+               public static class StoredData {
+                   private DataRequest dataRequest;
+                   private String groupName;
+                   private LocalDateTime storedAt;
+                   private LocalDateTime lastUpdated;
+                   private String status;
+                   private String details;
+
+                   // Getters and setters
+                   public DataRequest getDataRequest() { return dataRequest; }
+                   public void setDataRequest(DataRequest dataRequest) { this.dataRequest = dataRequest; }
+                   public String getGroupName() { return groupName; }
+                   public void setGroupName(String groupName) { this.groupName = groupName; }
+                   public LocalDateTime getStoredAt() { return storedAt; }
+                   public void setStoredAt(LocalDateTime storedAt) { this.storedAt = storedAt; }
+                   public LocalDateTime getLastUpdated() { return lastUpdated; }
+                   public void setLastUpdated(LocalDateTime lastUpdated) { this.lastUpdated = lastUpdated; }
+                   public String getStatus() { return status; }
+                   public void setStatus(String status) { this.status = status; }
+                   public String getDetails() { return details; }
+                   public void setDetails(String details) { this.details = details; }
+               }
+           }
+
+           /* =============================================================
+            * WORKFLOW HANDLERS - Business logic for each group
+            * =========================================================== */
+
+           package com.example.sqs.workflow;
+
+           import com.example.sqs.exception.WorkflowProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.StorageService;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.stereotype.Service;
+
+           /**
+            * Workflow handler for data preparation operations
+            */
+           @Service
+           @RequiredArgsConstructor
+           @Slf4j
+           public class DataPreparationWorkflowHandler {
+
+               private final StorageService storageService;
+               private final AuditService auditService;
+
+               public void processDataPreparation(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   try {
+                       auditService.logProcessingStarted(requestId);
+
+                       log.info("DataPrep Workflow: Starting data preparation for requestId={}", requestId);
+
+                       // Step 1: Store the data request
+                       storageService.storeDataRequest(dataRequest, "DATAPREP");
+
+                       // Step 2: Validate data format
+                       validateDataFormat(dataRequest);
+
+                       // Step 3: Perform data preparation logic
+                       performDataPreparation(dataRequest);
+
+                       // Step 4: Update storage with completion status
+                       storageService.updateProcessingStatus(requestId, "DATAPREP_COMPLETED",
+                               "Data preparation completed successfully");
+
+                       auditService.logProcessingCompleted(requestId, true, "Data preparation workflow completed");
+
+                       log.info("DataPrep Workflow: Successfully completed for requestId={}", requestId);
+
+                   } catch (Exception e) {
+                       String errorMessage = "Data preparation workflow failed: " + e.getMessage();
+                       log.error("DataPrep Workflow: Failed for requestId={}: {}", requestId, errorMessage, e);
+
+                       auditService.logError(requestId, errorMessage, e);
+                       storageService.updateProcessingStatus(requestId, "DATAPREP_FAILED", errorMessage);
+
+                       throw new WorkflowProcessingException(errorMessage, e);
+                   }
+               }
+
+               private void validateDataFormat(DataRequest dataRequest) {
+                   if (dataRequest.getProduct() == null || dataRequest.getProduct().trim().isEmpty()) {
+                       throw new IllegalArgumentException("Product field is required for data preparation");
+                   }
+
+                   if (dataRequest.getIterationCount() == null || dataRequest.getIterationCount() < 1) {
+                       throw new IllegalArgumentException("Valid iteration count is required");
+                   }
+
+                   log.debug("DataPrep Workflow: Data format validation passed for requestId={}",
+                           dataRequest.getRequestId());
+               }
+
+               private void performDataPreparation(DataRequest dataRequest) {
+                   // Simulate data preparation work
+                   try {
+                       Thread.sleep(100); // Simulate processing time
+                       log.debug("DataPrep Workflow: Data preparation logic executed for requestId={}",
+                               dataRequest.getRequestId());
+                   } catch (InterruptedException e) {
+                       Thread.currentThread().interrupt();
+                       throw new WorkflowProcessingException("Data preparation interrupted", e);
+                   }
+               }
+           }
+
+           /* ============================================================= */
+
+           package com.example.sqs.workflow;
+
+           import com.example.sqs.exception.WorkflowProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.StorageService;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.stereotype.Service;
+
+           /**
+            * Workflow handler for data pipeline operations
+            */
+           @Service
+           @RequiredArgsConstructor
+           @Slf4j
+           public class DataPipelineWorkflowHandler {
+
+               private final StorageService storageService;
+               private final AuditService auditService;
+
+               public void processDataPipeline(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   try {
+                       auditService.logProcessingStarted(requestId);
+
+                       log.info("DataPipeline Workflow: Starting data pipeline processing for requestId={}", requestId);
+
+                       // Step 1: Store the data request
+                       storageService.storeDataRequest(dataRequest, "DATAPIPELINE");
+
+                       // Step 2: Execute pipeline stages
+                       executePipelineStages(dataRequest);
+
+                       // Step 3: Generate reports
+                       generateReports(dataRequest);
+
+                       // Step 4: Update storage with completion status
+                       storageService.updateProcessingStatus(requestId, "PIPELINE_COMPLETED",
+                               "Data pipeline processing completed successfully");
+
+                       auditService.logProcessingCompleted(requestId, true, "Data pipeline workflow completed");
+
+                       log.info("DataPipeline Workflow: Successfully completed for requestId={}", requestId);
+
+                   } catch (Exception e) {
+                       String errorMessage = "Data pipeline workflow failed: " + e.getMessage();
+                       log.error("DataPipeline Workflow: Failed for requestId={}: {}", requestId, errorMessage, e);
+
+                       auditService.logError(requestId, errorMessage, e);
+                       storageService.updateProcessingStatus(requestId, "PIPELINE_FAILED", errorMessage);
+
+                       throw new WorkflowProcessingException(errorMessage, e);
+                   }
+               }
+
+               private void executePipelineStages(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   // Stage 1: Data transformation
+                   log.debug("DataPipeline Workflow: Executing data transformation for requestId={}", requestId);
+                   simulateProcessing(50);
+
+                   // Stage 2: Data validation
+                   log.debug("DataPipeline Workflow: Executing data validation for requestId={}", requestId);
+                   simulateProcessing(75);
+
+                   // Stage 3: Data enrichment
+                   log.debug("DataPipeline Workflow: Executing data enrichment for requestId={}", requestId);
+                   simulateProcessing(100);
+
+                   log.debug("DataPipeline Workflow: All pipeline stages completed for requestId={}", requestId);
+               }
+
+               private void generateReports(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   log.debug("DataPipeline Workflow: Generating reports for requestId={}", requestId);
+                   simulateProcessing(200);
+
+                   log.debug("DataPipeline Workflow: Report generation completed for requestId={}", requestId);
+               }
+
+               private void simulateProcessing(int durationMs) {
+                   try {
+                       Thread.sleep(durationMs);
+                   } catch (InterruptedException e) {
+                       Thread.currentThread().interrupt();
+                       throw new WorkflowProcessingException("Pipeline processing interrupted", e);
+                   }
+               }
+           }
+
+           /* ============================================================= */
+
+           package com.example.sqs.workflow;
+
+           import com.example.sqs.exception.WorkflowProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.StorageService;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.stereotype.Service;
+
+           /**
+            * Workflow handler for approval operations
+            */
+           @Service
+           @RequiredArgsConstructor
+           @Slf4j
+           public class ApprovalWorkflowHandler {
+
+               private final StorageService storageService;
+               private final AuditService auditService;
+
+               public void processApproval(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   try {
+                       auditService.logProcessingStarted(requestId);
+
+                       log.info("Approval Workflow: Starting approval processing for requestId={}", requestId);
+
+                       // Step 1: Store the data request
+                       storageService.storeDataRequest(dataRequest, "APPROVAL");
+
+                       // Step 2: Validate approval requirements
+                       validateApprovalRequirements(dataRequest);
+
+                       // Step 3: Execute approval logic
+                       executeApprovalLogic(dataRequest);
+
+                       // Step 4: Finalize approval
+                       finalizeApproval(dataRequest);
+
+                       // Step 5: Update storage with completion status
+                       storageService.updateProcessingStatus(requestId, "APPROVAL_COMPLETED",
+                               "Approval processing completed successfully");
+
+                       auditService.logProcessingCompleted(requestId, true, "Approval workflow completed");
+
+                       log.info("Approval Workflow: Successfully completed for requestId={}", requestId);
+
+                   } catch (Exception e) {
+                       String errorMessage = "Approval workflow failed: " + e.getMessage();
+                       log.error("Approval Workflow: Failed for requestId={}: {}", requestId, errorMessage, e);
+
+                       auditService.logError(requestId, errorMessage, e);
+                       storageService.updateProcessingStatus(requestId, "APPROVAL_FAILED", errorMessage);
+
+                       throw new WorkflowProcessingException(errorMessage, e);
+                   }
+               }
+
+               private void validateApprovalRequirements(DataRequest dataRequest) {
+                   if (dataRequest.getFlowIndicator() == null) {
+                       throw new IllegalArgumentException("Flow indicator is required for approval");
+                   }
+
+                   if (dataRequest.getReportDate() == null || dataRequest.getReportDate().trim().isEmpty()) {
+                       throw new IllegalArgumentException("Report date is required for approval");
+                   }
+
+                   log.debug("Approval Workflow: Requirements validation passed for requestId={}",
+                           dataRequest.getRequestId());
+               }
+
+               private void executeApprovalLogic(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   log.debug("Approval Workflow: Executing approval logic for requestId={}", requestId);
+
+                   // Simulate approval checks
+                   simulateApprovalProcess(150);
+
+                   log.debug("Approval Workflow: Approval logic completed for requestId={}", requestId);
+               }
+
+               private void finalizeApproval(DataRequest dataRequest) {
+                   String requestId = dataRequest.getRequestId();
+
+                   log.debug("Approval Workflow: Finalizing approval for requestId={}", requestId);
+
+                   // Simulate finalization
+                   simulateApprovalProcess(100);
+
+                   log.debug("Approval Workflow: Approval finalized for requestId={}", requestId);
+               }
+
+               private void simulateApprovalProcess(int durationMs) {
+                   try {
+                       Thread.sleep(durationMs);
+                   } catch (InterruptedException e) {
+                       Thread.currentThread().interrupt();
+                       throw new WorkflowProcessingException("Approval processing interrupted", e);
+                   }
+               }
+           }
+
+           /* =============================================================
+            * ENHANCED LISTENERS - With workflow handlers and exception handling
+            * =========================================================== */
+
+           package com.example.sqs.listener;
+
+           import com.example.sqs.exception.SqsProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.model.MessageGroup;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.SqsMessageProcessingService;
+           import com.example.sqs.workflow.DataPreparationWorkflowHandler;
+           import io.awspring.cloud.sqs.annotation.SqsListener;
+           import io.awspring.cloud.sqs.listener.Visibility;
+           import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.messaging.handler.annotation.Header;
+           import org.springframework.messaging.handler.annotation.Payload;
+           import org.springframework.stereotype.Component;
+
+           import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+           /**
+            * Enhanced SQS listener for data preparation group with workflow handling
+            */
+           @Component
+           @RequiredArgsConstructor
+           @Slf4j
+           public class DataPreparationSqsListener {
+
+               private static final String GROUP_NAME = "DataPreparation";
+
+               private final SqsMessageProcessingService messageProcessingService;
+               private final DataPreparationWorkflowHandler workflowHandler;
+               private final AuditService auditService;
+
+               @SqsListener(
+                   value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                   factory = "dataPreparationListenerFactory"
+               )
+               public void handleDataPreparationMessage(
+                       @Payload DataRequest dataRequest,
+                       @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                       Visibility visibility,
+                       Acknowledgement acknowledgement) {
+
+                   String requestId = dataRequest.getRequestId();
+
+                   log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                           GROUP_NAME, requestId, messageGroupId, dataRequest.getRequestType());
+
+                   try {
+                       // Log message receipt
+                       auditService.logMessageReceived(requestId, GROUP_NAME, messageGroupId);
+
+                       // Check if message belongs to this group
+                       if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.DATAPREP)) {
+                           log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                                    messageGroupId, GROUP_NAME);
+                           messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                           return;
+                       }
+
+                       // Process the message through workflow handler
+                       workflowHandler.processDataPreparation(dataRequest);
+
+                       // Acknowledge successful processing
+                       acknowledgement.acknowledge();
+                       log.info("Message successfully processed and acknowledged for {} group, requestId={}",
+                               GROUP_NAME, requestId);
+
+                   } catch (SqsProcessingException e) {
+                       log.error("SQS processing error in {} group for requestId={}: {}",
+                               GROUP_NAME, requestId, e.getMessage(), e);
+                       auditService.logError(requestId, "SQS processing error: " + e.getMessage(), e);
+
+                       // Don't acknowledge - let message be retried
+                       handleProcessingError(visibility, requestId, e);
+
+                   } catch (Exception e) {
+                       log.error("Unexpected error in {} group for requestId={}: {}",
+                               GROUP_NAME, requestId, e.getMessage(), e);
+                       auditService.logError(requestId, "Unexpected error: " + e.getMessage(), e);
+
+                       // Don't acknowledge - let message be retried
+                       handleProcessingError(visibility, requestId, e);
+                   }
+               }
+
+               private void handleProcessingError(Visibility visibility, String requestId, Exception e) {
+                   try {
+                       // Extend visibility timeout to prevent immediate retry
+                       visibility.changeTo(60); // 60 seconds
+                       log.info("Extended visibility timeout for failed message processing, requestId={}", requestId);
+                   } catch (Exception visibilityException) {
+                       log.error("Failed to extend visibility timeout for requestId={}: {}",
+                               requestId, visibilityException.getMessage(), visibilityException);
+                   }
+               }
+           }
+
+           /* ============================================================= */
+
+           package com.example.sqs.listener;
+
+           import com.example.sqs.exception.SqsProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.model.MessageGroup;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.SqsMessageProcessingService;
+           import com.example.sqs.workflow.DataPipelineWorkflowHandler;
+           import io.awspring.cloud.sqs.annotation.SqsListener;
+           import io.awspring.cloud.sqs.listener.Visibility;
+           import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.messaging.handler.annotation.Header;
+           import org.springframework.messaging.handler.annotation.Payload;
+           import org.springframework.stereotype.Component;
+
+           import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+           /**
+            * Enhanced SQS listener for data pipeline group with workflow handling
+            */
+           @Component
+           @RequiredArgsConstructor
+           @Slf4j
+           public class DataPipelineSqsListener {
+
+               private static final String GROUP_NAME = "DataPipeline";
+
+               private final SqsMessageProcessingService messageProcessingService;
+               private final DataPipelineWorkflowHandler workflowHandler;
+               private final AuditService auditService;
+
+               @SqsListener(
+                   value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                   factory = "dataPipelineListenerFactory"
+               )
+               public void handleDataPipelineMessage(
+                       @Payload DataRequest dataRequest,
+                       @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                       Visibility visibility,
+                       Acknowledgement acknowledgement) {
+
+                   String requestId = dataRequest.getRequestId();
+
+                   log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                           GROUP_NAME, requestId, messageGroupId, dataRequest.getRequestType());
+
+                   try {
+                       // Log message receipt
+                       auditService.logMessageReceived(requestId, GROUP_NAME, messageGroupId);
+
+                       // Check if message belongs to this group
+                       if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.DATAPIPELINE)) {
+                           log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                                    messageGroupId, GROUP_NAME);
+                           messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                           return;
+                       }
+
+                       // Process the message through workflow handler
+                       workflowHandler.processDataPipeline(dataRequest);
+
+                       // Acknowledge successful processing
+                       acknowledgement.acknowledge();
+                       log.info("Message successfully processed and acknowledged for {} group, requestId={}",
+                               GROUP_NAME, requestId);
+
+                   } catch (SqsProcessingException e) {
+                       log.error("SQS processing error in {} group for requestId={}: {}",
+                               GROUP_NAME, requestId, e.getMessage(), e);
+                       auditService.logError(requestId, "SQS processing error: " + e.getMessage(), e);
+
+                       handleProcessingError(visibility, requestId, e);
+
+                   } catch (Exception e) {
+                       log.error("Unexpected error in {} group for requestId={}: {}",
+                               GROUP_NAME, requestId, e.getMessage(), e);
+                       auditService.logError(requestId, "Unexpected error: " + e.getMessage(), e);
+
+                       handleProcessingError(visibility, requestId, e);
+                   }
+               }
+
+               private void handleProcessingError(Visibility visibility, String requestId, Exception e) {
+                   try {
+                       visibility.changeTo(60); // 60 seconds
+                       log.info("Extended visibility timeout for failed message processing, requestId={}", requestId);
+                   } catch (Exception visibilityException) {
+                       log.error("Failed to extend visibility timeout for requestId={}: {}",
+                               requestId, visibilityException.getMessage(), visibilityException);
+                   }
+               }
+           }
+
+           /* ============================================================= */
+
+           package com.example.sqs.listener;
+
+           import com.example.sqs.exception.SqsProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.model.MessageGroup;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.SqsMessageProcessingService;
+           import com.example.sqs.workflow.ApprovalWorkflowHandler;
+           import io.awspring.cloud.sqs.annotation.SqsListener;
+           import io.awspring.cloud.sqs.listener.Visibility;
+           import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.messaging.handler.annotation.Header;
+           import org.springframework.messaging.handler.annotation.Payload;
+           import org.springframework.stereotype.Component;
+
+           import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+           /**
+            * Enhanced SQS listener for approval group with workflow handling
+            */
+           @Component
+           @RequiredArgsConstructor
+           @Slf4j
+           public class ApprovalSqsListener {
+
+               private static final String GROUP_NAME = "Approval";
+
+               private final SqsMessageProcessingService messageProcessingService;
+               private final ApprovalWorkflowHandler workflowHandler;
+               private final AuditService auditService;
+
+               @SqsListener(
+                   value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                   factory = "approvalGroupListenerFactory"
+               )
+               public void handleApprovalMessage(
+                       @Payload DataRequest dataRequest,
+                       @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                       Visibility visibility,
+                       Acknowledgement acknowledgement) {
+
+                   String requestId = dataRequest.getRequestId();
+
+                   log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                           GROUP_NAME, requestId, messageGroupId, dataRequest.getRequestType());
+
+                   try {
+                       // Log message receipt
+                       auditService.logMessageReceived(requestId, GROUP_NAME, messageGroupId);
+
+                       // Check if message belongs to this group
+                       if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.APPROVAL)) {
+                           log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                                    messageGroupId, GROUP_NAME);
+                           messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                           return;
+                       }
+
+                       // Process the message through workflow handler
+                       workflowHandler.processApproval(dataRequest);
+
+                       // Acknowledge successful processing
+                       acknowledgement.acknowledge();
+                       log.info("Message successfully processed and acknowledged for {} group, requestId={}",
+                               GROUP_NAME, requestId);
+
+                   } catch (SqsProcessingException e) {
+                       log.error("SQS processing error in {} group for requestId={}: {}",
+                               GROUP_NAME, requestId, e.getMessage(), e);
+                       auditService.logError(requestId, "SQS processing error: " + e.getMessage(), e);
+
+                       handleProcessingError(visibility, requestId, e);
+
+                   } catch (Exception e) {
+                       log.error("Unexpected error in {} group for requestId={}: {}",
+                               GROUP_NAME, requestId, e.getMessage(), e);
+                       auditService.logError(requestId, "Unexpected error: " + e.getMessage(), e);
+
+                       handleProcessingError(visibility, requestId, e);
+                   }
+               }
+
+               private void handleProcessingError(Visibility visibility, String requestId, Exception e) {
+                   try {
+                       visibility.changeTo(60); // 60 seconds
+                       log.info("Extended visibility timeout for failed message processing, requestId={}", requestId);
+                   } catch (Exception visibilityException) {
+                       log.error("Failed to extend visibility timeout for requestId={}: {}",
+                               requestId, visibilityException.getMessage(), visibilityException);
+                   }
+               }
+           }
+
+           /* =============================================================
+            * GLOBAL EXCEPTION HANDLER - For REST endpoints
+            * =========================================================== */
+
+           package com.example.sqs.exception;
+
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.http.HttpStatus;
+           import org.springframework.http.ResponseEntity;
+           import org.springframework.validation.FieldError;
+           import org.springframework.web.bind.MethodArgumentNotValidException;
+           import org.springframework.web.bind.annotation.ExceptionHandler;
+           import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+           import java.time.LocalDateTime;
+           import java.util.HashMap;
+           import java.util.Map;
+
+           /**
+            * Global exception handler for REST API endpoints
+            */
+           @RestControllerAdvice
+           @Slf4j
+           public class GlobalExceptionHandler {
+
+               @ExceptionHandler(SqsProcessingException.class)
+               public ResponseEntity<ErrorResponse> handleSqsProcessingException(SqsProcessingException e) {
+                   log.error("SQS processing exception: {}", e.getMessage(), e);
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                           .error("SQS Processing Error")
+                           .message(e.getMessage())
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+               }
+
+               @ExceptionHandler(WorkflowProcessingException.class)
+               public ResponseEntity<ErrorResponse> handleWorkflowProcessingException(WorkflowProcessingException e) {
+                   log.error("Workflow processing exception: {}", e.getMessage(), e);
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                           .error("Workflow Processing Error")
+                           .message(e.getMessage())
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+               }
+
+               @ExceptionHandler(StorageServiceException.class)
+               public ResponseEntity<ErrorResponse> handleStorageServiceException(StorageServiceException e) {
+                   log.error("Storage service exception: {}", e.getMessage(), e);
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                           .error("Storage Service Error")
+                           .message(e.getMessage())
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+               }
+
+               @ExceptionHandler(AuditServiceException.class)
+               public ResponseEntity<ErrorResponse> handleAuditServiceException(AuditServiceException e) {
+                   log.error("Audit service exception: {}", e.getMessage(), e);
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                           .error("Audit Service Error")
+                           .message(e.getMessage())
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+               }
+
+               @ExceptionHandler(MethodArgumentNotValidException.class)
+               public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException e) {
+                   log.error("Validation exception: {}", e.getMessage());
+
+                   Map<String, String> validationErrors = new HashMap<>();
+                   e.getBindingResult().getAllErrors().forEach(error -> {
+                       String fieldName = ((FieldError) error).getField();
+                       String errorMessage = error.getDefaultMessage();
+                       validationErrors.put(fieldName, errorMessage);
+                   });
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.BAD_REQUEST.value())
+                           .error("Validation Error")
+                           .message("Invalid request data")
+                           .validationErrors(validationErrors)
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+               }
+
+               @ExceptionHandler(IllegalArgumentException.class)
+               public ResponseEntity<ErrorResponse> handleIllegalArgumentException(IllegalArgumentException e) {
+                   log.error("Illegal argument exception: {}", e.getMessage(), e);
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.BAD_REQUEST.value())
+                           .error("Invalid Argument")
+                           .message(e.getMessage())
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+               }
+
+               @ExceptionHandler(Exception.class)
+               public ResponseEntity<ErrorResponse> handleGenericException(Exception e) {
+                   log.error("Unexpected exception: {}", e.getMessage(), e);
+
+                   ErrorResponse errorResponse = ErrorResponse.builder()
+                           .timestamp(LocalDateTime.now())
+                           .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                           .error("Internal Server Error")
+                           .message("An unexpected error occurred")
+                           .build();
+
+                   return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+               }
+
+               // Error response DTO
+               @lombok.Data
+               @lombok.Builder
+               public static class ErrorResponse {
+                   private LocalDateTime timestamp;
+                   private int status;
+                   private String error;
+                   private String message;
+                   private Map<String, String> validationErrors;
+               }
+           }
+
+           /* =============================================================
+            * ENHANCED REST CONTROLLER - With audit and monitoring endpoints
+            * =========================================================== */
+
+           package com.example.sqs.controller;
+
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.model.MessageGroup;
+           import com.example.sqs.publisher.SqsMessagePublisher;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.StorageService;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.http.ResponseEntity;
+           import org.springframework.web.bind.annotation.*;
+           import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
+
+           import jakarta.validation.Valid;
+           import java.util.UUID;
+           import java.util.concurrent.CompletableFuture;
+
+           @RestController
+           @RequestMapping("/api/sqs")
+           @RequiredArgsConstructor
+           @Slf4j
+           public class SqsTestController {
+
+               private final SqsMessagePublisher messagePublisher;
+               private final AuditService auditService;
+               private final StorageService storageService;
+
+               @PostMapping("/publish/{group}")
+               public CompletableFuture<ResponseEntity<String>> publishTestMessage(
+                       @PathVariable MessageGroup group,
+                       @Valid @RequestBody DataRequest request) {
+
+                   log.info("Received request to publish message to {} group: {}", group, request.getRequestId());
+
+                   return messagePublisher.publishMessage(request, group)
+                           .thenApply(response -> ResponseEntity.ok(
+                                   String.format("Message published successfully to %s group. MessageId: %s", group, response.messageId())
+                           ))
+                           .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                   .body("Failed to publish message: " + throwable.getMessage()));
+               }
+
+               @PostMapping("/test/dataprep")
+               public CompletableFuture<ResponseEntity<String>> testDataPrep() {
+                   DataRequest request = createSampleRequest("DATAPREP_TEST");
+                   return messagePublisher.publishToDataPrep(request)
+                           .thenApply(response -> ResponseEntity.ok("DataPrep test message sent. MessageId: " + response.messageId()))
+                           .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                   .body("Failed to send test message: " + throwable.getMessage()));
+               }
+
+               @PostMapping("/test/datapipeline")
+               public CompletableFuture<ResponseEntity<String>> testDataPipeline() {
+                   DataRequest request = createSampleRequest("DATAPIPELINE_TEST");
+                   return messagePublisher.publishToDataPipeline(request)
+                           .thenApply(response -> ResponseEntity.ok("DataPipeline test message sent. MessageId: " + response.messageId()))
+                           .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                   .body("Failed to send test message: " + throwable.getMessage()));
+               }
+
+               @PostMapping("/test/approval")
+               public CompletableFuture<ResponseEntity<String>> testApproval() {
+                   DataRequest request = createSampleRequest("APPROVAL_TEST");
+                   return messagePublisher.publishToApproval(request)
+                           .thenApply(response -> ResponseEntity.ok("Approval test message sent. MessageId: " + response.messageId()))
+                           .exceptionally(throwable -> ResponseEntity.internalServerError()
+                                   .body("Failed to send test message: " + throwable.getMessage()));
+               }
+
+               @GetMapping("/audit/{requestId}")
+               public ResponseEntity<AuditService.AuditRecord> getAuditRecord(@PathVariable String requestId) {
+                   AuditService.AuditRecord auditRecord = auditService.getAuditRecord(requestId);
+                   if (auditRecord != null) {
+                       return ResponseEntity.ok(auditRecord);
+                   } else {
+                       return ResponseEntity.notFound().build();
+                   }
+               }
+
+               @GetMapping("/storage/{requestId}")
+               public ResponseEntity<StorageService.StoredData> getStoredData(@PathVariable String requestId) {
+                   StorageService.StoredData storedData = storageService.retrieveStoredData(requestId);
+                   if (storedData != null) {
+                       return ResponseEntity.ok(storedData);
+                   } else {
+                       return ResponseEntity.notFound().build();
+                   }
+               }
+
+               @GetMapping("/health")
+               public ResponseEntity<String> health() {
+                   return ResponseEntity.ok("SQS Multi-Listener Group System with Workflow Handlers is running");
+               }
+
+               private DataRequest createSampleRequest(String requestType) {
+                   return DataRequest.builder()
+                           .requestId(UUID.randomUUID().toString())
+                           .requestType(requestType)
+                           .reportDate("2025-01-15")
+                           .product("TestProduct")
+                           .subProduct("TestSubProduct")
+                           .iterationCount(1)
+                           .frequency("DAILY")
+                           .flowIndicator("TEST")
+                           .flowStatus("PENDING")
+                           .host("localhost")
+                           .build();
+               }
+           }
+
+           /* =============================================================
+            * RETRY CONFIGURATION - For failed message processing
+            * =========================================================== */
+
+           package com.example.sqs.config;
+
+           import lombok.Data;
+           import org.springframework.boot.context.properties.ConfigurationProperties;
+           import org.springframework.validation.annotation.Validated;
+
+           import jakarta.validation.constraints.*;
+
+           /**
+            * Configuration properties for retry and error handling
+            */
+           @ConfigurationProperties(prefix = "spring.cloud.aws.sqs.retry")
+           @Validated
+           @Data
+           public class SqsRetryConfigurationProperties {
+
+               @Min(value = 1, message = "Max retry attempts must be at least 1")
+               @Max(value = 10, message = "Max retry attempts cannot exceed 10")
+               private int maxRetryAttempts = 3;
+
+               @Min(value = 30, message = "Initial retry delay must be at least 30 seconds")
+               @Max(value = 900, message = "Initial retry delay cannot exceed 15 minutes")
+               private int initialRetryDelaySeconds = 60;
+
+               @Min(value = 2, message = "Retry multiplier must be at least 2")
+               @Max(value = 10, message = "Retry multiplier cannot exceed 10")
+               private double retryMultiplier = 2.0;
+
+               @Min(value = 300, message = "Max retry delay must be at least 5 minutes")
+               @Max(value = 3600, message = "Max retry delay cannot exceed 1 hour")
+               private int maxRetryDelaySeconds = 1800;
+
+               private boolean enableDeadLetterQueue = true;
+               private String deadLetterQueueUrl;
+           }
+
+           /* =============================================================
+            * ENHANCED MESSAGE PROCESSING SERVICE - With retry logic
+            * =========================================================== */
+
+           package com.example.sqs.service;
+
+           import com.example.sqs.config.SqsRetryConfigurationProperties;
+           import io.awspring.cloud.sqs.listener.Visibility;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.boot.context.properties.EnableConfigurationProperties;
+           import org.springframework.stereotype.Service;
+
+           import java.util.Map;
+           import java.util.concurrent.ConcurrentHashMap;
+
+           /**
+            * Enhanced SQS message processing service with retry logic
+            */
+           @Service
+           @RequiredArgsConstructor
+           @EnableConfigurationProperties(SqsRetryConfigurationProperties.class)
+           @Slf4j
+           public class SqsMessageProcessingService {
+
+               private final SqsRetryConfigurationProperties retryProperties;
+               private final Map<String, Integer> retryCountMap = new ConcurrentHashMap<>();
+
+               /**
+                * Routes misdelivered messages back to the queue for correct listener pickup.
+                */
+               public void routeMessageToCorrectListener(Visibility visibility, String groupName) {
+                   if (visibility == null) {
+                       log.error("Cannot route message - visibility is null");
+                       return;
+                   }
+
+                   try {
+                       visibility.changeTo(0); // make visible immediately
+                       log.debug("Message routed away from {} listener – visibility reset to 0 s", groupName);
+                   } catch (Exception routingException) {
+                       log.error("Failed to reset visibility for {} listener: {}",
+                                groupName, routingException.getMessage(), routingException);
+                   }
+               }
+
+               /**
+                * Handles retry logic for failed message processing
+                */
+               public boolean handleRetry(String requestId, Visibility visibility, Exception exception) {
+                   int currentRetryCount = retryCountMap.getOrDefault(requestId, 0);
+
+                   if (currentRetryCount >= retryProperties.getMaxRetryAttempts()) {
+                       log.error("Maximum retry attempts ({}) exceeded for requestId={}, sending to DLQ",
+                               retryProperties.getMaxRetryAttempts(), requestId);
+                       retryCountMap.remove(requestId);
+                       return false; // Message should go to DLQ
+                   }
+
+                   currentRetryCount++;
+                   retryCountMap.put(requestId, currentRetryCount);
+
+                   int retryDelay = calculateRetryDelay(currentRetryCount);
+
+                   try {
+                       visibility.changeTo(retryDelay);
+                       log.info("Retry {} of {} scheduled for requestId={} with delay of {} seconds",
+                               currentRetryCount, retryProperties.getMaxRetryAttempts(), requestId, retryDelay);
+                       return true;
+                   } catch (Exception e) {
+                       log.error("Failed to set retry visibility for requestId={}: {}",
+                               requestId, e.getMessage(), e);
+                       return false;
+                   }
+               }
+
+               /**
+                * Calculates exponential backoff delay for retries
+                */
+               private int calculateRetryDelay(int retryAttempt) {
+                   double delay = retryProperties.getInitialRetryDelaySeconds() *
+                                 Math.pow(retryProperties.getRetryMultiplier(), retryAttempt - 1);
+
+                   return Math.min((int) delay, retryProperties.getMaxRetryDelaySeconds());
+               }
+
+               /**
+                * Clears retry count for successfully processed message
+                */
+               public void clearRetryCount(String requestId) {
+                   retryCountMap.remove(requestId);
+                   log.debug("Retry count cleared for requestId={}", requestId);
+               }
+           }
+
+           /* =============================================================
+            * UPDATED APPLICATION.YML WITH RETRY CONFIGURATION
+            * =========================================================== */
+
+           # Enhanced application.yml with retry configuration
+           spring:
+             application:
+               name: sqs-multilistener-workflow-system
+
+             cloud:
+               aws:
+                 credentials:
+                   access-key: ${AWS_ACCESS_KEY_ID:}
+                   secret-key: ${AWS_SECRET_ACCESS_KEY:}
+                 region:
+                   static: ${AWS_REGION:us-east-1}
+                 sqs:
+                   # Core connection settings
+                   shared-queue-url: ${SQS_QUEUE_URL:https://sqs.us-east-1.amazonaws.com/123456789/data-processing-queue.fifo}
+                   aws-region: ${AWS_REGION:us-east-1}
+
+                   # Polling and message visibility configuration
+                   message-polling-timeout-seconds: ${SQS_POLL_TIMEOUT:10}
+                   message-visibility-timeout-seconds: ${SQS_VISIBILITY_TIMEOUT:300}
+
+                   # Independent scaling per group type
+                   data-preparation-concurrency: ${DATAPREP_CONCURRENCY:5}
+                   data-pipeline-concurrency: ${DATAPIPELINE_CONCURRENCY:15}
+                   approval-group-concurrency: ${APPROVAL_CONCURRENCY:10}
+
+                   # Retry configuration
+                   retry:
+                     max-retry-attempts: ${SQS_MAX_RETRY:3}
+                     initial-retry-delay-seconds: ${SQS_INITIAL_DELAY:60}
+                     retry-multiplier: ${SQS_RETRY_MULTIPLIER:2.0}
+                     max-retry-delay-seconds: ${SQS_MAX_DELAY:1800}
+                     enable-dead-letter-queue: ${SQS_ENABLE_DLQ:true}
+                     dead-letter-queue-url: ${SQS_DLQ_URL:}
+
+           # Server configuration
+           server:
+             port: ${SERVER_PORT:8080}
+
+           # Logging configuration
+           logging:
+             level:
+               com.example.sqs: ${LOG_LEVEL_APP:INFO}
+               software.amazon.awssdk: ${LOG_LEVEL_AWS:WARN}
+               io.awspring.cloud: ${LOG_LEVEL_SPRING_CLOUD:INFO}
+
+             pattern:
+               console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+           # Management endpoints
+           management:
+             endpoints:
+               web:
+                 exposure:
+                   include: health,info,metrics,auditevents
+             endpoint:
+               health:
+                 show-details: always
+
+           ---
+           # LocalStack Profile for Local Development
+           spring:
+             config:
+               activate:
+                 on-profile: localstack
+             cloud:
+               aws:
+                 credentials:
+                   access-key: localstack
+                   secret-key: localstack
+                 region:
+                   static: us-east-1
+                 sqs:
+                   shared-queue-url: "https://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/data-queue.fifo"
+                   aws-region: us-east-1
+
+                   message-polling-timeout-seconds: 5
+                   message-visibility-timeout-seconds: 30
+
+                   data-preparation-concurrency: 3
+                   data-pipeline-concurrency: 5
+                   approval-group-concurrency: 3
+
+                   retry:
+                     max-retry-attempts: 2
+                     initial-retry-delay-seconds: 30
+                     retry-multiplier: 1.5
+                     max-retry-delay-seconds: 300
+
+           # LocalStack debug logging
+           logging:
+             level:
+               com.example.sqs: DEBUG
+               io.awspring.cloud: DEBUG
+               software.amazon.awssdk: DEBUG
+
+           ---
+           # Production Profile
+           spring:
+             config:
+               activate:
+                 on-profile: prod
+             cloud:
+               aws:
+                 sqs:
+                   retry:
+                     max-retry-attempts: 5
+                     initial-retry-delay-seconds: 120
+                     retry-multiplier: 2.5
+                     max-retry-delay-seconds: 3600
+
+           logging:
+             level:
+               com.example.sqs: INFO
+               io.awspring.cloud: WARN
+
+           management:
+             metrics:
+               export:
+                 cloudwatch:
+                   enabled: true
+
+           /* =============================================================
+            * MONITORING AND METRICS SERVICE
+            * =========================================================== */
+
+           package com.example.sqs.service;
+
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.stereotype.Service;
+
+           import java.time.LocalDateTime;
+           import java.util.Map;
+           import java.util.concurrent.ConcurrentHashMap;
+           import java.util.concurrent.atomic.AtomicLong;
+
+           /**
+            * Service for tracking metrics and monitoring SQS processing
+            */
+           @Service
+           @Slf4j
+           public class MonitoringService {
+
+               private final Map<String, AtomicLong> messageCounters = new ConcurrentHashMap<>();
+               private final Map<String, AtomicLong> errorCounters = new ConcurrentHashMap<>();
+               private final Map<String, LocalDateTime> lastProcessedTime = new ConcurrentHashMap<>();
+
+               public void incrementMessageCount(String groupName) {
+                   messageCounters.computeIfAbsent(groupName, k -> new AtomicLong(0)).incrementAndGet();
+                   lastProcessedTime.put(groupName, LocalDateTime.now());
+                   log.debug("Incremented message count for group: {}", groupName);
+               }
+
+               public void incrementErrorCount(String groupName) {
+                   errorCounters.computeIfAbsent(groupName, k -> new AtomicLong(0)).incrementAndGet();
+                   log.debug("Incremented error count for group: {}", groupName);
+               }
+
+               public long getMessageCount(String groupName) {
+                   return messageCounters.getOrDefault(groupName, new AtomicLong(0)).get();
+               }
+
+               public long getErrorCount(String groupName) {
+                   return errorCounters.getOrDefault(groupName, new AtomicLong(0)).get();
+               }
+
+               public LocalDateTime getLastProcessedTime(String groupName) {
+                   return lastProcessedTime.get(groupName);
+               }
+
+               public Map<String, Object> getMetrics() {
+                   Map<String, Object> metrics = new ConcurrentHashMap<>();
+
+                   messageCounters.forEach((group, count) ->
+                       metrics.put(group + "_message_count", count.get()));
+
+                   errorCounters.forEach((group, count) ->
+                       metrics.put(group + "_error_count", count.get()));
+
+                   lastProcessedTime.forEach((group, time) ->
+                       metrics.put(group + "_last_processed", time));
+
+                   return metrics;
+               }
+
+               public void resetMetrics() {
+                   messageCounters.clear();
+                   errorCounters.clear();
+                   lastProcessedTime.clear();
+                   log.info("All metrics have been reset");
+               }
+           }
+
+           /* =============================================================
+            * FINAL ENHANCED LISTENERS WITH MONITORING
+            * =========================================================== */
+
+           package com.example.sqs.listener;
+
+           import com.example.sqs.exception.SqsProcessingException;
+           import com.example.sqs.model.DataRequest;
+           import com.example.sqs.model.MessageGroup;
+           import com.example.sqs.service.AuditService;
+           import com.example.sqs.service.MonitoringService;
+           import com.example.sqs.service.SqsMessageProcessingService;
+           import com.example.sqs.workflow.DataPreparationWorkflowHandler;
+           import io.awspring.cloud.sqs.annotation.SqsListener;
+           import io.awspring.cloud.sqs.listener.Visibility;
+           import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
+           import lombok.RequiredArgsConstructor;
+           import lombok.extern.slf4j.Slf4j;
+           import org.springframework.messaging.handler.annotation.Header;
+           import org.springframework.messaging.handler.annotation.Payload;
+           import org.springframework.stereotype.Component;
+
+           import static io.awspring.cloud.sqs.listener.SqsHeaders.MessageSystemAttributes.*;
+
+           /**
+            * Final enhanced SQS listener for data preparation group with complete monitoring
+            */
+           @Component
+           @RequiredArgsConstructor
+           @Slf4j
+           public class DataPreparationSqsListener {
+
+               private static final String GROUP_NAME = "DataPreparation";
+
+               private final SqsMessageProcessingService messageProcessingService;
+               private final DataPreparationWorkflowHandler workflowHandler;
+               private final AuditService auditService;
+               private final MonitoringService monitoringService;
+
+               @SqsListener(
+                   value = "${spring.cloud.aws.sqs.shared-queue-url}",
+                   factory = "dataPreparationListenerFactory"
+               )
+               public void handleDataPreparationMessage(
+                       @Payload DataRequest dataRequest,
+                       @Header(SQS_MESSAGE_GROUP_ID_HEADER) String messageGroupId,
+                       Visibility visibility,
+                       Acknowledgement acknowledgement) {
+
+                   String requestId = dataRequest.getRequestId();
+
+                   log.info("Received message for {} group: requestId={}, groupId={}, requestType={}",
+                           GROUP_NAME, requestId, messageGroupId, dataRequest.getRequestType());
+
+                   try {
+                       // Increment monitoring counter
+                       monitoringService.incrementMessageCount(GROUP_NAME);
+
+                       // Log message receipt
+                       auditService.logMessageReceived(requestId, GROUP_NAME, messageGroupId);
+
+                       // Check if message belongs to this group
+                       if (!MessageGroup.isMatchingGroup(messageGroupId, MessageGroup.DATAPREP)) {
+                           log.info("Message with groupId={} does not belong to {} group, routing to correct listener",
+                                    messageGroupId, GROUP_NAME);
+                           messageProcessingService.routeMessageToCorrectListener(visibility, GROUP_NAME);
+                           return;
+                       }
+
+                       // Process the message through workflow handler
+                       workflowHandler.processDataPreparation(dataRequest);
+
+                       // Clear retry count on success
+                       messageProcessingService.clearRetryCount(requestId);
+
+                       // Acknowledge successful processing
+                       acknowledgement.acknowledge();
+                       log.info("Message successfully processed and acknowledged for {} group, requestId={}",
+                               GROUP_NAME, requestId);
+
+                   } catch (SqsProcessingException e) {
+                       handleError(visibility, requestId, e, "SQS processing error");
+
+                   } catch (Exception e) {
+                       handleError(visibility, requestId, e, "Unexpected error");
+                   }
+               }
+
+               private void handleError(Visibility
