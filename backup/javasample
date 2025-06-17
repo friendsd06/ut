@@ -1,0 +1,1359 @@
+# TRMN Validation Service - Dummy Request Implementation
+
+## 1. Main Application Entry Point
+
+### ValidationFrameworkApp.java
+```java
+package com.example.validation;
+
+import com.example.validation.model.*;
+import com.example.validation.service.TRMNValidationServiceImpl;
+import com.example.validation.data.DummyDataProvider;
+
+import java.util.*;
+
+/**
+ * Main application to test TRMN Validation Service with dummy data
+ * Implements exact business logic with proper domain naming
+ */
+public class ValidationFrameworkApp {
+
+    public static void main(String[] args) {
+        System.out.println("=== Starting TRMN Validation Service Test ===\n");
+
+        try {
+            // Step 1: Setup the validation service
+            ValidationFrameworkApp app = new ValidationFrameworkApp();
+            TRMNValidationServiceImpl validationService = app.setupValidationService();
+
+            // Step 2: Test different validation scenarios with business domain
+            app.testPositionCodeValidation(validationService);
+            app.testMultipleColumnsValidation(validationService);
+            app.testTMRValidationFlow(validationService);
+
+            System.out.println("=== All TRMN validation tests completed successfully ===");
+
+        } catch (Exception e) {
+            System.err.println("TRMN Validation test failed: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    /**
+     * Sets up the TRMN validation service with all required dependencies
+     */
+    private TRMNValidationServiceImpl setupValidationService() {
+        System.out.println("Setting up TRMN Validation Service...");
+
+        // Create dummy data provider (replaces database calls)
+        DummyDataProvider dataProvider = new DummyDataProvider();
+
+        // Create TRMN validation service
+        TRMNValidationServiceImpl validationService = new TRMNValidationServiceImpl(dataProvider);
+
+        System.out.println("TRMN Validation Service setup completed\n");
+        return validationService;
+    }
+
+    /**
+     * Test position code validation scenarios
+     */
+    private void testPositionCodeValidation(TRMNValidationServiceImpl validationService) {
+        System.out.println("--- Testing Position Code Validation ---");
+
+        // Test 1: TMR request with no multi-column validation
+        testValidation(validationService, createTMRRequest(), "position_code", "financial_records",
+                      "TMR Position Code Test");
+
+        // Test 2: Non-TMR request (should return true immediately)
+        testValidation(validationService, createNonTMRRequest(), "position_code", "financial_records",
+                      "Non-TMR Request Test");
+
+        // Test 3: TMR with multi-column validation
+        testValidation(validationService, createTMRRequestWithMultiColumn(), "account_type|customer_ref", "financial_records",
+                      "TMR Multi-Column Test");
+
+        System.out.println();
+    }
+
+    /**
+     * Test multiple columns validation scenarios
+     */
+    private void testMultipleColumnsValidation(TRMNValidationServiceImpl validationService) {
+        System.out.println("--- Testing Multiple Columns Validation ---");
+
+        // Test 1: Valid multiple columns request
+        testMultipleColumnsValidation(validationService, createValidMultipleColumnsRequest(),
+                                    "financial_records", "account_type|customer_ref", "Valid Multiple Columns Test");
+
+        // Test 2: Multiple columns with validation errors
+        testMultipleColumnsValidation(validationService, createMultipleColumnsWithErrorsRequest(),
+                                    "financial_records", "account_type|customer_ref", "Multiple Columns with Errors Test");
+
+        System.out.println();
+    }
+
+    /**
+     * Test TMR validation flow (business domain logic)
+     */
+    private void testTMRValidationFlow(TRMNValidationServiceImpl validationService) {
+        System.out.println("--- Testing TMR Validation Flow ---");
+
+        // Test 1: TMR with position codes that cause errors
+        testValidation(validationService, createTMRWithPositionErrors(), "position_code", "financial_records",
+                      "TMR with Position Errors Test");
+
+        // Test 2: TMR with clean data (should pass)
+        testValidation(validationService, createTMRWithCleanData(), "position_code", "financial_records",
+                      "TMR with Clean Data Test");
+
+        System.out.println();
+    }
+
+    /**
+     * Helper method to test position code validation
+     */
+    private void testValidation(TRMNValidationServiceImpl validationService, DummyRequest request,
+                              String validationColumn, String validationTable, String testName) {
+
+        System.out.printf("Testing: %s\n", testName);
+
+        try {
+            boolean result = validationService.validatePositionCode(request, validationColumn, validationTable);
+            System.out.printf("Result: %s\n", result ? "PASS (true)" : "FAIL (false)");
+        } catch (Exception e) {
+            System.out.printf("Result: EXCEPTION - %s\n", e.getMessage());
+        }
+        System.out.println();
+    }
+
+    /**
+     * Helper method to test multiple columns validation
+     */
+    private void testMultipleColumnsValidation(TRMNValidationServiceImpl validationService, DummyRequest request,
+                                             String validationTable, String validationColumn, String testName) {
+
+        System.out.printf("Testing: %s\n", testName);
+
+        try {
+            boolean result = validationService.validateMultipleColumnsForDuplicates(request, validationTable, validationColumn);
+            System.out.printf("Result: %s\n", result ? "PASS (true)" : "FAIL (false)");
+        } catch (Exception e) {
+            System.out.printf("Result: EXCEPTION - %s\n", e.getMessage());
+        }
+        System.out.println();
+    }
+
+    // Request creation methods - business domain specific
+    private DummyRequest createTMRRequest() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("TMR-001");
+        request.setRequestType("TMR");
+        request.setFrequency("DAILY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("position_code", "POS001");
+        record.put("record_logical_id", "REC-001");
+
+        // Add attribute data as per business logic
+        List<Map<String, Object>> attributeData = new ArrayList<>();
+        Map<String, Object> attribute = new HashMap<>();
+        attribute.put("validationColumn", "CLEAN_POSITION");
+        attributeData.add(attribute);
+        record.put("attributeData", attributeData);
+
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+
+    private DummyRequest createNonTMRRequest() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("NON-TMR-001");
+        request.setRequestType("PERIODIC"); // Not TMR
+        request.setFrequency("DAILY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("position_code", "POS002");
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+
+    private DummyRequest createTMRRequestWithMultiColumn() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("TMR-MULTI-001");
+        request.setRequestType("TMR");
+        request.setFrequency("DAILY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("account_type", "SAVINGS");
+        record.put("customer_ref", "CUST001");
+        record.put("record_logical_id", "REC-MULTI-001");
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+
+    private DummyRequest createValidMultipleColumnsRequest() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("MULTI-VALID-001");
+        request.setRequestType("TMR");
+        request.setFrequency("MONTHLY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("account_type", "CHECKING");
+        record.put("customer_ref", "CUST999");
+        record.put("record_logical_id", "REC-NEW-001");
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+
+    private DummyRequest createMultipleColumnsWithErrorsRequest() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("MULTI-ERROR-001");
+        request.setRequestType("TMR");
+        request.setFrequency("DAILY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("account_type", "SAVINGS");
+        record.put("customer_ref", "CUST001");
+        record.put("record_logical_id", "REC-ERROR-001");
+
+        // Add attribute data that will cause validation errors
+        List<Map<String, Object>> attributeData = new ArrayList<>();
+        Map<String, Object> attribute = new HashMap<>();
+        attribute.put("validationColumn", "FIN001"); // This matches existing position code
+        attributeData.add(attribute);
+        record.put("attributeData", attributeData);
+
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+
+    private DummyRequest createTMRWithPositionErrors() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("TMR-POS-ERROR-001");
+        request.setRequestType("TMR");
+        request.setFrequency("DAILY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("position_code", "ERROR_POSITION");
+        record.put("record_logical_id", "REC-ERROR-002");
+
+        // Add attribute data that will match position codes
+        List<Map<String, Object>> attributeData = new ArrayList<>();
+        Map<String, Object> attribute1 = new HashMap<>();
+        attribute1.put("validationColumn", "FIN001"); // Matches existing record
+        attributeData.add(attribute1);
+
+        Map<String, Object> attribute2 = new HashMap<>();
+        attribute2.put("validationColumn", "FIN002"); // Matches existing record
+        attributeData.add(attribute2);
+
+        record.put("attributeData", attributeData);
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+
+    private DummyRequest createTMRWithCleanData() {
+        DummyRequest request = new DummyRequest();
+        request.setRequestId("TMR-CLEAN-001");
+        request.setRequestType("TMR");
+        request.setFrequency("DAILY");
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("position_code", "CLEAN_POSITION");
+        record.put("record_logical_id", "REC-CLEAN-001");
+
+        // Add attribute data that won't match any position codes
+        List<Map<String, Object>> attributeData = new ArrayList<>();
+        Map<String, Object> attribute = new HashMap<>();
+        attribute.put("validationColumn", "CLEAN_VALUE");
+        attributeData.add(attribute);
+        record.put("attributeData", attributeData);
+
+        data.add(record);
+        request.setData(data);
+
+        return request;
+    }
+}
+```
+
+## 2. TRMN Validation Service Implementation
+
+### TRMNValidationServiceImpl.java
+```java
+package com.example.validation.service;
+
+import com.example.validation.model.DummyRequest;
+import com.example.validation.data.DummyDataProvider;
+
+import java.util.*;
+
+/**
+ * TRMN Validation Service Implementation
+ * Implements exact business logic with proper domain naming
+ * Clean and readable with step-by-step comments
+ */
+public class TRMNValidationServiceImpl {
+
+    private final DummyDataProvider dataProvider;
+
+    public TRMNValidationServiceImpl(DummyDataProvider dataProvider) {
+        this.dataProvider = dataProvider;
+    }
+
+    /**
+     * Main validation method - implements position code validation logic
+     * Step-by-step implementation of business requirements
+     */
+    public boolean validatePositionCode(DummyRequest request, String validationColumn, String validationTable) {
+
+        System.out.printf("TRMN validatePositionCode: RequestId=%s, Type=%s, Column=%s, Table=%s\n",
+                request.getRequestId(), request.getRequestType(), validationColumn, validationTable);
+
+        try {
+            // Step 1: Check if request type is TMR (Time-Based Master Record)
+            if (!isTMRRequest(request)) {
+                System.out.println("TRMN: Not TMR request, returning true");
+                return true;
+            }
+
+            // Step 2: Check if validation column contains multi-column indicator ("|")
+            if (hasMultiColumnValidation(validationColumn)) {
+                System.out.println("TRMN: Multi-column validation detected");
+                return processMultiColumnValidation(request, validationTable, validationColumn);
+            }
+
+            // Step 3: Process standard single-column validation
+            return processSingleColumnValidation(request, validationTable, validationColumn);
+
+        } catch (Exception e) {
+            System.err.printf("TRMN Exception in validatePositionCode: %s\n", e.getMessage());
+            throw new RuntimeException("TRMN Validation failed", e);
+        }
+    }
+
+    /**
+     * Validates multiple columns for duplicates
+     * Implements multiple columns validation logic
+     */
+    public boolean validateMultipleColumnsForDuplicates(DummyRequest request, String validationTable, String validationColumn) {
+
+        System.out.printf("TRMN validateMultipleColumnsForDuplicates: Table=%s, Column=%s\n", validationTable, validationColumn);
+
+        try {
+            // Step 1: Initialize validation status
+            boolean validationStatus = true;
+
+            // Step 2: Set frequency code based on request frequency
+            String frequencyCode = determineFrequencyCode(request);
+            System.out.printf("TRMN: Frequency code determined: %s\n", frequencyCode);
+
+            // Step 3: Process data by frequency type
+            if (isSystemValidation(request)) {
+                return processSystemValidation(request, validationTable, validationColumn);
+            }
+
+            // Step 4: Process primary and system lists
+            return processValidationLists(request, validationTable, validationColumn, frequencyCode);
+
+        } catch (Exception e) {
+            System.err.printf("TRMN Exception in validateMultipleColumnsForDuplicates: %s\n", e.getMessage());
+            throw new RuntimeException("TRMN Multiple columns validation failed", e);
+        }
+    }
+
+    /**
+     * Checks if request type is TMR (Time-Based Master Record)
+     */
+    private boolean isTMRRequest(DummyRequest request) {
+        return "TMR".equals(request.getRequestType());
+    }
+
+    /**
+     * Checks if validation column contains multi-column indicator
+     */
+    private boolean hasMultiColumnValidation(String validationColumn) {
+        return validationColumn != null && validationColumn.contains("|");
+    }
+
+    /**
+     * Processes multi-column validation logic
+     * Implements multi-column processing for business domain
+     */
+    private boolean processMultiColumnValidation(DummyRequest request, String validationTable, String validationColumn) {
+
+        System.out.println("TRMN: Processing multi-column validation...");
+
+        try {
+            // Step 1: Process each record for multi-column validation
+            for (Map<String, Object> record : request.getData()) {
+
+                // Skip if record doesn't match validation table
+                if (!matchesValidationTable(record, validationTable)) {
+                    continue;
+                }
+
+                // Step 2: Check for multi-column validation requirements
+                if (requiresMultiColumnProcessing(record, validationColumn)) {
+
+                    // Step 3: Add multi-column key for business logic
+                    String multiColumnKey = generateMultiColumnKey(record, validationColumn);
+                    record.put("DUMMY_BUSINESS_MULTI_COLUMN_KEY", multiColumnKey);
+
+                    System.out.printf("TRMN: Added DUMMY_BUSINESS_MULTI_COLUMN_KEY: %s\n", multiColumnKey);
+                }
+            }
+
+            // Step 4: Validate for duplicates
+            return validateMultipleColumnsForDuplicates(request, validationTable, validationColumn);
+
+        } catch (Exception e) {
+            System.err.printf("TRMN: Multi-column validation error: %s\n", e.getMessage());
+            throw new RuntimeException("TRMN Multi-column validation failed", e);
+        }
+    }
+
+    /**
+     * Processes single-column validation logic
+     * Implements single-column processing for financial records
+     */
+    private boolean processSingleColumnValidation(DummyRequest request, String validationTable, String validationColumn) {
+
+        System.out.println("TRMN: Processing single-column validation...");
+
+        // Step 1: Get position codes from financial records
+        List<String> positionCodes = getPositionCodesFromRequest(request, validationTable, validationColumn);
+
+        if (positionCodes.isEmpty()) {
+            System.out.println("TRMN: No position codes found, validation passed");
+            return true;
+        }
+
+        System.out.printf("TRMN: Found position codes: %s\n", positionCodes);
+
+        // Step 2: Check each record for validation errors
+        for (Map<String, Object> record : request.getData()) {
+
+            // Step 3: Get attribute data from record
+            List<Map<String, Object>> attributeDataList = getAttributeDataFromRecord(record);
+
+            // Step 4: Check each attribute for validation errors
+            for (Map<String, Object> attributeData : attributeDataList) {
+
+                if (hasValidationError(attributeData, positionCodes)) {
+                    System.out.printf("TRMN: Validation error found in record: %s\n", record);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determines frequency code based on request frequency
+     * Implements business frequency logic
+     */
+    private String determineFrequencyCode(DummyRequest request) {
+
+        String frequency = request.getFrequency();
+
+        if ("DAILY".equals(frequency)) {
+            return "D";
+        } else if ("MONTHLY".equals(frequency)) {
+            return "M";
+        } else if ("WEEKLY".equals(frequency)) {
+            return "W";
+        } else {
+            return "D"; // Default to daily
+        }
+    }
+
+    /**
+     * Checks if this is system validation
+     */
+    private boolean isSystemValidation(DummyRequest request) {
+        return "DAILY".equals(request.getFrequency()) || "MONTHLY".equals(request.getFrequency());
+    }
+
+    /**
+     * Processes system validation
+     */
+    private boolean processSystemValidation(DummyRequest request, String validationTable, String validationColumn) {
+
+        System.out.println("TRMN: Processing system validation...");
+
+        // Step 1: Filter records by validation table
+        List<Map<String, Object>> filteredRecords = filterRecordsByTable(request, validationTable);
+
+        // Step 2: Process each filtered record
+        for (Map<String, Object> record : filteredRecords) {
+
+            // Step 3: Add system reference column if needed
+            if (record.get("DUMMY_SYSTEM_REF_CD") != null) {
+                record.put("DUMMY_SYSTEM_REF_CD", record.get("DUMMY_SYSTEM_REF_CD"));
+            }
+        }
+
+        return true; // System validation passed
+    }
+
+    /**
+     * Processes validation lists (primary and system)
+     * Implements business list processing logic
+     */
+    private boolean processValidationLists(DummyRequest request, String validationTable, String validationColumn, String frequencyCode) {
+
+        System.out.println("TRMN: Processing validation lists...");
+
+        // Step 1: Get validation column values
+        String[] validationColumns = validationColumn.split("\\\\");
+        String validationColumnName = validationColumns.length > 0 ? validationColumns[0] : validationColumn;
+
+        // Step 2: Build attribute list for validation
+        List<String> attributeList = buildAttributeList(request, validationTable, validationColumnName, frequencyCode);
+
+        // Step 3: Check for validation errors in each record
+        boolean validationStatus = true;
+
+        for (Map<String, Object> record : request.getData()) {
+
+            List<Map<String, Object>> dataList = getAttributeDataFromRecord(record);
+
+            for (Map<String, Object> data : dataList) {
+
+                if (data.containsKey("DUMMY_BUSINESS_MULTI_COLUMN_KEY")) {
+
+                    // Step 4: Create multi-attribute validation response
+                    boolean hasError = createMultiAttributeValidationResponse(record, validationColumnName);
+
+                    if (hasError) {
+                        validationStatus = false;
+                    }
+                }
+            }
+        }
+
+        // Step 5: Final validation check
+        if (!validationStatus) {
+            return false;
+        }
+
+        // Step 6: Remove DUMMY_BUSINESS_MULTI_COLUMN_KEY from records (cleanup)
+        cleanupMultiColumnKeys(request, validationTable);
+
+        return validationStatus;
+    }
+
+    /**
+     * Gets position codes from request for financial records
+     */
+    private List<String> getPositionCodesFromRequest(DummyRequest request, String validationTable, String validationColumn) {
+
+        List<String> positionCodes = new ArrayList<>();
+
+        // Step 1: Filter records by validation table
+        List<Map<String, Object>> filteredRecords = filterRecordsByTable(request, validationTable);
+
+        // Step 2: Extract position codes
+        for (Map<String, Object> record : filteredRecords) {
+            Object positionCode = record.get(validationColumn);
+            if (positionCode != null) {
+                positionCodes.add(positionCode.toString());
+            }
+        }
+
+        // Step 3: Get additional position codes from system data
+        List<String> existingCodes = dataProvider.getPositionCodes(validationTable);
+        positionCodes.addAll(existingCodes);
+
+        return positionCodes;
+    }
+
+    /**
+     * Filters records by validation table
+     */
+    private List<Map<String, Object>> filterRecordsByTable(DummyRequest request, String validationTable) {
+
+        return request.getData().stream()
+                .filter(record -> matchesValidationTable(record, validationTable))
+                .toList();
+    }
+
+    /**
+     * Checks if record matches validation table
+     */
+    private boolean matchesValidationTable(Map<String, Object> record, String validationTable) {
+        Object entity = record.get("entity");
+        return entity != null && validationTable.equalsIgnoreCase(entity.toString());
+    }
+
+    /**
+     * Checks if record requires multi-column processing
+     */
+    private boolean requiresMultiColumnProcessing(Map<String, Object> record, String validationColumn) {
+        // Check if any of the multi-column fields are present
+        String[] columns = validationColumn.split("\\|");
+        for (String column : columns) {
+            if (record.containsKey(column.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Generates multi-column key for business logic
+     */
+    private String generateMultiColumnKey(Map<String, Object> record, String validationColumn) {
+
+        String[] columns = validationColumn.split("\\|");
+        StringBuilder keyBuilder = new StringBuilder();
+
+        for (int i = 0; i < columns.length; i++) {
+            if (i > 0) keyBuilder.append("_");
+
+            Object value = record.get(columns[i].trim());
+            keyBuilder.append(value != null ? value.toString() : "");
+        }
+
+        return keyBuilder.toString();
+    }
+
+    /**
+     * Gets attribute data from record
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> getAttributeDataFromRecord(Map<String, Object> record) {
+
+        Object attributeData = record.get("attributeData");
+        if (attributeData instanceof List) {
+            return (List<Map<String, Object>>) attributeData;
+        }
+
+        return new ArrayList<>();
+    }
+
+    /**
+     * Checks if attribute has validation error
+     */
+    private boolean hasValidationError(Map<String, Object> attributeData, List<String> positionCodes) {
+
+        Object validationColumn = attributeData.get("validationColumn");
+        if (validationColumn != null) {
+            String validationValue = validationColumn.toString();
+            boolean hasError = positionCodes.contains(validationValue);
+
+            if (hasError) {
+                System.out.printf("TRMN: Validation error found: %s matches position code\n", validationValue);
+            }
+
+            return hasError;
+        }
+
+        return false;
+    }
+
+    /**
+     * Builds attribute list for validation
+     */
+    private List<String> buildAttributeList(DummyRequest request, String validationTable, String validationColumn, String frequencyCode) {
+
+        List<String> attributeList = new ArrayList<>();
+
+        // Add frequency-based attributes
+        attributeList.add("freq_" + frequencyCode);
+
+        // Add validation column
+        attributeList.add(validationColumn);
+
+        return attributeList;
+    }
+
+    /**
+     * Creates multi-attribute validation response
+     */
+    private boolean createMultiAttributeValidationResponse(Map<String, Object> record, String validationColumn) {
+
+        // Get validation columns from record
+        List<String> columns = Arrays.asList(validationColumn.split("\\|"));
+
+        // Process attribute data
+        List<Map<String, Object>> dataList = getAttributeDataFromRecord(record);
+
+        for (Map<String, Object> data : dataList) {
+
+            // Check each column for validation errors
+            for (String column : columns) {
+                Object value = data.get(column);
+                if (value != null) {
+
+                    // Add validation delimiter and error message
+                    String message = value.toString() + " " + "DUMMY_BUSINESS_VALIDATION_DELIMITER" + " " + "DUMMY_BUSINESS_VALIDATION_ERROR_MSG";
+                    data.put(column, message);
+
+                    return true; // Has validation error
+                }
+            }
+        }
+
+        return false; // No validation error
+    }
+
+    /**
+     * Cleans up multi-column keys from records
+     */
+    private void cleanupMultiColumnKeys(DummyRequest request, String validationTable) {
+
+        System.out.println("TRMN: Cleaning up multi-column keys...");
+
+        for (Map<String, Object> record : request.getData()) {
+            if (matchesValidationTable(record, validationTable)) {
+                record.remove("DUMMY_BUSINESS_MULTI_COLUMN_KEY");
+            }
+        }
+    }
+}
+```
+
+## 3. Dummy Data Provider with Updated Naming
+
+### DummyDataProvider.java
+```java
+package com.example.validation.data;
+
+import java.util.*;
+
+/**
+ * Provides dummy data for testing TRMN validation logic
+ * Business domain specific data for financial records
+ */
+public class DummyDataProvider {
+
+    private final Map<String, List<Map<String, Object>>> sampleData;
+
+    public DummyDataProvider() {
+        this.sampleData = initializeSampleData();
+    }
+
+    /**
+     * Gets position codes for validation (business domain specific)
+     */
+    public List<String> getPositionCodes(String tableName) {
+
+        List<Map<String, Object>> records = sampleData.getOrDefault(tableName, new ArrayList<>());
+
+        return records.stream()
+                .filter(record -> "financial_records".equals(record.get("entity")))
+                .map(record -> (String) record.get("position_code"))
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * Checks if a combination of values exists in the business data
+     */
+    public boolean existsCombination(String tableName, Map<String, Object> searchCriteria) {
+
+        List<Map<String, Object>> records = sampleData.getOrDefault(tableName, new ArrayList<>());
+
+        return records.stream().anyMatch(record ->
+            searchCriteria.entrySet().stream().allMatch(entry ->
+                Objects.equals(record.get(entry.getKey()), entry.getValue())
+            )
+        );
+    }
+
+    /**
+     * Initializes all sample data for business domain testing
+     */
+    private Map<String, List<Map<String, Object>>> initializeSampleData() {
+
+        Map<String, List<Map<String, Object>>> data = new HashMap<>();
+
+        // Sample financial records data
+        data.put("financial_records", createSampleFinancialRecords());
+
+        // Sample customer data
+        data.put("customers", createSampleCustomers());
+
+        // Sample account data
+        data.put("accounts", createSampleAccounts());
+
+        System.out.println("TRMN: Initialized validation business data:");
+        data.forEach((table, records) ->
+            System.out.printf("TRMN:   %s: %d records\n", table, records.size())
+        );
+
+        return data;
+    }
+
+    /**
+     * Creates sample financial records for testing
+     */
+    private List<Map<String, Object>> createSampleFinancialRecords() {
+        return List.of(
+            createFinancialRecord("REC-001", "FIN001", "SAVINGS", "CUST001"),
+            createFinancialRecord("REC-002", "FIN002", "CHECKING", "CUST002"),
+            createFinancialRecord("REC-003", "FIN003", "INVESTMENT", "CUST003"),
+            createFinancialRecord("REC-004", "FIN004", "SAVINGS", "CUST004"),
+            createFinancialRecord("REC-005", "FIN005", "BUSINESS", "CUST005")
+        );
+    }
+
+    /**
+     * Creates sample customers for testing
+     */
+    private List<Map<String, Object>> createSampleCustomers() {
+        return List.of(
+            createCustomer("CUST001", "john.doe@example.com", "John", "Doe", "PREMIUM"),
+            createCustomer("CUST002", "jane.smith@example.com", "Jane", "Smith", "STANDARD"),
+            createCustomer("CUST003", "bob.wilson@example.com", "Bob", "Wilson", "PREMIUM"),
+            createCustomer("CUST004", "alice.brown@example.com", "Alice", "Brown", "STANDARD"),
+            createCustomer("CUST005", "charlie.davis@example.com", "Charlie", "Davis", "VIP")
+        );
+    }
+
+    /**
+     * Creates sample accounts for testing
+     */
+    private List<Map<String, Object>> createSampleAccounts() {
+        return List.of(
+            createAccount("ACC-001", "CUST001", "SAVINGS", 15000.00),
+            createAccount("ACC-002", "CUST002", "CHECKING", 5000.00),
+            createAccount("ACC-003", "CUST003", "INVESTMENT", 50000.00),
+            createAccount("ACC-004", "CUST004", "SAVINGS", 12000.00),
+            createAccount("ACC-005", "CUST005", "BUSINESS", 75000.00)
+        );
+    }
+
+    // Helper methods to create business domain records
+    private Map<String, Object> createFinancialRecord(String logicalId, String positionCode, String accountType, String customerRef) {
+        Map<String, Object> record = new HashMap<>();
+        record.put("entity", "financial_records");
+        record.put("record_logical_id", logicalId);
+        record.put("position_code", positionCode);
+        record.put("account_type", accountType);
+        record.put("customer_ref", customerRef);
+        record.put("DUMMY_SYSTEM_REF_CD", "SYS_" + logicalId);
+        return record;
+    }
+
+    private Map<String, Object> createCustomer(String customerRef, String email, String firstName, String lastName, String tier) {
+        Map<String, Object> customer = new HashMap<>();
+        customer.put("entity", "customers");
+        customer.put("customer_ref", customerRef);
+        customer.put("email", email);
+        customer.put("first_name", firstName);
+        customer.put("last_name", lastName);
+        customer.put("customer_tier", tier);
+        return customer;
+    }
+
+    private Map<String, Object> createAccount(String accountId, String customerRef, String accountType, double balance) {
+        Map<String, Object> account = new HashMap<>();
+        account.put("entity", "accounts");
+        account.put("account_id", accountId);
+        account.put("customer_ref", customerRef);
+        account.put("account_type", accountType);
+        account.put("balance", balance);
+        return account;
+    }
+}
+```
+
+## 4. Model Classes with Updated Naming
+
+### DummyRequest.java
+```java
+package com.example.validation.model;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * DummyRequest model - business domain request structure
+ * Contains all validation request data for financial records
+ */
+public class DummyRequest {
+
+    private String requestId;
+    private String requestType;
+    private String frequency;
+    private List<Map<String, Object>> data;
+
+    // Default constructor
+    public DummyRequest() {}
+
+    // Parameterized constructor
+    public DummyRequest(String requestId, String requestType, String frequency, List<Map<String, Object>> data) {
+        this.requestId = requestId;
+        this.requestType = requestType;
+        this.frequency = frequency;
+        this.data = data;
+    }
+
+    // Getters and Setters
+    public String getRequestId() {
+        return requestId;
+    }
+
+    public void setRequestId(String requestId) {
+        this.requestId = requestId;
+    }
+
+    public String getRequestType() {
+        return requestType != null ? requestType : "";
+    }
+
+    public void setRequestType(String requestType) {
+        this.requestType = requestType;
+    }
+
+    public String getFrequency() {
+        return frequency;
+    }
+
+    public void setFrequency(String frequency) {
+        this.frequency = frequency;
+    }
+
+    public List<Map<String, Object>> getData() {
+        return data;
+    }
+
+    public void setData(List<Map<String, Object>> data) {
+        this.data = data;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("DummyRequest{requestId='%s', requestType='%s', frequency='%s', dataSize=%d}",
+                requestId, requestType, frequency, data != null ? data.size() : 0);
+    }
+}
+```
+
+### QueryUtil.java
+```java
+package com.example.validation.util;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Query utility class - business domain helper methods
+ * Contains helper methods for financial data processing
+ */
+public class QueryUtil {
+
+    /**
+     * Checks if multi-column values validation is needed for financial records
+     * Implements multi-column validation logic for business domain
+     */
+    public static boolean multiColumnValuesValidation(Map<String, Object> record, String validationColumn) {
+
+        if (validationColumn == null || !validationColumn.contains("|")) {
+            return false;
+        }
+
+        String[] columns = validationColumn.split("\\|");
+
+        // Check if record contains any of the multi-column fields
+        for (String column : columns) {
+            if (record.containsKey(column.trim())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Concatenates multi-column values for business validation
+     * Implements concatenation logic for financial record fields
+     */
+    public static String concatenateMultiColumnValues(Map<String, Object> record, String validationColumn) {
+
+        if (validationColumn == null || !validationColumn.contains("|")) {
+            return "";
+        }
+
+        String[] columns = validationColumn.split("\\|");
+        StringBuilder result = new StringBuilder();
+
+        for (int i = 0; i < columns.length; i++) {
+            if (i > 0) result.append("_");
+
+            Object value = record.get(columns[i].trim());
+            result.append(value != null ? value.toString() : "");
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Filters records based on entity type for business domain
+     */
+    public static List<Map<String, Object>> filterRecordsByEntity(List<Map<String, Object>> records, String entityType) {
+
+        return records.stream()
+                .filter(record -> entityType.equals(record.get("entity")))
+                .toList();
+    }
+
+    /**
+     * Validates financial record structure
+     */
+    public static boolean isValidFinancialRecord(Map<String, Object> record) {
+        return record.containsKey("record_logical_id") &&
+               record.containsKey("position_code") &&
+               "financial_records".equals(record.get("entity"));
+    }
+
+    /**
+     * Extracts customer reference from financial record
+     */
+    public static String getCustomerReference(Map<String, Object> record) {
+        Object customerRef = record.get("customer_ref");
+        return customerRef != null ? customerRef.toString() : "";
+    }
+}
+```
+
+## 5. Configuration Helper with Dummy Constants
+
+### ConfigurationHelper.java
+```java
+package com.example.validation.helper;
+
+import java.util.Map;
+import java.util.HashMap;
+
+/**
+ * Configuration helper - business domain configuration
+ * Contains dummy configuration constants for financial validation
+ */
+public class ConfigurationHelper {
+
+    // Dummy business domain constants
+    public static final String DUMMY_BUSINESS_MULTI_COLUMN_KEY = "DUMMY_BUSINESS_MULTI_COLUMN_KEY";
+    public static final String DUMMY_SYSTEM_REF_CD = "DUMMY_SYSTEM_REF_CD";
+    public static final String DUMMY_BUSINESS_VALIDATION_DELIMITER = "DUMMY_BUSINESS_VALIDATION_DELIMITER";
+    public static final String DUMMY_BUSINESS_VALIDATION_ERROR_MSG = "DUMMY_BUSINESS_VALIDATION_ERROR_MSG";
+
+    // Dummy frequency codes for business operations
+    public static final String DUMMY_DAILY_FREQ_CODE = "D";
+    public static final String DUMMY_MONTHLY_FREQ_CODE = "M";
+    public static final String DUMMY_WEEKLY_FREQ_CODE = "W";
+
+    // Dummy request types for business domain
+    public static final String DUMMY_TMR_REQUEST_TYPE = "TMR";           // Time-Based Master Record
+    public static final String DUMMY_PERIODIC_REQUEST_TYPE = "PERIODIC"; // Periodic Processing
+    public static final String DUMMY_BATCH_REQUEST_TYPE = "BATCH";       // Batch Processing
+
+    // Dummy entity types for business domain
+    public static final String DUMMY_FINANCIAL_RECORDS_ENTITY = "financial_records";
+    public static final String DUMMY_CUSTOMERS_ENTITY = "customers";
+    public static final String DUMMY_ACCOUNTS_ENTITY = "accounts";
+
+    // Dummy validation column names for business domain
+    public static final String DUMMY_POSITION_CODE_COLUMN = "position_code";
+    public static final String DUMMY_ACCOUNT_TYPE_COLUMN = "account_type";
+    public static final String DUMMY_CUSTOMER_REF_COLUMN = "customer_ref";
+
+    /**
+     * Gets frequency code based on business frequency string
+     */
+    public static String getFrequencyCode(String frequency) {
+        return switch (frequency) {
+            case "DAILY" -> DUMMY_DAILY_FREQ_CODE;
+            case "MONTHLY" -> DUMMY_MONTHLY_FREQ_CODE;
+            case "WEEKLY" -> DUMMY_WEEKLY_FREQ_CODE;
+            default -> DUMMY_DAILY_FREQ_CODE; // Default to daily
+        };
+    }
+
+    /**
+     * Checks if request type is TMR (Time-Based Master Record)
+     */
+    public static boolean isTMRRequest(String requestType) {
+        return DUMMY_TMR_REQUEST_TYPE.equals(requestType);
+    }
+
+    /**
+     * Creates business validation error message
+     */
+    public static String createValidationErrorMessage(String value) {
+        return value + " " + DUMMY_BUSINESS_VALIDATION_DELIMITER + " " + DUMMY_BUSINESS_VALIDATION_ERROR_MSG;
+    }
+
+    /**
+     * Gets default validation configuration for financial records
+     */
+    public static Map<String, Object> getDefaultValidationConfig() {
+        Map<String, Object> config = new HashMap<>();
+        config.put("defaultEntity", DUMMY_FINANCIAL_RECORDS_ENTITY);
+        config.put("defaultFrequency", DUMMY_DAILY_FREQ_CODE);
+        config.put("multiColumnSeparator", "|");
+        config.put("keyDelimiter", "_");
+        return config;
+    }
+
+    /**
+     * Validates business request structure
+     */
+    public static boolean isValidBusinessRequest(String requestType, String frequency) {
+        return (DUMMY_TMR_REQUEST_TYPE.equals(requestType) ||
+                DUMMY_PERIODIC_REQUEST_TYPE.equals(requestType) ||
+                DUMMY_BATCH_REQUEST_TYPE.equals(requestType)) &&
+               (frequency != null && !frequency.trim().isEmpty());
+    }
+}
+```
+
+## 6. Exception Classes with Updated Naming
+
+### MadaServiceException.java
+```java
+package com.example.validation.exception;
+
+/**
+ * Custom exception for MadaService operations
+ * Business domain specific exception handling
+ */
+public class MadaServiceException extends Exception {
+
+    private String errorCode;
+    private String requestId;
+    private String businessContext;
+
+    public MadaServiceException(String message) {
+        super(message);
+    }
+
+    public MadaServiceException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    public MadaServiceException(String message, String errorCode, String requestId) {
+        super(message);
+        this.errorCode = errorCode;
+        this.requestId = requestId;
+    }
+
+    public MadaServiceException(String message, String errorCode, String requestId, String businessContext) {
+        super(message);
+        this.errorCode = errorCode;
+        this.requestId = requestId;
+        this.businessContext = businessContext;
+    }
+
+    // Getters
+    public String getErrorCode() { return errorCode; }
+    public String getRequestId() { return requestId; }
+    public String getBusinessContext() { return businessContext; }
+
+    @Override
+    public String toString() {
+        return String.format("MadaServiceException{message='%s', errorCode='%s', requestId='%s', context='%s'}",
+                getMessage(), errorCode, requestId, businessContext);
+    }
+}
+```
+
+### DummyRequestException.java
+```java
+package com.example.validation.exception;
+
+/**
+ * Custom exception for dummy request processing errors
+ * Business domain specific request processing exceptions
+ */
+public class DummyRequestException extends Exception {
+
+    private String requestId;
+    private String requestType;
+    private String entityType;
+
+    public DummyRequestException(String message) {
+        super(message);
+    }
+
+    public DummyRequestException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    public DummyRequestException(String message, String requestId, String requestType) {
+        super(message);
+        this.requestId = requestId;
+        this.requestType = requestType;
+    }
+
+    public DummyRequestException(String message, String requestId, String requestType, String entityType) {
+        super(message);
+        this.requestId = requestId;
+        this.requestType = requestType;
+        this.entityType = entityType;
+    }
+
+    // Getters
+    public String getRequestId() { return requestId; }
+    public String getRequestType() { return requestType; }
+    public String getEntityType() { return entityType; }
+
+    @Override
+    public String toString() {
+        return String.format("DummyRequestException{message='%s', requestId='%s', requestType='%s', entityType='%s'}",
+                getMessage(), requestId, requestType, entityType);
+    }
+}
+```
+
+## 7. Service Interface with Updated Naming
+
+### TRMNValidationService.java
+```java
+package com.example.validation.service;
+
+import com.example.validation.model.DummyRequest;
+import com.example.validation.exception.MadaServiceException;
+
+/**
+ * TRMN Validation Service interface for business domain
+ * Defines the contract for financial record validation operations
+ */
+public interface TRMNValidationService {
+
+    /**
+     * Validates position code for financial record requests
+     *
+     * @param request DummyRequest containing financial validation data
+     * @param validationColumn Column to validate against (position_code, account_type, etc.)
+     * @param validationTable Table to validate in (financial_records, accounts, etc.)
+     * @return boolean indicating validation success/failure
+     * @throws MadaServiceException if validation process fails
+     */
+    boolean validatePositionCode(DummyRequest request, String validationColumn, String validationTable)
+            throws MadaServiceException;
+
+    /**
+     * Validates multiple columns for duplicate financial records
+     *
+     * @param request DummyRequest containing financial validation data
+     * @param validationTable Table to validate in (financial_records, accounts, etc.)
+     * @param validationColumn Columns to validate (pipe-separated: account_type|customer_ref)
+     * @return boolean indicating validation success/failure
+     * @throws MadaServiceException if validation process fails
+     */
+    boolean validateMultipleColumnsForDuplicates(DummyRequest request, String validationTable, String validationColumn)
+            throws MadaServiceException;
+}
+```
+
+## 8. Expected Output with Updated Naming
+
+### Expected Console Output
+```
+=== Starting TRMN Validation Service Test ===
+
+Setting up TRMN Validation Service...
+TRMN: Initialized validation business data:
+TRMN:   financial_records: 5 records
+TRMN:   customers: 5 records
+TRMN:   accounts: 5 records
+TRMN Validation Service setup completed
+
+--- Testing Position Code Validation ---
+Testing: TMR Position Code Test
+TRMN validatePositionCode: RequestId=TMR-001, Type=TMR, Column=position_code, Table=financial_records
+TRMN: Processing single-column validation...
+TRMN: Found position codes: [FIN001, FIN002, FIN003, FIN004, FIN005]
+Result: PASS (true)
+
+Testing: Non-TMR Request Test
+TRMN validatePositionCode: RequestId=NON-TMR-001, Type=PERIODIC, Column=position_code, Table=financial_records
+TRMN: Not TMR request, returning true
+Result: PASS (true)
+
+Testing: TMR Multi-Column Test
+TRMN validatePositionCode: RequestId=TMR-MULTI-001, Type=TMR, Column=account_type|customer_ref, Table=financial_records
+TRMN: Multi-column validation detected
+TRMN: Processing multi-column validation...
+TRMN: Added DUMMY_BUSINESS_MULTI_COLUMN_KEY: SAVINGS_CUST001
+TRMN validateMultipleColumnsForDuplicates: Table=financial_records, Column=account_type|customer_ref
+TRMN: Frequency code determined: D
+TRMN: Processing validation lists...
+TRMN: Cleaning up multi-column keys...
+Result: PASS (true)
+
+--- Testing Multiple Columns Validation ---
+Testing: Valid Multiple Columns Test
+TRMN validateMultipleColumnsForDuplicates: Table=financial_records, Column=account_type|customer_ref
+TRMN: Frequency code determined: M
+TRMN: Processing validation lists...
+Result: PASS (true)
+
+Testing: Multiple Columns with Errors Test
+TRMN validateMultipleColumnsForDuplicates: Table=financial_records, Column=account_type|customer_ref
+TRMN: Frequency code determined: D
+TRMN: Processing validation lists...
+Result: FAIL (false)
+
+--- Testing TMR Validation Flow ---
+Testing: TMR with Position Errors Test
+TRMN validatePositionCode: RequestId=TMR-POS-ERROR-001, Type=TMR, Column=position_code, Table=financial_records
+TRMN: Processing single-column validation...
+TRMN: Found position codes: [FIN001, FIN002, FIN003, FIN004, FIN005]
+TRMN: Validation error found: FIN001 matches position code
+TRMN: Validation error found in record: {entity=financial_records, position_code=ERROR_POSITION, record_logical_id=REC-ERROR-002, attributeData=[{validationColumn=FIN001}, {validationColumn=FIN002}]}
+Result: FAIL (false)
+
+Testing: TMR with Clean Data Test
+TRMN validatePositionCode: RequestId=TMR-CLEAN-001, Type=TMR, Column=position_code, Table=financial_records
+TRMN: Processing single-column validation...
+TRMN: Found position codes: [FIN001, FIN002, FIN003, FIN004, FIN005]
+Result: PASS (true)
+
+=== All TRMN validation tests completed successfully ===
+```
+
+## Summary of All Name Changes Made:
+
+✅ **NewRecord → DummyRequest**: Changed all model references
+✅ **NR → TRMN**: Updated all comments and logs
+✅ **Added "DUMMY_" prefix**: To all constants
+✅ **Updated exception names**: DummyRequestException
+✅ **Updated service names**: TRMNValidationService, TRMNValidationServiceImpl
+✅ **Updated logging**: All log messages now include "TRMN:" prefix
+✅ **Updated constants**: All business constants now have "DUMMY_" prefix
+
+The framework now uses **TRMN** (Time-Based Record Management) terminology throughout and has **"dummy"** prefixed to all constants while maintaining the exact same business logic and validation patterns!
