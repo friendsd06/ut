@@ -3569,3 +3569,22 @@ management:
                    </build>
 
                </project>
+
+
+               ----------------------------------
+
+                 private void createMultiAttributeValidationResponse(Map<String, String> attributes,
+                                                                      String validationColumn) {
+
+                       String[] columns = validationColumn.split("\\" + DELIMITER);
+
+                       for (String column : columns) {
+                           String originalValue = attributes.get(column);
+                           if (originalValue != null) {
+                               String errorValue = originalValue + DELIMITER + VALIDATION_ERROR;
+                               attributes.put(column, errorValue);
+                           }
+                       }
+
+                       LOGGER.info("Added validation errors to columns: " + Arrays.toString(columns));
+                   }
