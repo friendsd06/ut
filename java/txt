@@ -3573,18 +3573,33 @@ management:
 
                ----------------------------------
 
-                 private void createMultiAttributeValidationResponse(Map<String, String> attributes,
-                                                                      String validationColumn) {
+                /**
+                     * Creates error response for multi-attribute validation failure
+                     * Marks ALL columns in the validation set with error messages
+                     *
+                     * SAMPLE INPUT:
+                     * attributes = {"ACCOUNT_ID": "ACC-456", "CURRENCY": "EUR", "BRANCH": "LON"}
+                     * validationColumn = "ACCOUNT_ID|CURRENCY|BRANCH"
+                     *
+                     * SAMPLE OUTPUT:
+                     * attributes = {
+                     *   "ACCOUNT_ID": "ACC-456|VALIDATION_ERROR",
+                     *   "CURRENCY": "EUR|VALIDATION_ERROR",
+                     *   "BRANCH": "LON|VALIDATION_ERROR"
+                     * }
+                     */
+                    private void createMultiAttributeValidationResponse(Map<String, String> attributes,
+                                                                       String validationColumn) {
 
-                       String[] columns = validationColumn.split("\\" + DELIMITER);
+                        String[] columns = validationColumn.split("\\" + DELIMITER);
 
-                       for (String column : columns) {
-                           String originalValue = attributes.get(column);
-                           if (originalValue != null) {
-                               String errorValue = originalValue + DELIMITER + VALIDATION_ERROR;
-                               attributes.put(column, errorValue);
-                           }
-                       }
+                        for (String column : columns) {
+                            String originalValue = attributes.get(column);
+                            if (originalValue != null) {
+                                String errorValue = originalValue + DELIMITER + VALIDATION_ERROR;
+                                attributes.put(column, errorValue);
+                            }
+                        }
 
-                       LOGGER.info("Added validation errors to columns: " + Arrays.toString(columns));
-                   }
+                        LOGGER.info("Added validation errors to columns: " + Arrays.toString(columns));
+                    }
