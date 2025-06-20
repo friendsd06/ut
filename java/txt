@@ -1,680 +1,1133 @@
-package com.banking.mcr.validation;
+package com.company.mcr.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import lombok.Data;
 import lombok.Builder;
-import lombok.AllArgsConstructor;
+import lombok.Data;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Clean MCR Validation Service Implementation
+ * Production-ready service for handling MCR (Master Child Record) validation and processing.
  *
- * This service provides clean validation methods with proper return objects
- * and comprehensive data flow processing for financial records.
+ * This service follows SOLID principles and provides comprehensive MCR processing capabilities:
+ * - Validates incoming MCR requests
+ * - Processes records with derived values
+ * - Handles file creation and storage operations
+ * - Provides robust error handling and logging
+ *
+ * Business Flow:
+ * 1. Request Structure Validation
+ * 2. Processing Context Building
+ * 3. Data Validation Execution
+ * 4. Record Creation and File Processing
+ *
+ * @author Development Team
+ * @version 2.0 - Production Ready
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j
-public class MCRValidationService {
+public class MCRChildRecordService {
 
-    // Dependencies
+    // Core dependencies injected via constructor (Dependency Inversion Principle)
+    private final AssetConfiguration assetConfiguration;
     private final StorageServiceProcessor storageServiceProcessor;
-    private final AdapterService adapterService;
+    private final ConfigurationHelper configurationHelper;
+    private final QueryHelper queryHelper;
+    private final AdjustmentUtilities adjustmentUtilities;
+    private final ServiceHelper serviceHelper;
+    private final MCRValidationService validationService;
+    private final MCRRecordDerivationService derivationService;
 
-    // Configuration
-    @Value("${query.filter-chunk-size:1000}")
-    private Integer chunkSize;
-
-    // Sample providers for testing
-    private final SampleDataProvider dataProvider = new SampleDataProvider();
-    private final ValidationUtils validationUtils = new ValidationUtils();
-
-    // Constants
-    private static final String DAILY_FREQ = "D";
-    private static final String MONTHLY_FREQ = "M";
-    private static final String PIPE_DELIMITER = "|";
-    private static final String VALIDATION_ERROR_MSG = "VALIDATION_ERROR";
+    // Business constants for better maintainability
+    private static final String DE_LOAN = "DE_LOAN";
+    private static final String DUP_ATTR = "_DUP_ATTR";
+    private static final String DUP_ATTR_908 = "_DUP_ATTR_908";
+    private static final String PARENT_CLS_CD_ATTR = "_PARENT_CLS_CD_ATTR";
+    private static final String CLS_CD_ATTR = "_CLS_CD_ATTR";
+    private static final String CLS_CD_908_VAL = "_CLS_CD_908_VAL";
+    private static final String STRM_CD_ATTR = "_STRM_CD_ATTR";
+    private static final String MCR_MISSING_CONTEXT_KEYS = "MCR_MISSING_CONTEXT_KEYS";
+    private static final String VALIDATION_SUCCESS = "Success";
+    private static final String VALIDATION_FAILED = "Failed";
 
     /**
-     * Validates position codes and returns simple response object
+     * Main entry point for MCR validation and record creation process.
      *
-     * SAMPLE INPUT:
-     * positionCodes = ["POS-001", "POS-002", "INVALID-999"]
-     * request = GenericRequest with entity data
-     * validationColumn = "POSITION_CODE"
-     * validationTable = "POSITION_TABLE"
+     * This method orchestrates the complete MCR processing workflow:
+     * 1. Validates request structure and business rules
+     * 2. Builds processing context with required metadata
+     * 3. Executes comprehensive validation rules
+     * 4. Creates records and processes files on successful validation
      *
-     * SAMPLE PROCESSING:
-     * 1. Check if AMU request -> Skip validation
-     * 2. Multi-column check -> Route to appropriate method
-     * 3. Single column -> Validate against position codes list
-     * 4. Mark errors for invalid codes
-     *
-     * SAMPLE OUTPUT:
-     * ChildEntityResponse{isValid: false}
-     *
-     * @param positionCodes List of valid position codes
-     * @param request The validation request
-     * @param validationColumn Column to validate
-     * @param validationTable Table for validation
-     * @return ChildEntityResponse object with validation status
+     * @param request The MCR record request containing data to process
+     * @throws AdjustmentException if validation or processing fails
      */
-    public ChildEntityResponse validatePositionCode(List<String> positionCodes,
-                                                  GenericRequest request,
-                                                  String validationColumn,
-                                                  String validationTable) {
-
-        log.info("🔍 Starting position code validation for column: {} in table: {}",
-                validationColumn, validationTable);
-
-        // Early return for AMU requests
-        if (isAMURequest(request)) {
-            log.info("⏭️ Skipping validation for AMU request");
-            return new ChildEntityResponse(true);
-        }
+    @Async
+    public void validateAndCreateMCRBalanceRecord(MCRRecordRequest request) throws AdjustmentException {
+        log.info("Starting MCR validation and record creation for request: {} with subProduct: {}",
+            request.getRequestId(), request.getSubProduct());
 
         try {
-            // Route to appropriate validation method
-            if (validationColumn.contains(PIPE_DELIMITER)) {
-                return validateMultipleColumnsForDuplicates(request, validationColumn, validationTable);
-            } else {
-                return validateSingleColumnRequest(request, validationColumn, validationTable, positionCodes);
-            }
+            // Step 1: Validate request structure and business constraints
+            validateRequestStructure(request);
+
+            // Step 2: Build comprehensive processing context
+            MCRProcessingContext context = buildProcessingContext(request);
+
+            // Step 3: Execute all validation rules
+            boolean isValidationSuccessful = executeValidation(request, context);
+
+            // Step 4: Process based on validation outcome
+            processValidationResult(request, context, isValidationSuccessful);
+
+            log.info("Successfully completed MCR processing for request: {}", request.getRequestId());
+
+        } catch (AdjustmentException e) {
+            handleAdjustmentException(request, e);
+        } catch (Exception e) {
+            handleGeneralException(request, e);
+        }
+    }
+
+    /**
+     * Validates the basic structure and business rules of the incoming request.
+     *
+     * Business Rule: MCR requests must contain exactly one child entity
+     * to ensure proper processing and data integrity.
+     *
+     * @param request The MCR request to validate
+     * @throws MCRChildRecordException if validation fails
+     */
+    private void validateRequestStructure(MCRRecordRequest request) throws MCRChildRecordException {
+        log.debug("Validating request structure for request: {}", request.getRequestId());
+
+        if (request.getData() == null || request.getData().isEmpty()) {
+            throw new MCRChildRecordException(
+                AdjustmentConstants.VALIDATION_STATUS,
+                request.getRequestId(),
+                "Request data cannot be null or empty"
+            );
+        }
+
+        if (request.getData().size() != 1) {
+            throw new MCRChildRecordException(
+                AdjustmentConstants.VALIDATION_STATUS,
+                request.getRequestId(),
+                String.format("Expected exactly one entity, but found %d entities", request.getData().size())
+            );
+        }
+
+        // Validate entity data is present
+        RequestData entityData = request.getData().get(0);
+        if (entityData.getAttributeData() == null || entityData.getAttributeData().isEmpty()) {
+            throw new MCRChildRecordException(
+                AdjustmentConstants.VALIDATION_STATUS,
+                request.getRequestId(),
+                "Entity attribute data cannot be null or empty"
+            );
+        }
+
+        log.debug("Request structure validation successful for request: {}", request.getRequestId());
+    }
+
+    /**
+     * Builds comprehensive processing context containing all metadata and data mappings
+     * required for MCR validation and record creation.
+     *
+     * This method aggregates:
+     * - Configuration metadata for the sub-product
+     * - Validation rules and constraints
+     * - Position and balance data mappings
+     * - Context hierarchies and logical record associations
+     *
+     * @param request The MCR request
+     * @return Complete processing context
+     * @throws AdjustmentException if context building fails
+     */
+    private MCRProcessingContext buildProcessingContext(MCRRecordRequest request) throws AdjustmentException {
+        log.debug("Building processing context for request: {}", request.getRequestId());
+
+        try {
+            // Get configuration metadata
+            SubProductMetadata subProductData = configurationHelper.getSubProductData(request.getSubProduct());
+            RequestTypeMetadata requestTypeMetadata = configurationHelper.getRequestTypeMetadata(
+                subProductData, request.getRequestType());
+
+            // Build validation metadata with business rules
+            MCRValidationMetadata validationMetadata = buildValidationMetadata(request, requestTypeMetadata);
+
+            // Get position data from balance service
+            Map<String, BalanceAttributeData> positionClassCodeMap = getPositionData(request, subProductData, validationMetadata);
+
+            // Build MCR context data with hierarchical mappings
+            MCRContextData mcrContextData = buildMCRContextData(positionClassCodeMap);
+
+            // Get stream code data for loan-specific processing
+            Map<String, BalanceAttributeData> streamCodeMap = getStreamCodeData(request, validationMetadata, mcrContextData);
+
+            // Build logical record mappings for duplicate validation
+            Map<String, List<String>> logicalRecordMappings = buildLogicalRecordMappings(
+                request, validationMetadata, mcrContextData, positionClassCodeMap);
+
+            MCRProcessingContext context = MCRProcessingContext.builder()
+                .subProductData(subProductData)
+                .validationMetadata(validationMetadata)
+                .positionClassCodeMap(positionClassCodeMap)
+                .mcrContextData(mcrContextData)
+                .streamCodeMap(streamCodeMap)
+                .logicalRecordMappings(logicalRecordMappings)
+                .build();
+
+            log.debug("Successfully built processing context for request: {}", request.getRequestId());
+            return context;
 
         } catch (Exception e) {
-            log.error("❌ Validation failed with exception: {}", e.getMessage(), e);
-            return new ChildEntityResponse(false);
+            log.error("Failed to build processing context for request: {}", request.getRequestId(), e);
+            throw new AdjustmentException(AdjustmentConstants.DATA_PREP, request.getRequestId(),
+                "Failed to build processing context: " + e.getMessage(), request.getRequestType());
         }
     }
 
     /**
-     * Validates multiple columns for duplicate combinations with complete data flow
+     * Builds validation metadata from request configuration.
      *
-     * DETAILED DATA FLOW:
-     *
-     * 📥 INPUT:
-     * request = {
-     *   frequency: "DAILY",
-     *   cohData: "2024-01-15",
-     *   requestId: "REQ-001",
-     *   data: [{
-     *     entity: "POSITION_TABLE",
-     *     attributeData: [
-     *       {"ACCOUNT_ID": "ACC-123", "CURRENCY": "USD", "BRANCH": "NYC"},
-     *       {"ACCOUNT_ID": "ACC-456", "CURRENCY": "EUR", "BRANCH": "LON"},
-     *       {"ACCOUNT_ID": "ACC-789", "CURRENCY": "GBP", "BRANCH": "NYC"}
-     *     ]
-     *   }]
-     * }
-     * validationColumn = "ACCOUNT_ID|CURRENCY|BRANCH"
-     * validationTable = "POSITION_TABLE"
-     *
-     * 🔄 PROCESSING STEPS:
-     *
-     * Step 1: Frequency Normalization
-     *   "DAILY" -> "D"
-     *
-     * Step 2: Extract Concatenated Values
-     *   Record 1: "ACC-123" + "|" + "USD" + "|" + "NYC" = "ACC-123|USD|NYC"
-     *   Record 2: "ACC-456" + "|" + "EUR" + "|" + "LON" = "ACC-456|EUR|LON"
-     *   Record 3: "ACC-789" + "|" + "GBP" + "|" + "NYC" = "ACC-789|GBP|NYC"
-     *   concatenatedValues = ["ACC-123|USD|NYC", "ACC-456|EUR|LON", "ACC-789|GBP|NYC"]
-     *
-     * Step 3: Database Query for Duplicates
-     *   Query: Check which combinations already exist in database
-     *   Result: invalidCombinations = ["ACC-456|EUR|LON"] // This exists as duplicate
-     *
-     * Step 4: Mark Errors for Invalid Combinations
-     *   Record 1: "ACC-123|USD|NYC" -> Not in invalid list -> ✅ Valid
-     *   Record 2: "ACC-456|EUR|LON" -> Found in invalid list -> ❌ Add error key
-     *   Record 3: "ACC-789|GBP|NYC" -> Not in invalid list -> ✅ Valid
-     *
-     * 📤 OUTPUT:
-     * ChildEntityResponse{isValid: false}
-     *
-     * Modified request data:
-     * [{
-     *   entity: "POSITION_TABLE",
-     *   attributeData: [
-     *     {"ACCOUNT_ID": "ACC-123", "CURRENCY": "USD", "BRANCH": "NYC"},                    // ✅ Unchanged
-     *     {"ACCOUNT_ID": "ACC-456|VALIDATION_ERROR", "CURRENCY": "EUR|VALIDATION_ERROR",
-     *      "BRANCH": "LON|VALIDATION_ERROR"},                                              // ❌ All fields marked with error
-     *     {"ACCOUNT_ID": "ACC-789", "CURRENCY": "GBP", "BRANCH": "NYC"}                    // ✅ Unchanged
-     *   ]
-     * }]
-     *
-     * @param request The validation request
-     * @param validationColumn Pipe-separated column names
-     * @param validationTable Table for validation
-     * @return ChildEntityResponse with simple validation status
+     * @param request The MCR request
+     * @param requestTypeMetadata Configuration metadata
+     * @return Validation metadata with business rules
      */
-    public ChildEntityResponse validateMultipleColumnsForDuplicates(GenericRequest request,
-                                                                  String validationColumn,
-                                                                  String validationTable) {
+    private MCRValidationMetadata buildValidationMetadata(MCRRecordRequest request, RequestTypeMetadata requestTypeMetadata) {
+        String entity = request.getData().get(0).getEntity().toLowerCase();
+        SubProductMetadata subProductData = configurationHelper.getSubProductData(request.getSubProduct());
 
-        log.info("🔍 Starting multi-column validation for table: {}", validationTable);
-        log.info("📊 Validation columns: {}", validationColumn);
-
-        // Step 1: Normalize frequency
-        String frequencyCode = normalizeFrequency(request.getFrequency());
-        log.info("📅 Frequency normalized: {} -> {}", request.getFrequency(), frequencyCode);
-
-        // Step 2: Extract concatenated values from all records
-        Set<String> concatenatedValues = extractConcatenatedValues(request, validationColumn);
-        log.info("🔗 Extracted {} concatenated values: {}",
-                concatenatedValues.size(), concatenatedValues);
-
-        // Step 3: Query database for duplicate combinations
-        List<String> invalidCombinations = queryDatabaseForDuplicates(
-            request, validationTable, validationColumn, frequencyCode, concatenatedValues);
-
-        log.info("🚨 Found {} invalid combinations: {}", invalidCombinations.size(), invalidCombinations);
-
-        // Step 4: Mark errors and build result
-        boolean hasErrors = markValidationErrors(request, validationTable, validationColumn, invalidCombinations);
-
-        // Build final simple response
-        boolean isValid = !hasErrors;
-
-        log.info("✅ Multi-column validation completed: isValid={}", isValid);
-        return new ChildEntityResponse(isValid);
-    }
-
-    // =====================================
-    // HELPER METHODS
-    // =====================================
-
-    /**
-     * Validates single column requests
-     */
-    private ChildEntityResponse validateSingleColumnRequest(GenericRequest request,
-                                                           String validationColumn,
-                                                           String validationTable,
-                                                           List<String> positionCodes) throws Exception {
-
-        log.info("🔍 Starting single column validation for column: {}", validationColumn);
-
-        // Handle large position code lists with chunking
-        if (positionCodes.size() > chunkSize) {
-            handleLargePositionCodeList(request, validationColumn, positionCodes);
-        }
-
-        // Validate attributes
-        boolean hasErrors = validateSingleColumnAttributes(request, validationColumn, positionCodes);
-
-        boolean isValid = !hasErrors;
-        return new ChildEntityResponse(isValid);
-    }
-
-    /**
-     * Extracts concatenated values and data source codes from request
-     */
-    private Set<String> extractConcatenatedValues(GenericRequest request, String validationColumn) {
-        Set<String> concatenatedValues = new HashSet<>();
-
-        for (EntityRequestData dataItem : request.getData()) {
-            for (Map<String, String> attributes : dataItem.getAttributeData()) {
-                String concatenated = validationUtils.concatAllColumnValues(attributes, validationColumn);
-                concatenatedValues.add(concatenated);
-            }
-        }
-
-        return concatenatedValues;
-    }
-
-    /**
-     * Queries database for duplicate combinations
-     */
-    private List<String> queryDatabaseForDuplicates(GenericRequest request,
-                                                   String validationTable,
-                                                   String validationColumn,
-                                                   String frequencyCode,
-                                                   Set<String> concatenatedValues) {
-
-        return dataProvider.getColumnValidationCodes(
-            request.getCohData(),
-            new ArrayList<>(concatenatedValues),
-            request.getRequestId(),
-            validationTable,
-            validationColumn,
-            new ArrayList<>(), // Empty data source codes
-            frequencyCode
+        return new MCRValidationMetadata(
+            subProductData.getParentTable(),
+            subProductData.getParentCd(),
+            entity,
+            configurationHelper.getValue(requestTypeMetadata, entity + DUP_ATTR),
+            configurationHelper.getValue(requestTypeMetadata, entity + DUP_ATTR_908),
+            configurationHelper.getValue(requestTypeMetadata, entity + PARENT_CLS_CD_ATTR),
+            configurationHelper.getValue(requestTypeMetadata, entity + CLS_CD_ATTR),
+            configurationHelper.getValue(requestTypeMetadata, entity + CLS_CD_908_VAL),
+            configurationHelper.getValue(requestTypeMetadata, entity + STRM_CD_ATTR)
         );
     }
 
     /**
-     * Marks validation errors for invalid combinations
-     */
-    private boolean markValidationErrors(GenericRequest request,
-                                       String validationTable,
-                                       String validationColumn,
-                                       List<String> invalidCombinations) {
-
-        boolean hasErrors = false;
-
-        for (EntityRequestData dataItem : request.getData()) {
-            if (validationTable.equalsIgnoreCase(dataItem.getEntity())) {
-
-                for (Map<String, String> attributes : dataItem.getAttributeData()) {
-                    String concatenatedValue = validationUtils.concatAllColumnValues(attributes, validationColumn);
-
-                    if (invalidCombinations.contains(concatenatedValue)) {
-                        // Add error to each individual field in the combination
-                        createMultiColumnValidationError(attributes, validationColumn);
-                        hasErrors = true;
-                        log.debug("❌ Invalid combination: {}", concatenatedValue);
-                    } else {
-                        log.debug("✅ Valid combination: {}", concatenatedValue);
-                    }
-                }
-            }
-        }
-
-        return hasErrors;
-    }
-
-    /**
-     * Creates validation error for multi-column validation failure
-     * Adds error messages to ALL individual columns in the validation set
+     * Retrieves position data from balance service for validation.
      *
-     * SAMPLE INPUT:
-     * attributes = {"ACCOUNT_ID": "ACC-456", "CURRENCY": "EUR", "BRANCH": "LON"}
-     * validationColumn = "ACCOUNT_ID|CURRENCY|BRANCH"
+     * @param request MCR request
+     * @param subProductData Sub-product configuration
+     * @param validationMetadata Validation rules
+     * @return Position class code mappings
+     */
+    private Map<String, BalanceAttributeData> getPositionData(MCRRecordRequest request,
+                                                            SubProductMetadata subProductData,
+                                                            MCRValidationMetadata validationMetadata) {
+        List<Map<String, String>> dataList = request.getData().get(0).getAttributeData();
+        List<String> positionCodes = extractAttributeValues(dataList, validationMetadata.getPositionTableKeyAttr());
+
+        log.debug("Retrieving position data for {} position codes", positionCodes.size());
+
+        BalanceAttributeResponse response = queryHelper.getParentCdAndLogicRecIdForPositionFromBalance(
+            request.getRequestId(), request.getCobDate(), positionCodes, request.getRequestType(),
+            subProductData.getParentCd(), subProductData.getParentTable(), request.getFrequency(),
+            subProductData.getParentClassCd());
+
+        return response.getBalanceAttributeData();
+    }
+
+    /**
+     * Retrieves stream code data for loan-specific processing.
      *
-     * SAMPLE OUTPUT:
-     * attributes = {
-     *   "ACCOUNT_ID": "ACC-456|VALIDATION_ERROR",     // ❌ Error added to each field
-     *   "CURRENCY": "EUR|VALIDATION_ERROR",           // ❌ Error added to each field
-     *   "BRANCH": "LON|VALIDATION_ERROR"              // ❌ Error added to each field
-     * }
+     * @param request MCR request
+     * @param validationMetadata Validation configuration
+     * @param mcrContextData Context mappings
+     * @return Stream code mappings
      */
-    private void createMultiColumnValidationError(Map<String, String> attributes,
-                                                String validationColumn) {
+    private Map<String, BalanceAttributeData> getStreamCodeData(MCRRecordRequest request,
+                                                              MCRValidationMetadata validationMetadata,
+                                                              MCRContextData mcrContextData) {
+        // Skip stream code processing if not configured
+        if (StringUtils.isEmpty(validationMetadata.getClassCode908Val()) ||
+            StringUtils.isEmpty(validationMetadata.getStreamCodeAttr())) {
+            log.debug("Stream code processing not required for request: {}", request.getRequestId());
+            return new HashMap<>();
+        }
 
-        String[] columns = validationColumn.split("\\" + PIPE_DELIMITER);
+        List<Map<String, String>> dataList = request.getData().get(0).getAttributeData();
+        List<Map<String, String>> filtered908Records = filterRecordsByClassCode908(dataList, validationMetadata);
+        List<String> streamCodes = extractAttributeValues(filtered908Records, validationMetadata.getStreamCodeAttr());
 
-        for (String column : columns) {
-            String originalValue = attributes.get(column);
-            if (originalValue != null) {
-                String errorValue = originalValue + PIPE_DELIMITER + VALIDATION_ERROR_MSG;
-                attributes.put(column, errorValue);
-                log.debug("🔧 Added validation error to field {}: {} -> {}", column, originalValue, errorValue);
+        if (streamCodes.isEmpty()) {
+            log.debug("No stream codes found for 908 records in request: {}", request.getRequestId());
+            return new HashMap<>();
+        }
+
+        log.debug("Retrieving stream code data for {} stream codes", streamCodes.size());
+
+        return queryHelper.getParentCdAndLogicRecIdFromIntFee(
+            request.getRequestId(), request.getCobDate(), streamCodes,
+            request.getRequestType(), mcrContextData.getContextList())
+            .getBalanceAttributeData();
+    }
+
+    /**
+     * Builds logical record mappings for duplicate validation.
+     *
+     * @param request MCR request
+     * @param validationMetadata Validation configuration
+     * @param mcrContextData Context data
+     * @param positionClassCodeMap Position mappings
+     * @return Logical record mappings for duplicate checking
+     */
+    private Map<String, List<String>> buildLogicalRecordMappings(MCRRecordRequest request,
+                                                               MCRValidationMetadata validationMetadata,
+                                                               MCRContextData mcrContextData,
+                                                               Map<String, BalanceAttributeData> positionClassCodeMap) {
+        Map<String, List<String>> mappings = new HashMap<>();
+        List<String> logicalRecordIds = extractLogicalRecordIds(positionClassCodeMap);
+
+        // Build standard duplicate mapping
+        String column = buildDuplicateColumn(validationMetadata.getDuplicateAttr());
+        Map<String, List<String>> standardMapping = queryHelper.getLogicalRecordAncIdMap(
+            request.getRequestId(), request.getCobDate(), logicalRecordIds,
+            request.getRequestType(), mcrContextData.getContextList(), column,
+            validationMetadata.getChildRecordTable());
+        mappings.put("standard", standardMapping.getOrDefault("standard", new ArrayList<>()));
+
+        // Build 908-specific mapping if applicable
+        if (isLoanProductWith908Processing(request, validationMetadata)) {
+            String dupColumn908 = buildDuplicateColumn(validationMetadata.getDuplicateAttr908());
+            Map<String, List<String>> mapping908 = queryHelper.getLogicalRecordAncIdMap(
+                request.getRequestId(), request.getCobDate(), logicalRecordIds,
+                request.getRequestType(), mcrContextData.getContextList(), dupColumn908,
+                validationMetadata.getChildRecordTable());
+            mappings.put("908", mapping908.getOrDefault("908", new ArrayList<>()));
+        }
+
+        log.debug("Built logical record mappings with {} mapping types", mappings.size());
+        return mappings;
+    }
+
+    /**
+     * Executes comprehensive validation rules against the request data.
+     *
+     * Validation includes:
+     * - Position code validation
+     * - Parent class code validation
+     * - Duplicate record validation (standard and 908-specific)
+     *
+     * @param request MCR request
+     * @param context Processing context
+     * @return true if all validations pass, false otherwise
+     */
+    private boolean executeValidation(MCRRecordRequest request, MCRProcessingContext context) {
+        log.debug("Starting comprehensive validation for request: {}", request.getRequestId());
+
+        List<Map<String, String>> dataList = request.getData().get(0).getAttributeData();
+        Set<Boolean> validationResults = new HashSet<>();
+
+        // Execute validation for each record
+        for (Map<String, String> record : dataList) {
+            validateSingleRecord(request, context, record, validationResults);
+        }
+
+        boolean isValid = !validationResults.contains(false);
+        log.debug("Validation completed for request: {} with result: {} (total records: {})",
+            request.getRequestId(), isValid, dataList.size());
+
+        return isValid;
+    }
+
+    /**
+     * Validates a single record against all applicable business rules.
+     *
+     * @param request MCR request
+     * @param context Processing context
+     * @param record Individual record to validate
+     * @param validationResults Collection to store validation outcomes
+     */
+    private void validateSingleRecord(MCRRecordRequest request, MCRProcessingContext context,
+                                    Map<String, String> record, Set<Boolean> validationResults) {
+        MCRValidationMetadata metadata = context.getValidationMetadata();
+
+        try {
+            // Core position code validation
+            boolean positionValid = validationService.validatePositionCode(
+                record, metadata, context.getPositionClassCodeMap());
+            validationResults.add(positionValid);
+
+            // Parent class code validation if configured
+            if (!StringUtils.isEmpty(metadata.getParentClassCodeAttr())) {
+                boolean parentClassValid = validationService.validateBalanceParentClassCode(
+                    record, metadata, context.getPositionClassCodeMap(),
+                    context.getStreamCodeMap(), request.getSubProduct());
+                validationResults.add(parentClassValid);
             }
+
+            // Duplicate validation based on class code
+            validateDuplicates(request, context, record, validationResults);
+
+        } catch (Exception e) {
+            log.error("Validation failed for record in request: {}", request.getRequestId(), e);
+            validationResults.add(false);
         }
     }
 
     /**
-     * Validates single column attributes against position codes
+     * Validates duplicate records based on class code and business rules.
+     *
+     * @param request MCR request
+     * @param context Processing context
+     * @param record Record to validate
+     * @param validationResults Validation results collection
      */
-    private boolean validateSingleColumnAttributes(GenericRequest request,
-                                                  String validationColumn,
-                                                  List<String> positionCodes) {
-        boolean hasErrors = false;
+    private void validateDuplicates(MCRRecordRequest request, MCRProcessingContext context,
+                                  Map<String, String> record, Set<Boolean> validationResults) {
+        MCRValidationMetadata metadata = context.getValidationMetadata();
 
-        for (EntityRequestData dataItem : request.getData()) {
-            for (Map<String, String> attributes : dataItem.getAttributeData()) {
-                String columnValue = attributes.get(validationColumn);
+        try {
+            if (isClass908Record(record, metadata) && isLoanProductWith908Processing(request, metadata)) {
+                // Validate 908 class code duplicates with specific rules
+                boolean duplicateValid = validationService.validateMCRDuplication(
+                    record, metadata, context.getLogicalRecordMappings().get("908"),
+                    context.getPositionClassCodeMap(), metadata.getDuplicateAttr908());
+                validationResults.add(duplicateValid);
 
-                if (positionCodes.contains(columnValue)) {
-                    // Mark as invalid
-                    attributes.put(validationColumn,
-                        columnValue + PIPE_DELIMITER + VALIDATION_ERROR_MSG);
-                    hasErrors = true;
-                }
+            } else if (isLoanProductWith908Processing(request, metadata)) {
+                // Validate non-908 class code duplicates with standard rules
+                boolean duplicateValid = validationService.validateMCRDuplication(
+                    record, metadata, context.getLogicalRecordMappings().get("standard"),
+                    context.getPositionClassCodeMap(), metadata.getDuplicateAttr());
+                validationResults.add(duplicateValid);
             }
+        } catch (Exception e) {
+            log.error("Duplicate validation failed for request: {}", request.getRequestId(), e);
+            throw new RuntimeException("Duplicate validation failed", e);
+        }
+    }
+
+    /**
+     * Processes validation results - either creates records or handles failure.
+     *
+     * @param request MCR request
+     * @param context Processing context
+     * @param isValid Validation outcome
+     * @throws AdjustmentException if processing fails
+     */
+    private void processValidationResult(MCRRecordRequest request, MCRProcessingContext context, boolean isValid)
+            throws AdjustmentException {
+        if (isValid) {
+            handleSuccessfulValidation(request, context);
+        } else {
+            handleFailedValidation(request);
+        }
+    }
+
+    /**
+     * Handles successful validation by creating records and processing files.
+     *
+     * @param request MCR request
+     * @param context Processing context
+     * @throws AdjustmentException if record creation fails
+     */
+    private void handleSuccessfulValidation(MCRRecordRequest request, MCRProcessingContext context)
+            throws AdjustmentException {
+        log.info("Validation successful for request: {}, proceeding with record creation", request.getRequestId());
+
+        // Update request status to success
+        updateRequestStatus(request, VALIDATION_SUCCESS);
+
+        // Create new records with derived values and process files
+        Object result = createRecordsWithDerivedValues(request, context);
+
+        log.info("Successfully created records for request: {}", request.getRequestId());
+    }
+
+    /**
+     * Handles failed validation by updating status and logging details.
+     *
+     * @param request MCR request
+     */
+    private void handleFailedValidation(MCRRecordRequest request) {
+        log.warn("Validation failed for request: {}", request.getRequestId());
+
+        // Update request status to failed
+        updateRequestStatus(request, VALIDATION_FAILED);
+
+        log.info("Updated request status to failed for request: {}", request.getRequestId());
+    }
+
+    /**
+     * Creates new records with derived values and processes associated files.
+     *
+     * This method orchestrates:
+     * - Record derivation and normalization
+     * - File creation and storage
+     * - Context-based processing
+     *
+     * @param request MCR request
+     * @param context Processing context
+     * @return Processing result
+     * @throws AdjustmentException if creation fails
+     */
+    private Object createRecordsWithDerivedValues(MCRRecordRequest request, MCRProcessingContext context)
+            throws AdjustmentException {
+        log.debug("Creating records with derived values for request: {}", request.getRequestId());
+
+        try {
+            // Initialize record processor with all required dependencies
+            MCRRecordProcessor processor = new MCRRecordProcessor(
+                request, context, assetConfiguration, configurationHelper,
+                queryHelper, serviceHelper, derivationService);
+
+            // Process all records by context
+            Object result = processor.processRecords();
+
+            log.debug("Successfully created derived records for request: {}", request.getRequestId());
+            return result;
+
+        } catch (Exception e) {
+            log.error("Failed to create records for request: {}", request.getRequestId(), e);
+            throw new AdjustmentException(AdjustmentConstants.DATA_PREP, request.getRequestId(),
+                "Failed to create records with derived values: " + e.getMessage(), request.getRequestType());
+        }
+    }
+
+    /**
+     * Updates request validation status and notifies downstream systems.
+     *
+     * @param request MCR request
+     * @param status Validation status (Success/Failed)
+     */
+    private void updateRequestStatus(MCRRecordRequest request, String status) {
+        try {
+            request.setValidationStatus(status);
+            request.getData().get(0).setAttributeData(request.getData().get(0).getAttributeData());
+
+            // Compress and encode request for DMAT
+            CompressionUtil compressionUtil = new CompressionUtil();
+            String jsonString = compressionUtil.getJsonString(request);
+
+            DmatResponse dmatResponse = new DmatResponse();
+            dmatResponse.setResponse(compressionUtil.getEncodedString(jsonString));
+
+            // Update payload validation status
+            adjustmentUtilities.updatePayloadValidationStatus(dmatResponse,
+                request.getRequestId(), request.getRequestType(), request.getCobDate());
+
+            log.debug("Successfully updated request status to: {} for request: {}", status, request.getRequestId());
+
+        } catch (Exception e) {
+            log.error("Failed to update request status for request: {}", request.getRequestId(), e);
+            // Don't throw exception here as it's a notification failure, not a business logic failure
+        }
+    }
+
+    // ================ Helper Methods ================
+
+    /**
+     * Extracts unique attribute values from data list.
+     *
+     * @param dataList List of attribute records
+     * @param attribute Attribute name to extract
+     * @return List of unique non-blank attribute values
+     */
+    private List<String> extractAttributeValues(List<Map<String, String>> dataList, String attribute) {
+        if (dataList == null || attribute == null) {
+            return new ArrayList<>();
         }
 
-        return hasErrors;
+        return dataList.stream()
+            .map(record -> record.getOrDefault(attribute, ""))
+            .filter(value -> !value.isBlank())
+            .distinct()
+            .collect(Collectors.toList());
     }
 
     /**
-     * Handles large position code lists with chunking
+     * Filters records by class code 908 for loan-specific processing.
+     *
+     * @param dataList Original data list
+     * @param metadata Validation metadata
+     * @return Filtered list containing only 908 class code records
      */
-    private void handleLargePositionCodeList(GenericRequest request,
-                                           String validationColumn,
-                                           List<String> positionCodes) throws Exception {
+    private List<Map<String, String>> filterRecordsByClassCode908(List<Map<String, String>> dataList,
+                                                                 MCRValidationMetadata metadata) {
+        if (dataList == null || metadata.getClassCode908Val() == null) {
+            return new ArrayList<>();
+        }
 
-        log.info("📦 Handling large position code list with {} items (chunk size: {})",
-                positionCodes.size(), chunkSize);
-
-        QueryRequest queryRequest = adapterService.getQueryRequestForFilter(request, validationColumn, positionCodes);
-        Map<String, String> attributePathMap = storageServiceProcessor.getAttributeOfFilePathMap(queryRequest);
-
-        log.debug("🗄️ Retrieved attribute path map with {} entries", attributePathMap.size());
+        return dataList.stream()
+            .filter(record -> metadata.getClassCode908Val()
+                .equalsIgnoreCase(record.get(metadata.getClassCodeAttr())))
+            .collect(Collectors.toList());
     }
 
     /**
-     * Normalizes frequency to standard codes
+     * Extracts logical record IDs from position data mappings.
+     *
+     * @param positionData Position class code mappings
+     * @return List of logical record IDs
      */
-    private String normalizeFrequency(String frequency) {
-        if (frequency == null) return "";
+    private List<String> extractLogicalRecordIds(Map<String, BalanceAttributeData> positionData) {
+        if (positionData == null) {
+            return new ArrayList<>();
+        }
 
-        String freq = frequency.trim().toUpperCase();
-        if ("DAILY".equals(freq) || "D".equals(freq)) return DAILY_FREQ;
-        if ("MONTHLY".equals(freq) || "M".equals(freq)) return MONTHLY_FREQ;
-
-        return frequency;
+        return positionData.values().stream()
+            .map(BalanceAttributeData::getLogicalRecordID)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
     }
 
     /**
-     * Checks if request is AMU type
+     * Builds duplicate column from attribute configuration.
+     * Handles both single attributes and pipe-separated concatenated attributes.
+     *
+     * @param duplicateAttr Duplicate attribute configuration
+     * @return Processed column definition
      */
-    private boolean isAMURequest(GenericRequest request) {
-        return "AMU".equals(request.getRequestType());
+    private String buildDuplicateColumn(String duplicateAttr) {
+        if (StringUtils.isEmpty(duplicateAttr)) {
+            return "";
+        }
+
+        if (duplicateAttr.contains("|")) {
+            List<String> columnValues = Arrays.asList(duplicateAttr.split("\\|"));
+            return new QueryUtil().getConcatenatedColumn(columnValues);
+        }
+        return duplicateAttr;
     }
 
-    // =====================================
-    // COMPREHENSIVE TESTING
-    // =====================================
+    /**
+     * Checks if record belongs to class code 908.
+     *
+     * @param record Record to check
+     * @param metadata Validation metadata
+     * @return true if record has 908 class code
+     */
+    private boolean isClass908Record(Map<String, String> record, MCRValidationMetadata metadata) {
+        if (record == null || metadata.getClassCode908Val() == null) {
+            return false;
+        }
 
+        return metadata.getClassCode908Val()
+            .equalsIgnoreCase(record.get(metadata.getClassCodeAttr()));
+    }
+
+    /**
+     * Checks if this is a loan product requiring 908-specific processing.
+     *
+     * @param request MCR request
+     * @param metadata Validation metadata
+     * @return true if 908 processing is required
+     */
+    private boolean isLoanProductWith908Processing(MCRRecordRequest request, MCRValidationMetadata metadata) {
+        return DE_LOAN.equalsIgnoreCase(request.getSubProduct()) &&
+               !StringUtils.isEmpty(metadata.getClassCode908Val());
+    }
+
+    /**
+     * Builds MCR context data from position mappings.
+     * Creates hierarchical context mappings for processing.
+     *
+     * @param positionData Position class code mappings
+     * @return MCR context data with hierarchical mappings
+     * @throws DataPrepException if context cannot be built
+     */
+    private MCRContextData buildMCRContextData(Map<String, BalanceAttributeData> positionData)
+            throws DataPrepException {
+
+        if (positionData == null || positionData.isEmpty()) {
+            throw new DataPrepException("Position data is required for MCR context building");
+        }
+
+        Map<String, List<String>> contextAndPositionCdList = groupByContextKey(positionData,
+            BalanceAttributeData::getPositionCode);
+        Map<String, List<String>> contextAndLogicalIdList = groupByContextKey(positionData,
+            BalanceAttributeData::getLogicalRecordID);
+        List<String> contextList = new ArrayList<>(contextAndPositionCdList.keySet());
+
+        log.debug("Built MCR context data with {} context keys: {}", contextList.size(), contextList);
+
+        if (contextList.isEmpty()) {
+            log.error("MCR context building failed: No context keys found in position data");
+            throw new DataPrepException(MCR_MISSING_CONTEXT_KEYS);
+        }
+
+        MCRContextData contextData = new MCRContextData();
+        contextData.setContextAndPositionCdList(contextAndPositionCdList);
+        contextData.setContextAndLogicalIdList(contextAndLogicalIdList);
+        contextData.setContextList(contextList);
+
+        return contextData;
+    }
+
+    /**
+     * Groups balance attribute data by context key using provided mapper function.
+     *
+     * @param positionData Position data mappings
+     * @param mapper Function to extract values from BalanceAttributeData
+     * @return Grouped data by context key
+     */
+    private <T> Map<String, List<T>> groupByContextKey(Map<String, BalanceAttributeData> positionData,
+                                                      Function<BalanceAttributeData, T> mapper) {
+        return positionData.values().stream()
+            .collect(Collectors.groupingBy(
+                BalanceAttributeData::getContextKey,
+                Collectors.mapping(mapper, Collectors.toList())
+            ));
+    }
+
+    // ================ Exception Handlers ================
+
+    /**
+     * Handles AdjustmentException with proper logging and re-throwing.
+     *
+     * @param request MCR request
+     * @param e AdjustmentException
+     * @throws AdjustmentException Re-thrown with additional context
+     */
+    private void handleAdjustmentException(MCRRecordRequest request, AdjustmentException e)
+            throws AdjustmentException {
+        log.error("AdjustmentException in MCR flow for request: {}", request.getRequestId(), e);
+
+        throw new AdjustmentException(AdjustmentConstants.DATA_PREP, request.getRequestId(),
+            "MCR processing failed: " + e.getMsg(), request.getRequestType());
+    }
+
+    /**
+     * Handles general exceptions with proper logging and conversion.
+     *
+     * @param request MCR request
+     * @param e Exception
+     * @throws MCRChildRecordException Converted exception with context
+     */
+    private void handleGeneralException(MCRRecordRequest request, Exception e) throws MCRChildRecordException {
+        log.error("Unexpected exception in MCR flow for request: {}", request.getRequestId(), e);
+
+        throw new MCRChildRecordException(AdjustmentConstants.DATA_PREP, request.getRequestId(),
+            "MCR processing failed due to unexpected error: " + e.getMessage(), request.getRequestType());
+    }
+
+    // ================ Main Method for Testing ================
+
+    /**
+     * Main method for testing the MCR service.
+     * Demonstrates proper usage and provides test data structure.
+     *
+     * @param args Command line arguments (not used)
+     */
     public static void main(String[] args) {
-        System.out.println("🏦 Clean MCR Validation Service - Complete Test Suite");
-        System.out.println("====================================================");
+        log.info("=== MCR Child Record Service - Production Test ===");
 
-        MCRValidationService service = createTestService();
+        try {
+            // Create comprehensive test data
+            MCRRecordRequest testRequest = createComprehensiveTestRequest();
 
-        testPositionCodeValidation(service);
-        testMultiColumnValidationDataFlow(service);
+            log.info("Created test request: {}", testRequest.getRequestId());
+            log.info("Sub-product: {}", testRequest.getSubProduct());
+            log.info("Request type: {}", testRequest.getRequestType());
+            log.info("Number of entities: {}", testRequest.getData().size());
+            log.info("Number of records: {}", testRequest.getData().get(0).getAttributeData().size());
 
-        System.out.println("\n✅ All tests completed successfully!");
+            // In production, this would be processed through Spring context:
+            // ApplicationContext context = SpringApplication.run(Application.class, args);
+            // MCRChildRecordService service = context.getBean(MCRChildRecordService.class);
+            // service.validateAndCreateMCRBalanceRecord(testRequest);
+
+            log.info("=== Test completed successfully ===");
+            log.info("Note: In production environment, inject this service through Spring context");
+            log.info("Expected flow: Request -> Validation -> Context Building -> Record Creation -> File Processing");
+
+        } catch (Exception e) {
+            log.error("Error during MCR service testing", e);
+        }
     }
 
     /**
-     * Creates test service with mock dependencies
+     * Creates a comprehensive test request with realistic data structure.
+     * This demonstrates the expected data format and business scenarios.
+     *
+     * @return Complete test MCR request
      */
-    private static MCRValidationService createTestService() {
-        return new MCRValidationService(
-            new MockStorageServiceProcessor(),
-            new MockAdapterService()
+    private static MCRRecordRequest createComprehensiveTestRequest() {
+        MCRRecordRequest request = new MCRRecordRequest();
+
+        // Set request metadata
+        request.setRequestId("MCR-TEST-" + System.currentTimeMillis());
+        request.setRequestType("MCR_BALANCE_VALIDATION");
+        request.setSubProduct("DE_LOAN");
+        request.setCobDate("2025-06-23");
+        request.setFrequency("DAILY");
+
+        // Create comprehensive attribute data
+        List<Map<String, String>> attributeDataList = new ArrayList<>();
+
+        // Sample record 1 - Standard loan record
+        Map<String, String> record1 = new HashMap<>();
+        record1.put("POSITION_CODE", "POS001");
+        record1.put("CLASS_CODE", "CLS001");
+        record1.put("ENTITY", "LOAN");
+        record1.put("PARENT_CLASS_CODE", "PARENT_001");
+        record1.put("LOGICAL_RECORD_ID", "LR001");
+        record1.put("AMOUNT", "10000.00");
+        record1.put("CURRENCY", "USD");
+        attributeDataList.add(record1);
+
+        // Sample record 2 - 908 class code record (for loan-specific processing)
+        Map<String, String> record2 = new HashMap<>();
+        record2.put("POSITION_CODE", "POS002");
+        record2.put("CLASS_CODE", "908");
+        record2.put("ENTITY", "LOAN");
+        record2.put("STREAM_CODE", "STR001");
+        record2.put("LOGICAL_RECORD_ID", "LR002");
+        record2.put("AMOUNT", "25000.00");
+        record2.put("CURRENCY", "USD");
+        attributeDataList.add(record2);
+
+        // Sample record 3 - Additional standard record
+        Map<String, String> record3 = new HashMap<>();
+        record3.put("POSITION_CODE", "POS003");
+        record3.put("CLASS_CODE", "CLS002");
+        record3.put("ENTITY", "LOAN");
+        record3.put("PARENT_CLASS_CODE", "PARENT_002");
+        record3.put("LOGICAL_RECORD_ID", "LR003");
+        record3.put("AMOUNT", "15000.00");
+        record3.put("CURRENCY", "EUR");
+        attributeDataList.add(record3);
+
+        // Create request data entity
+        RequestData requestData = new RequestData();
+        requestData.setEntity("LOAN");
+        requestData.setAttributeData(attributeDataList);
+
+        // Set data list (must contain exactly one entity as per business rules)
+        request.setData(Arrays.asList(requestData));
+
+        return request;
+    }
+
+    /**
+     * Creates a minimal test request for basic validation testing.
+     *
+     * @return Minimal test MCR request
+     */
+    private static MCRRecordRequest createMinimalTestRequest() {
+        MCRRecordRequest request = new MCRRecordRequest();
+        request.setRequestId("MCR-MINIMAL-" + System.currentTimeMillis());
+        request.setRequestType("MCR_VALIDATION");
+        request.setSubProduct("DE_LOAN");
+        request.setCobDate("2025-06-23");
+        request.setFrequency("DAILY");
+
+        Map<String, String> minimalRecord = new HashMap<>();
+        minimalRecord.put("POSITION_CODE", "MIN001");
+        minimalRecord.put("CLASS_CODE", "MIN_CLS");
+        minimalRecord.put("ENTITY", "LOAN");
+
+        RequestData data = new RequestData();
+        data.setEntity("LOAN");
+        data.setAttributeData(Arrays.asList(minimalRecord));
+
+        request.setData(Arrays.asList(data));
+
+        return request;
+    }
+}
+
+/**
+ * Context object holding all processing data together.
+ * Uses Builder pattern for easy and flexible construction.
+ *
+ * This class encapsulates all the data required for MCR processing:
+ * - Configuration metadata
+ * - Validation rules and constraints
+ * - Data mappings and hierarchies
+ * - Context relationships
+ */
+@Builder
+@Data
+class MCRProcessingContext {
+    /** Sub-product configuration metadata */
+    private SubProductMetadata subProductData;
+
+    /** Validation rules and business constraints */
+    private MCRValidationMetadata validationMetadata;
+
+    /** Position to balance attribute data mappings */
+    private Map<String, BalanceAttributeData> positionClassCodeMap;
+
+    /** MCR context data with hierarchical relationships */
+    private MCRContextData mcrContextData;
+
+    /** Stream code to balance attribute mappings (for loan processing) */
+    private Map<String, BalanceAttributeData> streamCodeMap;
+
+    /** Logical record mappings for duplicate validation */
+    private Map<String, List<String>> logicalRecordMappings;
+}
+
+/**
+ * Dedicated processor for MCR record creation and file processing.
+ * Separates record processing logic following Single Responsibility Principle.
+ *
+ * This processor handles:
+ * - Record derivation and normalization
+ * - File creation and storage operations
+ * - Context-based processing workflows
+ * - Error handling for processing operations
+ */
+@RequiredArgsConstructor
+@Slf4j
+class MCRRecordProcessor {
+
+    // Processing context and request data
+    private final MCRRecordRequest request;
+    private final MCRProcessingContext context;
+
+    // Service dependencies for processing
+    private final AssetConfiguration assetConfiguration;
+    private final ConfigurationHelper configurationHelper;
+    private final QueryHelper queryHelper;
+    private final ServiceHelper serviceHelper;
+    private final MCRRecordDerivationService derivationService;
+
+    /**
+     * Processes all records by context and creates necessary files.
+     *
+     * This method orchestrates the complete record processing workflow:
+     * 1. Validates context availability
+     * 2. Initializes processing status
+     * 3. Processes records for each context
+     * 4. Creates and stores files
+     *
+     * @return Processing result with entity record mappings
+     * @throws AdjustmentException if processing fails
+     */
+    public Object processRecords() throws AdjustmentException {
+        List<String> contextKeyList = context.getMcrContextData().getContextList();
+
+        if (contextKeyList.isEmpty()) {
+            log.error("No context keys available for processing request: {}", request.getRequestId());
+            throw new MCRChildRecordException(AdjustmentConstants.MISSING_CONTEXT_KEYS);
+        }
+
+        log.info("Processing {} contexts for request: {}", contextKeyList.size(), request.getRequestId());
+
+        // Initialize processing status
+        initializeProcessing(contextKeyList);
+
+        Map<String, List<String>> finalEntityRecordListMap = null;
+
+        // Process each context independently
+        for (String contextKey : contextKeyList) {
+            try {
+                finalEntityRecordListMap = processContextRecords(contextKey);
+                log.debug("Successfully processed context: {} for request: {}", contextKey, request.getRequestId());
+            } catch (Exception e) {
+                log.error("Failed to process context: {} for request: {}", contextKey, request.getRequestId(), e);
+                throw new AdjustmentException(AdjustmentConstants.DATA_PREP, request.getRequestId(),
+                    "Context processing failed for: " + contextKey, request.getRequestType());
+            }
+        }
+
+        log.info("Successfully completed record processing for request: {}", request.getRequestId());
+        return finalEntityRecordListMap;
+    }
+
+    /**
+     * Initializes processing status and prepares for record creation.
+     *
+     * @param contextKeyList List of context keys to process
+     */
+    private void initializeProcessing(List<String> contextKeyList) {
+        log.debug("Initializing MCR record processing for {} contexts", contextKeyList.size());
+
+        try {
+            // Set initial status for all contexts
+            serviceHelper.setInitialStatus(contextKeyList, request);
+            log.debug("Successfully initialized processing status for request: {}", request.getRequestId());
+        } catch (Exception e) {
+            log.warn("Failed to set initial status for request: {}", request.getRequestId(), e);
+            // Continue processing as this is not a critical failure
+        }
+    }
+
+    /**
+     * Processes records for a specific context.
+     *
+     * This method handles:
+     * - Request data filtering for the context
+     * - Data normalization and derivation
+     * - File creation and storage
+     *
+     * @param contextKey Context identifier
+     * @return Entity record mappings for this context
+     * @throws AdjustmentException if context processing fails
+     */
+    private Map<String, List<String>> processContextRecords(String contextKey) throws AdjustmentException {
+        log.debug("Processing records for context: {} in request: {}", contextKey, request.getRequestId());
+
+        try {
+            // Step 1: Prepare and filter request data for this context
+            RequestData filteredData = prepareContextData(contextKey);
+
+            // Step 2: Normalize and derive data
+            Map<String, List<String>> entityRecordListMap = normalizeAndDeriveData(contextKey, filteredData);
+
+            // Step 3: Create and store files
+            createAndStoreFiles(contextKey, filteredData, entityRecordListMap);
+
+            log.debug("Successfully processed {} entity records for context: {}",
+                entityRecordListMap.size(), contextKey);
+
+            return entityRecordListMap;
+
+        } catch (Exception e) {
+            log.error("Failed to process context: {} for request: {}", contextKey, request.getRequestId(), e);
+            throw new AdjustmentException(AdjustmentConstants.DATA_PREP, request.getRequestId(),
+                "Failed to process context records: " + e.getMessage(), request.getRequestType());
+        }
+    }
+
+    /**
+     * Prepares and filters request data for a specific context.
+     *
+     * @param contextKey Context identifier
+     * @return Filtered request data
+     */
+    private RequestData prepareContextData(String contextKey) {
+        // Get position codes for this context
+        List<String> positionCds = context.getMcrContextData()
+            .getContextAndPositionCdList().get(contextKey);
+
+        log.debug("Filtering data for context: {} with {} position codes", contextKey, positionCds.size());
+
+        // Modify initial request with metadata
+        RequestMapper requestMapper = new RequestMapper(assetConfiguration);
+        RequestData mcrRequestData = requestMapper.modifyInitialRequest(request, context.getSubProductData());
+
+        // Filter data for this specific context
+        return new AdjUtil().getFilteredRequest(mcrRequestData, positionCds);
+    }
+
+    /**
+     * Normalizes and derives data for the context.
+     *
+     * @param contextKey Context identifier
+     * @param filteredData Filtered request data
+     * @return Normalized entity record mappings
+     */
+    private Map<String, List<String>> normalizeAndDeriveData(String contextKey, RequestData filteredData) {
+        log.debug("Normalizing and deriving data for context: {}", contextKey);
+
+        // Initialize normalization utility
+        NormalizationUtil normalizationUtil = new NormalizationUtil(configurationHelper, queryHelper);
+        normalizationUtil.setPositionClassCodeMap(context.getPositionClassCodeMap());
+
+        // Perform data normalization and derivation
+        return normalizationUtil.normalizeData(
+            filteredData,
+            contextKey,
+            request,
+            context.getSubProductData(),
+            derivationService,
+            context.getSubProductData().getParentCd(),
+            context.getSubProductData().getParentTable()
         );
     }
 
     /**
-     * Tests position code validation with custom return object
+     * Creates and stores files for the processed data.
+     *
+     * @param contextKey Context identifier
+     * @param filteredData Filtered request data
+     * @param entityRecordListMap Entity record mappings
      */
-    private static void testPositionCodeValidation(MCRValidationService service) {
-        System.out.println("\n📋 Testing Position Code Validation with ChildEntityResponse");
-        System.out.println("==========================================================");
+    private void createAndStoreFiles(String contextKey, RequestData filteredData,
+                                   Map<String, List<String>> entityRecordListMap) {
+        log.debug("Creating and storing files for context: {}", contextKey);
 
-        List<String> validPositionCodes = Arrays.asList("POS-001", "POS-002", "POS-003");
-        GenericRequest request = createTestRequest();
+        try {
+            // Create file data
+            FileDataUtil fileDataUtil = new FileDataUtil();
+            List<FileCreationRequest> fileRequestList = fileDataUtil.createFileData(
+                entityRecordListMap, contextKey, filteredData.getRequestId(), request.getRequestType());
 
-        ChildEntityResponse result = service.validatePositionCode(
-            validPositionCodes, request, "POSITION_CODE", "POSITION_TABLE");
+            // Get logical IDs for this context
+            List<String> logicalIds = context.getMcrContextData()
+                .getContextAndLogicalIdList().get(contextKey);
+            String entityName = request.getData().get(0).getEntity();
 
-        System.out.println("Validation Result: " + result);
-        System.out.println("  Is Valid: " + result.isValid());
-        System.out.println("  Test Result: " + (!result.isValid() ? "✅ PASSED" : "❌ FAILED"));
-    }
+            // Push different types of files
+            pushKeyFiles(contextKey, logicalIds, entityName);
+            pushMercuryFiles(contextKey, fileRequestList);
+            pushBaseFiles(contextKey, logicalIds);
 
-    /**
-     * Tests multi-column validation with complete data flow
-     */
-    private static void testMultiColumnValidationDataFlow(MCRValidationService service) {
-        System.out.println("\n🔍 Testing Multi-Column Validation Data Flow");
-        System.out.println("===========================================");
+            log.debug("Successfully created and stored files for context: {}", contextKey);
 
-        GenericRequest request = createMultiColumnTestRequest();
-
-        System.out.println("📥 INPUT DATA:");
-        displayRequestData(request, "BEFORE VALIDATION");
-
-        ChildEntityResponse result = service.validateMultipleColumnsForDuplicates(
-            request, "ACCOUNT_ID|CURRENCY|BRANCH", "POSITION_TABLE");
-
-        System.out.println("\n📊 VALIDATION RESULT:");
-        System.out.println("  " + result);
-        System.out.println("  Is Valid: " + result.isValid());
-
-        System.out.println("\n📤 OUTPUT DATA:");
-        displayRequestData(request, "AFTER VALIDATION");
-
-        System.out.println("\n🎯 Test Result: " + (!result.isValid() ? "✅ PASSED" : "❌ FAILED"));
-    }
-
-    /**
-     * Creates realistic test request for multi-column validation
-     */
-    private static GenericRequest createMultiColumnTestRequest() {
-        GenericRequest request = new GenericRequest();
-        request.setFrequency("DAILY");
-        request.setCohData("2024-01-15");
-        request.setRequestId("REQ-001");
-        request.setRequestType("MCR");
-
-        EntityRequestData entityData = new EntityRequestData();
-        entityData.setEntity("POSITION_TABLE");
-
-        List<Map<String, String>> attributeData = new ArrayList<>();
-
-        // Record 1 - Valid combination
-        Map<String, String> record1 = new HashMap<>();
-        record1.put("ACCOUNT_ID", "ACC-123");
-        record1.put("CURRENCY", "USD");
-        record1.put("BRANCH", "NYC");
-        attributeData.add(record1);
-
-        // Record 2 - Invalid combination (will be flagged by mock)
-        Map<String, String> record2 = new HashMap<>();
-        record2.put("ACCOUNT_ID", "ACC-456");
-        record2.put("CURRENCY", "EUR");
-        record2.put("BRANCH", "LON");
-        attributeData.add(record2);
-
-        // Record 3 - Valid combination
-        Map<String, String> record3 = new HashMap<>();
-        record3.put("ACCOUNT_ID", "ACC-789");
-        record3.put("CURRENCY", "GBP");
-        record3.put("BRANCH", "NYC");
-        attributeData.add(record3);
-
-        entityData.setAttributeData(attributeData);
-        request.setData(Arrays.asList(entityData));
-
-        return request;
-    }
-
-    /**
-     * Creates simple test request
-     */
-    private static GenericRequest createTestRequest() {
-        GenericRequest request = new GenericRequest();
-        request.setRequestType("MCR");
-        request.setFrequency("DAILY");
-
-        EntityRequestData entityData = new EntityRequestData();
-        List<Map<String, String>> attributeData = new ArrayList<>();
-
-        Map<String, String> record = new HashMap<>();
-        record.put("POSITION_CODE", "INVALID-999");
-        attributeData.add(record);
-
-        entityData.setAttributeData(attributeData);
-        request.setData(Arrays.asList(entityData));
-
-        return request;
-    }
-
-    /**
-     * Displays request data for visualization
-     */
-    private static void displayRequestData(GenericRequest request, String phase) {
-        System.out.println(phase + ":");
-        int recordNum = 1;
-
-        for (EntityRequestData data : request.getData()) {
-            for (Map<String, String> attributes : data.getAttributeData()) {
-                System.out.printf("  Record %d: ACCOUNT_ID=%s, CURRENCY=%s, BRANCH=%s%n",
-                                recordNum++,
-                                attributes.get("ACCOUNT_ID"),
-                                attributes.get("CURRENCY"),
-                                attributes.get("BRANCH"));
-
-                // Check for error fields
-                boolean hasError = false;
-                for (Map.Entry<String, String> entry : attributes.entrySet()) {
-                    if (entry.getKey().contains("|") && entry.getValue().contains("VALIDATION_ERROR")) {
-                        System.out.println("    ❌ ERROR: \"" + entry.getKey() + "\": \"" + entry.getValue() + "\"");
-                        hasError = true;
-                    }
-                }
-
-                if (!hasError) {
-                    System.out.println("    ✅ VALID");
-                }
-            }
+        } catch (Exception e) {
+            log.error("Failed to create files for context: {} in request: {}", contextKey, request.getRequestId(), e);
+            // Re-throw as this is a critical failure
+            throw new RuntimeException("File creation failed for context: " + contextKey, e);
         }
     }
-}
 
-// =====================================
-// CUSTOM RETURN MODELS
-// =====================================
-
-/**
- * Simple custom response model with single boolean attribute
- */
-@Data
-@Builder
-@AllArgsConstructor
-class ChildEntityResponse {
-    private boolean isValid;
-
-    // Default constructor
-    public ChildEntityResponse() {}
-
-    public ChildEntityResponse(boolean isValid) {
-        this.isValid = isValid;
+    /**
+     * Pushes key files for the context.
+     *
+     * @param contextKey Context identifier
+     * @param logicalIds Logical record IDs
+     * @param entityName Entity name
+     */
+    private void pushKeyFiles(String contextKey, List<String> logicalIds, String entityName) {
+        try {
+            serviceHelper.pushKeyFiles(request, logicalIds, contextKey, entityName, context.getSubProductData());
+            log.debug("Successfully pushed key files for context: {}", contextKey);
+        } catch (Exception e) {
+            log.error("Failed to push key files for context: {}", contextKey, e);
+            throw new RuntimeException("Key file push failed", e);
+        }
     }
 
-    @Override
-    public String toString() {
-        return String.format("ChildEntityResponse{isValid=%s}", isValid);
+    /**
+     * Pushes files to Mercury S storage.
+     *
+     * @param contextKey Context identifier
+     * @param fileRequestList File creation requests
+     */
+    private void pushMercuryFiles(String contextKey, List<FileCreationRequest> fileRequestList) {
+        try {
+            serviceHelper.pushFilesToMercuryS(request, contextKey, fileRequestList, false);
+            log.debug("Successfully pushed Mercury files for context: {}", contextKey);
+        } catch (Exception e) {
+            log.error("Failed to push Mercury files for context: {}", contextKey, e);
+            throw new RuntimeException("Mercury file push failed", e);
+        }
     }
-}
 
-// =====================================
-// SUPPORTING CLASSES
-// =====================================
-
-/**
- * Validation utilities
- */
-class ValidationUtils {
-    public String concatAllColumnValues(Map<String, String> attributes, String validationColumn) {
-        return Arrays.stream(validationColumn.split("\\|"))
-                .map(column -> attributes.getOrDefault(column.trim(), ""))
-                .collect(Collectors.joining("|"));
-    }
-}
-
-/**
- * Sample data provider for testing
- */
-class SampleDataProvider {
-    public List<String> getColumnValidationCodes(String cohData,
-                                                List<String> concatenatedValues,
-                                                String requestId,
-                                                String validationTable,
-                                                String validationColumn,
-                                                List<String> dataSourceCodes,
-                                                String frequencyCode) {
-
-        System.out.println("🗄️ Mock Database Query executed");
-        System.out.println("  📊 Checking: " + concatenatedValues);
-
-        // Mock: Return ACC-456|EUR|LON as duplicate
-        List<String> duplicates = Arrays.asList("ACC-456|EUR|LON");
-        System.out.println("  🚨 Duplicates found: " + duplicates);
-
-        return duplicates;
-    }
-}
-
-// =====================================
-// DATA MODELS
-// =====================================
-
-class GenericRequest {
-    private String frequency;
-    private String cohData;
-    private String requestId;
-    private String requestType;
-    private List<EntityRequestData> data;
-
-    // Getters and setters
-    public String getFrequency() { return frequency; }
-    public void setFrequency(String frequency) { this.frequency = frequency; }
-
-    public String getCohData() { return cohData; }
-    public void setCohData(String cohData) { this.cohData = cohData; }
-
-    public String getRequestId() { return requestId; }
-    public void setRequestId(String requestId) { this.requestId = requestId; }
-
-    public String getRequestType() { return requestType; }
-    public void setRequestType(String requestType) { this.requestType = requestType; }
-
-    public List<EntityRequestData> getData() { return data; }
-    public void setData(List<EntityRequestData> data) { this.data = data; }
-}
-
-class EntityRequestData {
-    private String entity;
-    private List<Map<String, String>> attributeData;
-
-    public String getEntity() { return entity; }
-    public void setEntity(String entity) { this.entity = entity; }
-
-    public List<Map<String, String>> getAttributeData() { return attributeData; }
-    public void setAttributeData(List<Map<String, String>> attributeData) { this.attributeData = attributeData; }
-}
-
-class QueryRequest {
-    private String query;
-    private List<String> parameters;
-
-    public String getQuery() { return query; }
-    public void setQuery(String query) { this.query = query; }
-
-    public List<String> getParameters() { return parameters; }
-    public void setParameters(List<String> parameters) { this.parameters = parameters; }
-}
-
-// =====================================
-// INTERFACES
-// =====================================
-
-interface StorageServiceProcessor {
-    Map<String, String> getAttributeOfFilePathMap(QueryRequest queryRequest) throws Exception;
-}
-
-interface AdapterService {
-    QueryRequest getQueryRequestForFilter(GenericRequest request, String validationColumn, List<String> positionCodes);
-}
-
-// =====================================
-// MOCK IMPLEMENTATIONS
-// =====================================
-
-class MockStorageServiceProcessor implements StorageServiceProcessor {
-    @Override
-    public Map<String, String> getAttributeOfFilePathMap(QueryRequest queryRequest) {
-        return new HashMap<>();
-    }
-}
-
-class MockAdapterService implements AdapterService {
-    @Override
-    public QueryRequest getQueryRequestForFilter(GenericRequest request, String validationColumn, List<String> positionCodes) {
-        QueryRequest queryRequest = new QueryRequest();
-        queryRequest.setQuery("SELECT * FROM validation WHERE column = ?");
-        queryRequest.setParameters(positionCodes);
-        return queryRequest;
+    /**
+     * Pushes base files for the context.
+     *
+     * @param contextKey Context identifier
+     * @param logicalIds Logical record IDs
+     */
+    private void pushBaseFiles(String contextKey, List<String> logicalIds) {
+        try {
+            serviceHelper.pushBaseFiles(logicalIds, contextKey, request);
+            log.debug("Successfully pushed base files for context: {}", contextKey);
+        } catch (Exception e) {
+            log.error("Failed to push base files for context: {}", contextKey, e);
+            throw new RuntimeException("Base file push failed", e);
+        }
     }
 }
