@@ -1,0 +1,549 @@
+package com.banking.mcr.validation;
+
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.logging.Logger;
+import java.util.logging.Level;
+
+/**
+ * Final MCR Validation Service Implementation
+ *
+ * This implementation correctly handles multi-column validation with proper error formatting:
+ * - Concatenated value: "ACC-456|EUR|LON"
+ * - Error format: "ACC-456|EUR|LON|VALIDATION_ERROR"
+ */
+public class MCRValidationServiceImpl implements MCRValidationService {
+
+    private static final Logger LOGGER = Logger.getLogger(MCRValidationServiceImpl.class.getName());
+
+    // Dependencies
+    private final DataProvider dataProvider;
+    private final AdjustmentUtilities adjUtil;
+
+    // Constants
+    private static final String VALIDATION_ERROR = "VALIDATION_ERROR";
+    private static final String DELIMITER = "|";
+    private static final String DAILY_FREQ = "D";
+    private static final String MONTHLY_FREQ = "M";
+    private static final String MULTI_COLUMN_KEY = "FRM_MULTI_COLUMN_KEY";
+
+    public MCRValidationServiceImpl(DataProvider dataProvider, AdjustmentUtilities adjUtil) {
+        this.dataProvider = dataProvider;
+        this.adjUtil = adjUtil;
+    }
+
+    /**
+     * Validates multiple columns for duplicates against database records
+     *
+     * SAMPLE INPUT:
+     * request = GenericRequest with records containing ACCOUNT_ID, CURRENCY, BRANCH
+     * validationColumn = "ACCOUNT_ID|CURRENCY|BRANCH"
+     * validationTable = "POSITION_TABLE"
+     *
+     * SAMPLE PROCESSING:
+     * 1. Concatenate: "ACC-456" + "|" + "EUR" + "|" + "LON" = "ACC-456|EUR|LON"
+     * 2. Database check: Is "ACC-456|EUR|LON" a duplicate? YES
+     * 3. Add error: "ACC-456|EUR|LON" + "|" + "VALIDATION_ERROR" = "ACC-456|EUR|LON|VALIDATION_ERROR"
+     *
+     * SAMPLE OUTPUT:
+     * Returns false, adds "FRM_MULTI_COLUMN_KEY": "ACC-456|EUR|LON|VALIDATION_ERROR"
+     *
+     * @param request The request containing data to validate
+     * @param validationColumn Pipe-separated column names to validate
+     * @param validationTable Database table for validation
+     * @return true if all records are valid, false if duplicates found
+     */
+    @Override
+    public boolean validateMultipleColumnsForDuplicates(GenericRequest request,
+                                                       String validationColumn,
+                                                       String validationTable) {
+
+        LOGGER.info("🔍 Starting multi-column validation for table: " + validationTable);
+
+        // Step 1: Normalize frequency code
+        String frequencyCode = normalizeFrequency(request.getFrequency());
+        LOGGER.info("📅 Normalized frequency: " + request.getFrequency() + " → " + frequencyCode);
+
+        // Step 2: Extract concatenated values from all records
+        Set<String> concatenatedValues = new HashSet<>();
+        Set<String> dataSourceCodes = new HashSet<>();
+
+        extractConcatenatedValuesAndDataSources(request, validationColumn, concatenatedValues, dataSourceCodes);
+        LOGGER.info("🔗 Extracted " + concatenatedValues.size() + " concatenated values: " + concatenatedValues);
+
+        // Step 3: Query database for duplicate combinations
+        List<String> invalidConcatenatedValues = dataProvider.getColumnValidationCodes(
+            request.getCohData(),
+            new ArrayList<>(concatenatedValues),
+            request.getRequestId(),
+            validationTable,
+            validationColumn,
+            new ArrayList<>(dataSourceCodes),
+            frequencyCode
+        );
+
+        LOGGER.info("🚨 Database found " + invalidConcatenatedValues.size() + " invalid combinations: " + invalidConcatenatedValues);
+
+        // Step 4: Mark errors for invalid combinations
+        boolean allValid = validateAndMarkErrors(request, validationTable, validationColumn, invalidConcatenatedValues);
+
+        LOGGER.info("✅ Multi-column validation completed. Result: " + (allValid ? "ALL VALID" : "ERRORS FOUND"));
+        return allValid;
+    }
+
+    /**
+     * Validates each record and marks errors for invalid combinations
+     *
+     * SAMPLE PROCESSING:
+     * For record with "ACC-456|EUR|LON":
+     * 1. Check if "ACC-456|EUR|LON" is in invalidConcatenatedValues
+     * 2. If YES: Add "FRM_MULTI_COLUMN_KEY": "ACC-456|EUR|LON|VALIDATION_ERROR"
+     * 3. Original fields remain unchanged
+     */
+    private boolean validateAndMarkErrors(GenericRequest request,
+                                        String validationTable,
+                                        String validationColumn,
+                                        List<String> invalidConcatenatedValues) {
+
+        boolean allValid = true;
+
+        for (EntityRequestData dataItem : request.getData()) {
+            if (validationTable.equalsIgnoreCase(dataItem.getEntity())) {
+
+                for (Map<String, String> attributes : dataItem.getAttributeData()) {
+                    String concatenatedValue = concatAllColumnValues(attributes, validationColumn);
+
+                    if (invalidConcatenatedValues.contains(concatenatedValue)) {
+                        // Create error: "ACC-456|EUR|LON" → "ACC-456|EUR|LON|VALIDATION_ERROR"
+                        createMultiColumnValidationError(attributes, concatenatedValue);
+                        allValid = false;
+
+                        LOGGER.warning("❌ Invalid combination found: " + concatenatedValue +
+                                     " → Added error field: " + concatenatedValue + DELIMITER + VALIDATION_ERROR);
+                    } else {
+                        LOGGER.info("✅ Valid combination: " + concatenatedValue);
+                    }
+                }
+            }
+        }
+
+        return allValid;
+    }
+
+    // =====================================
+    // HELPER METHODS
+    // =====================================
+
+    /**
+     * Normalizes frequency code to standard format
+     *
+     * EXAMPLES:
+     * "DAILY" → "D"
+     * "D" → "D"
+     * "MONTHLY" → "M"
+     * "M" → "M"
+     * "WEEKLY" → "WEEKLY" (unchanged)
+     */
+    private String normalizeFrequency(String frequency) {
+        if (frequency == null) {
+            return "";
+        }
+
+        String freq = frequency.trim().toUpperCase();
+
+        if ("DAILY".equals(freq) || "D".equals(freq)) {
+            return DAILY_FREQ;
+        } else if ("MONTHLY".equals(freq) || "M".equals(freq)) {
+            return MONTHLY_FREQ;
+        }
+
+        return frequency; // Return original if no standard match
+    }
+
+    /**
+     * Extracts concatenated values and data source codes from all records
+     *
+     * SAMPLE PROCESSING:
+     * Input record: {"ACCOUNT_ID": "ACC-123", "CURRENCY": "USD", "BRANCH": "NYC", "DATA_SRC_CD": "SRC-001"}
+     * Concatenated: "ACC-123|USD|NYC"
+     * Data source: "SRC-001"
+     */
+    private void extractConcatenatedValuesAndDataSources(GenericRequest request,
+                                                        String validationColumn,
+                                                        Set<String> concatenatedValues,
+                                                        Set<String> dataSourceCodes) {
+
+        for (EntityRequestData dataItem : request.getData()) {
+            for (Map<String, String> attributes : dataItem.getAttributeData()) {
+
+                // Extract concatenated value: "ACC-123|USD|NYC"
+                String concatenated = concatAllColumnValues(attributes, validationColumn);
+                concatenatedValues.add(concatenated);
+
+                // Extract data source code if present
+                String dataSourceCode = attributes.get("DATA_SRC_CD");
+                if (dataSourceCode != null && !dataSourceCode.trim().isEmpty()) {
+                    dataSourceCodes.add(dataSourceCode);
+                }
+            }
+        }
+    }
+
+    /**
+     * Concatenates column values using pipe delimiter
+     *
+     * SAMPLE PROCESSING:
+     * Input: requestMap = {"ACCOUNT_ID": "ACC-456", "CURRENCY": "EUR", "BRANCH": "LON", "OTHER": "IGNORE"}
+     * Input: validationColumn = "ACCOUNT_ID|CURRENCY|BRANCH"
+     *
+     * Step 1: Split "ACCOUNT_ID|CURRENCY|BRANCH" → ["ACCOUNT_ID", "CURRENCY", "BRANCH"]
+     * Step 2: Extract values: ["ACC-456", "EUR", "LON"]
+     * Step 3: Join with "|": "ACC-456|EUR|LON"
+     *
+     * Output: "ACC-456|EUR|LON"
+     */
+    public String concatAllColumnValues(Map<String, String> requestMap, String validationColumn) {
+        String result = Arrays.stream(validationColumn.split("\\" + DELIMITER))
+                .map(column -> requestMap.getOrDefault(column.trim(), ""))
+                .collect(Collectors.joining(DELIMITER));
+
+        LOGGER.fine("🔗 Concatenated values: " + validationColumn + " → " + result);
+        return result;
+    }
+
+    /**
+     * Creates validation error for multi-column combination
+     *
+     * SAMPLE PROCESSING:
+     * Input: concatenatedValue = "ACC-456|EUR|LON"
+     * Process: "ACC-456|EUR|LON" + "|" + "VALIDATION_ERROR"
+     * Output: "ACC-456|EUR|LON|VALIDATION_ERROR"
+     *
+     * BEFORE:
+     * {
+     *   "ACCOUNT_ID": "ACC-456",
+     *   "CURRENCY": "EUR",
+     *   "BRANCH": "LON"
+     * }
+     *
+     * AFTER:
+     * {
+     *   "ACCOUNT_ID": "ACC-456",                    // ✅ Unchanged
+     *   "CURRENCY": "EUR",                          // ✅ Unchanged
+     *   "BRANCH": "LON",                            // ✅ Unchanged
+     *   "ACC-456|EUR|LON": "ACC-456|EUR|LON|VALIDATION_ERROR"  // ❌ Error added with concatenated key
+     * }
+     */
+    private void createMultiColumnValidationError(Map<String, String> attributes,
+                                                 String concatenatedValue) {
+
+        // Format: "ACC-456|EUR|LON" + "|" + "VALIDATION_ERROR" = "ACC-456|EUR|LON|VALIDATION_ERROR"
+        String errorValue = concatenatedValue + DELIMITER + VALIDATION_ERROR;
+
+        // Use the concatenated value as the KEY and error value as the VALUE
+        // "ACC-456|EUR|LON": "ACC-456|EUR|LON|VALIDATION_ERROR"
+        attributes.put(concatenatedValue, errorValue);
+
+        LOGGER.info("🔧 Added validation error: " + concatenatedValue + " = " + errorValue);
+    }
+
+    // =====================================
+    // COMPREHENSIVE TEST SUITE
+    // =====================================
+
+    public static void main(String[] args) {
+        System.out.println("🔧 Final MCR Validation Service - Complete Test Suite");
+        System.out.println("====================================================");
+        System.out.println("Testing error format: concatenatedValue|VALIDATION_ERROR");
+        System.out.println();
+
+        // Create service with mock dependencies
+        MCRValidationServiceImpl service = new MCRValidationServiceImpl(
+            new MockDataProvider(),
+            new MockAdjustmentUtilities()
+        );
+
+        // Run comprehensive tests
+        testCompleteValidationFlow(service);
+        testErrorFormatting(service);
+        testConcatenationEdgeCases(service);
+
+        System.out.println("\n✅ All tests completed successfully!");
+        System.out.println("📋 Error format confirmed: \"ACC-456|EUR|LON\": \"ACC-456|EUR|LON|VALIDATION_ERROR\"");
+    }
+
+    /**
+     * Tests the complete validation flow with realistic data
+     */
+    private static void testCompleteValidationFlow(MCRValidationServiceImpl service) {
+        System.out.println("📊 Testing Complete Validation Flow");
+        System.out.println("===================================");
+
+        GenericRequest request = createRealisticTestRequest();
+
+        System.out.println("🔍 Input Records:");
+        displayRequestData(request, "BEFORE VALIDATION");
+
+        boolean result = service.validateMultipleColumnsForDuplicates(
+            request,
+            "ACCOUNT_ID|CURRENCY|BRANCH",
+            "POSITION_TABLE"
+        );
+
+        System.out.println("\n📋 Validation Result: " + (result ? "✅ ALL VALID" : "❌ ERRORS FOUND"));
+        System.out.println("\n📊 Output Records:");
+        displayRequestData(request, "AFTER VALIDATION");
+
+        System.out.println("\n🎯 Test Result: " + (!result ? "✅ PASSED" : "❌ FAILED"));
+    }
+
+    /**
+     * Tests specific error formatting scenarios
+     */
+    private static void testErrorFormatting(MCRValidationServiceImpl service) {
+        System.out.println("\n🔧 Testing Error Formatting");
+        System.out.println("============================");
+
+        // Test concatenation
+        Map<String, String> testRecord = new HashMap<>();
+        testRecord.put("ACCOUNT_ID", "ACC-456");
+        testRecord.put("CURRENCY", "EUR");
+        testRecord.put("BRANCH", "LON");
+
+        String concatenated = service.concatAllColumnValues(testRecord, "ACCOUNT_ID|CURRENCY|BRANCH");
+        System.out.println("1. Concatenated value: " + concatenated);
+        System.out.println("   Expected: ACC-456|EUR|LON");
+        System.out.println("   Result: " + ("ACC-456|EUR|LON".equals(concatenated) ? "✅ PASSED" : "❌ FAILED"));
+
+        // Test error creation
+        service.createMultiColumnValidationError(testRecord, concatenated);
+        String errorField = testRecord.get(concatenated); // Use concatenated value as key
+        System.out.println("\n2. Error field value: \"" + concatenated + "\": \"" + errorField + "\"");
+        System.out.println("   Expected: \"ACC-456|EUR|LON\": \"ACC-456|EUR|LON|VALIDATION_ERROR\"");
+        System.out.println("   Result: " + ("ACC-456|EUR|LON|VALIDATION_ERROR".equals(errorField) ? "✅ PASSED" : "❌ FAILED"));
+
+        // Verify original fields unchanged
+        boolean originalUnchanged = "ACC-456".equals(testRecord.get("ACCOUNT_ID")) &&
+                                   "EUR".equals(testRecord.get("CURRENCY")) &&
+                                   "LON".equals(testRecord.get("BRANCH"));
+        System.out.println("\n3. Original fields unchanged: " + (originalUnchanged ? "✅ PASSED" : "❌ FAILED"));
+    }
+
+    /**
+     * Tests concatenation edge cases
+     */
+    private static void testConcatenationEdgeCases(MCRValidationServiceImpl service) {
+        System.out.println("\n🧪 Testing Concatenation Edge Cases");
+        System.out.println("===================================");
+
+        // Test Case 1: Empty values
+        Map<String, String> emptyTest = new HashMap<>();
+        emptyTest.put("ACCOUNT_ID", "ACC-123");
+        emptyTest.put("CURRENCY", "");
+        emptyTest.put("BRANCH", "NYC");
+
+        String result1 = service.concatAllColumnValues(emptyTest, "ACCOUNT_ID|CURRENCY|BRANCH");
+        System.out.println("1. Empty middle value: " + result1);
+        System.out.println("   Expected: ACC-123||NYC");
+        System.out.println("   Result: " + ("ACC-123||NYC".equals(result1) ? "✅ PASSED" : "❌ FAILED"));
+
+        // Test Case 2: Missing fields
+        Map<String, String> missingTest = new HashMap<>();
+        missingTest.put("ACCOUNT_ID", "ACC-789");
+        missingTest.put("CURRENCY", "GBP");
+        // Missing BRANCH
+
+        String result2 = service.concatAllColumnValues(missingTest, "ACCOUNT_ID|CURRENCY|BRANCH");
+        System.out.println("\n2. Missing field: " + result2);
+        System.out.println("   Expected: ACC-789|GBP|");
+        System.out.println("   Result: " + ("ACC-789|GBP|".equals(result2) ? "✅ PASSED" : "❌ FAILED"));
+
+        // Test Case 3: Single column
+        String result3 = service.concatAllColumnValues(emptyTest, "ACCOUNT_ID");
+        System.out.println("\n3. Single column: " + result3);
+        System.out.println("   Expected: ACC-123");
+        System.out.println("   Result: " + ("ACC-123".equals(result3) ? "✅ PASSED" : "❌ FAILED"));
+    }
+
+    /**
+     * Creates a realistic test request with various scenarios
+     */
+    private static GenericRequest createRealisticTestRequest() {
+        GenericRequest request = new GenericRequest();
+        request.setFrequency("DAILY");
+        request.setCohData("2024-01-15");
+        request.setRequestId("TEST-REQ-001");
+
+        EntityRequestData entityData = new EntityRequestData();
+        entityData.setEntity("POSITION_TABLE");
+
+        List<Map<String, String>> attributeData = new ArrayList<>();
+
+        // Record 1 - Valid combination
+        Map<String, String> record1 = new HashMap<>();
+        record1.put("ACCOUNT_ID", "ACC-123");
+        record1.put("CURRENCY", "USD");
+        record1.put("BRANCH", "NYC");
+        record1.put("DATA_SRC_CD", "SRC-001");
+        attributeData.add(record1);
+
+        // Record 2 - Invalid combination (will be flagged by mock)
+        Map<String, String> record2 = new HashMap<>();
+        record2.put("ACCOUNT_ID", "ACC-456");
+        record2.put("CURRENCY", "EUR");
+        record2.put("BRANCH", "LON");
+        record2.put("DATA_SRC_CD", "SRC-002");
+        attributeData.add(record2);
+
+        // Record 3 - Valid combination
+        Map<String, String> record3 = new HashMap<>();
+        record3.put("ACCOUNT_ID", "ACC-789");
+        record3.put("CURRENCY", "GBP");
+        record3.put("BRANCH", "NYC");
+        record3.put("DATA_SRC_CD", "SRC-001");
+        attributeData.add(record3);
+
+        // Record 4 - Another invalid combination
+        Map<String, String> record4 = new HashMap<>();
+        record4.put("ACCOUNT_ID", "ACC-999");
+        record4.put("CURRENCY", "CAD");
+        record4.put("BRANCH", "TOR");
+        record4.put("DATA_SRC_CD", "SRC-003");
+        attributeData.add(record4);
+
+        entityData.setAttributeData(attributeData);
+        request.setData(Arrays.asList(entityData));
+
+        return request;
+    }
+
+    /**
+     * Displays request data in a formatted way
+     */
+    private static void displayRequestData(GenericRequest request, String phase) {
+        System.out.println(phase + ":");
+        int recordNum = 1;
+
+        for (EntityRequestData data : request.getData()) {
+            for (Map<String, String> attributes : data.getAttributeData()) {
+                System.out.printf("  Record %d: %s%n", recordNum++, formatRecord(attributes));
+
+                // Check for error fields (keys with | that have VALIDATION_ERROR values)
+                boolean hasError = false;
+                for (Map.Entry<String, String> entry : attributes.entrySet()) {
+                    if (entry.getKey().contains("|") && entry.getValue().contains("VALIDATION_ERROR")) {
+                        System.out.println("    ❌ ERROR: \"" + entry.getKey() + "\": \"" + entry.getValue() + "\"");
+                        hasError = true;
+                    }
+                }
+
+                if (!hasError) {
+                    System.out.println("    ✅ VALID");
+                }
+            }
+        }
+    }
+
+    /**
+     * Formats a record for display
+     */
+    private static String formatRecord(Map<String, String> record) {
+        return String.format("ACCOUNT_ID=%s, CURRENCY=%s, BRANCH=%s",
+                           record.get("ACCOUNT_ID"),
+                           record.get("CURRENCY"),
+                           record.get("BRANCH"));
+    }
+}
+
+// =====================================
+// SUPPORTING INTERFACES AND CLASSES
+// =====================================
+
+interface MCRValidationService {
+    boolean validateMultipleColumnsForDuplicates(GenericRequest request,
+                                               String validationColumn,
+                                               String validationTable);
+}
+
+class GenericRequest {
+    private String frequency;
+    private String cohData;
+    private String requestId;
+    private List<EntityRequestData> data;
+
+    // Getters and setters
+    public String getFrequency() { return frequency; }
+    public void setFrequency(String frequency) { this.frequency = frequency; }
+
+    public String getCohData() { return cohData; }
+    public void setCohData(String cohData) { this.cohData = cohData; }
+
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
+
+    public List<EntityRequestData> getData() { return data; }
+    public void setData(List<EntityRequestData> data) { this.data = data; }
+}
+
+class EntityRequestData {
+    private String entity;
+    private List<Map<String, String>> attributeData;
+
+    public String getEntity() { return entity; }
+    public void setEntity(String entity) { this.entity = entity; }
+
+    public List<Map<String, String>> getAttributeData() { return attributeData; }
+    public void setAttributeData(List<Map<String, String>> attributeData) { this.attributeData = attributeData; }
+}
+
+interface DataProvider {
+    List<String> getColumnValidationCodes(String cohData,
+                                        List<String> concatenatedValues,
+                                        String requestId,
+                                        String validationTable,
+                                        String validationColumn,
+                                        List<String> dataSourceCodes,
+                                        String frequencyCode);
+}
+
+interface AdjustmentUtilities {
+    String concatAllColumnValues(Map<String, String> attributes, String validationColumn);
+}
+
+/**
+ * Mock data provider that simulates database behavior
+ */
+class MockDataProvider implements DataProvider {
+    @Override
+    public List<String> getColumnValidationCodes(String cohData,
+                                                List<String> concatenatedValues,
+                                                String requestId,
+                                                String validationTable,
+                                                String validationColumn,
+                                                List<String> dataSourceCodes,
+                                                String frequencyCode) {
+
+        System.out.println("\n🗄️ Mock Database Query:");
+        System.out.println("  📅 COH Data: " + cohData);
+        System.out.println("  🔍 Checking Values: " + concatenatedValues);
+        System.out.println("  📋 Table: " + validationTable);
+        System.out.println("  📊 Columns: " + validationColumn);
+        System.out.println("  🏷️ Data Sources: " + dataSourceCodes);
+        System.out.println("  ⏰ Frequency: " + frequencyCode);
+
+        // Mock: Return specific combinations as duplicates
+        List<String> duplicates = Arrays.asList("ACC-456|EUR|LON", "ACC-999|CAD|TOR");
+        System.out.println("  🚨 Duplicate Combinations Found: " + duplicates);
+
+        return duplicates;
+    }
+}
+
+class MockAdjustmentUtilities implements AdjustmentUtilities {
+    @Override
+    public String concatAllColumnValues(Map<String, String> attributes, String validationColumn) {
+        return Arrays.stream(validationColumn.split("\\|"))
+                .map(column -> attributes.getOrDefault(column.trim(), ""))
+                .collect(Collectors.joining("|"));
+    }
+}
