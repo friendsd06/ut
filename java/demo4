@@ -1,0 +1,161 @@
+MCR Child Record Service - High Level Flow
+🎯 Overview
+The MCR (Master Child Record) Child Record Service is responsible for validating and processing loan record data, creating derived records, and managing file operations across different contexts.
+📊 High-Level Flow Diagram
+                    MCR CHILD RECORD SERVICE FLOW
+                    ================================
+
+    START
+      |
+      v
+┌─────────────────┐
+│  MCR Request    │ ← Input: Loan record data with position codes
+│    Received     │
+└─────────────────┘
+      |
+      v
+┌─────────────────┐
+│   Validate      │ ← Check: Single entity, required fields
+│   Request       │
+│   Structure     │
+└─────────────────┘
+      |
+      v
+    Valid? ───NO──→ [Return Error] ──→ END
+      |
+     YES
+      |
+      v
+┌─────────────────┐
+│  Build Context  │ ← Get: Config metadata, position data,
+│   & Metadata    │      stream codes, validation rules
+└─────────────────┘
+      |
+      v
+┌─────────────────┐
+│   Execute       │ ← Validate: Position codes, parent class,
+│  Validations    │           duplicate records, stream codes
+└─────────────────┘
+      |
+      v
+   All Valid? ───NO──→ [Set Status: Failed] ──→ [Notify DMAT] ──→ END
+      |
+     YES
+      |
+      v
+┌─────────────────┐
+│ Set Status:     │
+│   Success       │
+└─────────────────┘
+      |
+      v
+┌─────────────────┐
+│  Process Each   │ ← For each context key:
+│    Context      │   • Filter data
+│  (Parallel)     │   • Normalize & derive
+└─────────────────┘
+      |
+      v
+┌─────────────────┐
+│  Create Files   │ ← Generate: Key files, Mercury files, Base files
+│   & Store       │
+└─────────────────┘
+      |
+      v
+┌─────────────────┐
+│   Processing    │
+│   Complete      │
+└─────────────────┘
+      |
+      v
+     END
+Simplified Visual Flow
+📨 Request → 🔍 Validate → 🏗️ Build Context → ⚡ Execute Validations
+                                                        |
+                                                       YES
+                                                        ↓
+📁 Store Files ← 🔄 Process Contexts ← ✅ Set Success ←
+🔄 Detailed Process Flow
+Phase 1: Request Entry & Validation 🔍
+Input: MCR Request with loan data
+  ↓
+Check Structure:
+  • Must have exactly 1 entity
+  • Must have attribute data
+  • Required fields present
+  ↓
+Result: Valid/Invalid
+Phase 2: Context & Data Preparation 🏗️
+Get Configuration:
+  • Sub-product settings (DE_LOAN)
+  • Validation rules
+  • Metadata mappings
+  ↓
+Retrieve Data:
+  • Position codes → Balance data
+  • Stream codes → Interest fee data
+  • Build context mappings
+  ↓
+Result: Processing context ready
+Phase 3: Business Validation ⚡
+Validate Each Record:
+  ├── Position Code: Check against balance data
+  ├── Parent Class: Verify hierarchy
+  ├── Duplicates: Check for existing records
+  └── Stream Codes: Validate loan streams (if 908 class)
+  ↓
+Result: Pass/Fail for each rule
+Phase 4: Record Processing & File Creation 🎯
+For Each Context:
+  ├── Filter records by context
+  ├── Apply business transformations
+  ├── Derive calculated values
+  └── Normalize data format
+  ↓
+Create Files:
+  ├── Key Files: Metadata & identifiers
+  ├── Mercury Files: Processed loan data
+  └── Base Files: Foundation records
+  ↓
+Store in respective systems
+🎯 Key Business Rules
+RuleDescriptionImpactSingle EntityOnly one child entity per requestEnsures data integrityContext GroupingRecords grouped by business contextEnables parallel processingDuplicate PreventionPrevents duplicate records based on class codesMaintains data quality908 Class Special HandlingLoan-specific processing for class code 908Supports loan business rulesStream Code ProcessingAdditional validation for loan streamsEnhanced loan data validation
+🔧 Technical Architecture
+Core Components
+MCRChildRecordService (Main Orchestrator)
+    ├── ConfigurationHelper (Metadata)
+    ├── QueryHelper (Data Access)
+    ├── ValidationService (Business Rules)
+    ├── DerivationService (Data Transformation)
+    └── MCRRecordProcessor (File Operations)
+Data Flow
+Request → Validation → Context Building → Record Processing → File Creation
+    ↓           ↓            ↓               ↓                ↓
+DMAT ← Status Updates ← Logging ← Monitoring ← Storage Systems
+📈 Success Criteria
+Validation Success ✅
+
+All position codes valid
+No duplicate violations
+Parent class codes verified
+Stream codes validated (if applicable)
+
+Processing Success 🎯
+
+Records created with derived values
+Files successfully stored
+Context processing completed
+Status updated to 'Success'
+
+❌ Error Scenarios
+Validation Failures
+
+Invalid position codes → Reject request
+Duplicate records found → Reject request
+Missing required data → Reject request
+
+Processing Failures
+
+Context building fails → System error
+File creation fails → Retry mechanism
+Storage issues → Alert and retry
