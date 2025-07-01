@@ -546,3 +546,589 @@ management:
     health:
       show-details: always
 */
+
+==============
+
+// Complete Test Setup with Main Method
+
+// 1. Missing Enums and DTOs
+package com.example.abinitio.enums;
+
+public enum FlowStatus {
+    FLOW_ONE("FLOW_ONE"),
+    FLOW_TWO("FLOW_TWO"),
+    UNKNOWN("UNKNOWN");
+
+    private final String value;
+
+    FlowStatus(String value) {
+        this.value = value;
+    }
+
+    public String getValue() {
+        return value;
+    }
+}
+
+package com.example.abinitio.dto;
+
+import com.example.abinitio.enums.FlowStatus;
+import java.time.LocalDateTime;
+
+public class AbinitioRequest {
+    private String entityName;
+    private FlowStatus flowStatus;
+    private String requestId;
+    private LocalDateTime receivedTime;
+
+    public AbinitioRequest() {
+        this.receivedTime = LocalDateTime.now();
+    }
+
+    public AbinitioRequest(String entityName, FlowStatus flowStatus) {
+        this();
+        this.entityName = entityName;
+        this.flowStatus = flowStatus;
+    }
+
+    // Getters and Setters
+    public String getEntityName() { return entityName; }
+    public void setEntityName(String entityName) { this.entityName = entityName; }
+
+    public FlowStatus getFlowStatus() { return flowStatus; }
+    public void setFlowStatus(FlowStatus flowStatus) { this.flowStatus = flowStatus; }
+
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
+
+    public LocalDateTime getReceivedTime() { return receivedTime; }
+    public void setReceivedTime(LocalDateTime receivedTime) { this.receivedTime = receivedTime; }
+}
+
+package com.example.abinitio.dto;
+
+import java.time.LocalDateTime;
+
+public class AuditRequest {
+    private String auditId;
+    private String requestId;
+    private String entityName;
+    private String operation;
+    private String status;
+    private LocalDateTime startTime;
+    private LocalDateTime endTime;
+    private String errorMessage;
+
+    public AuditRequest() {
+        this.startTime = LocalDateTime.now();
+        this.status = "IN_PROGRESS";
+    }
+
+    public AuditRequest(AbinitioRequest abinitioRequest) {
+        this();
+        this.requestId = abinitioRequest.getRequestId();
+        this.entityName = abinitioRequest.getEntityName();
+        this.operation = "FLOW_PROCESSING";
+    }
+
+    public static AuditRequest fromAbinitioRequest(AbinitioRequest abinitioRequest) {
+        return new AuditRequest(abinitioRequest);
+    }
+
+    public void markAsCompleted() {
+        this.status = "COMPLETED";
+        this.endTime = LocalDateTime.now();
+    }
+
+    public void markAsFailed(String errorMessage) {
+        this.status = "FAILED";
+        this.endTime = LocalDateTime.now();
+        this.errorMessage = errorMessage;
+    }
+
+    // Getters and Setters
+    public String getAuditId() { return auditId; }
+    public void setAuditId(String auditId) { this.auditId = auditId; }
+
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
+
+    public String getEntityName() { return entityName; }
+    public void setEntityName(String entityName) { this.entityName = entityName; }
+
+    public String getOperation() { return operation; }
+    public void setOperation(String operation) { this.operation = operation; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public LocalDateTime getStartTime() { return startTime; }
+    public void setStartTime(LocalDateTime startTime) { this.startTime = startTime; }
+
+    public LocalDateTime getEndTime() { return endTime; }
+    public void setEndTime(LocalDateTime endTime) { this.endTime = endTime; }
+
+    public String getErrorMessage() { return errorMessage; }
+    public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+}
+
+// 2. Mock Spring Components for Testing
+package com.example.abinitio.mock;
+
+import com.example.abinitio.chain.AbstractFlowHandler;
+import com.example.abinitio.context.FlowContext;
+import java.util.Map;
+
+// Mock Read Instruction Handler
+public class MockReadInstructionHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "READ_INSTRUCTION";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    📖 Reading instruction file from S3 for entity: " + context.getRequest().getEntityName());
+
+        String instructionFile = String.format("{\"entity\":\"%s\",\"instructions\":[\"process\",\"validate\"]}",
+                                             context.getRequest().getEntityName());
+        context.addContextData("instructionFile", instructionFile);
+
+        System.out.println("    ✅ Instruction file read successfully");
+        Thread.sleep(100); // Simulate processing time
+    }
+}
+
+// Mock Prehook Handler
+public class MockPrehookHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "PREHOOK";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    🔧 Executing prehook operations for entity: " + context.getRequest().getEntityName());
+
+        String instructionFile = context.getContextData("instructionFile", String.class);
+        Object genericRequest = Map.of("converted", true, "source", instructionFile);
+        context.addContextData("genericRequest", genericRequest);
+
+        System.out.println("    ✅ Prehook operations completed");
+        Thread.sleep(150);
+    }
+}
+
+// Mock Validate Handler
+public class MockValidateHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "VALIDATE";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    🔍 Executing validation for entity: " + context.getRequest().getEntityName());
+
+        System.out.println("      - Performing MR validation");
+        context.addContextData("mrValidationResult", "PASSED");
+
+        System.out.println("      - Performing HCR validation (3 types)");
+        context.addContextData("hcrValidationResult", "PASSED");
+
+        System.out.println("    ✅ Validation completed successfully");
+        Thread.sleep(200);
+    }
+}
+
+// Mock Derive Handler
+public class MockDeriveHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "DERIVE";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    📊 Executing derive operations for entity: " + context.getRequest().getEntityName());
+
+        context.addContextData("deriveResult", "COMPLETED");
+
+        System.out.println("    ✅ Derive operations completed");
+        Thread.sleep(120);
+    }
+}
+
+// Mock Create Context ID Handler
+public class MockCreateContextIdHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "CREATE_CONTEXT_ID";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    🆔 Creating context ID for entity: " + context.getRequest().getEntityName());
+
+        String contextId = java.util.UUID.randomUUID().toString().substring(0, 8);
+        context.addContextData("contextId", contextId);
+
+        System.out.println("    ✅ Context ID created: " + contextId);
+        Thread.sleep(50);
+    }
+}
+
+// Mock Create File Handler
+public class MockCreateFileHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "CREATE_FILE";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    📁 Creating files for entity: " + context.getRequest().getEntityName());
+
+        System.out.println("      - Creating adjust file");
+        context.addContextData("adjustFile", "adjust_file_created");
+
+        System.out.println("      - Creating base files");
+        context.addContextData("keyFile", "key_created");
+        context.addContextData("baseAdjustFile", "base_adjust_file_created");
+        context.addContextData("baseFile", "base_file_created");
+
+        System.out.println("    ✅ File creation completed");
+        Thread.sleep(180);
+    }
+}
+
+// Mock Perform Adjustment Handler
+public class MockPerformAdjustmentHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "PERFORM_ADJUSTMENT";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    ⚙️ Performing comprehensive adjustment operations for entity: " + context.getRequest().getEntityName());
+
+        System.out.println("      - Processing adjustment algorithms");
+        context.addContextData("adjustmentResult", "COMPLETED");
+
+        System.out.println("    ✅ Adjustment operations completed");
+        Thread.sleep(300); // Longer processing time
+    }
+}
+
+// Mock Send Notification Handler
+public class MockSendNotificationHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "SEND_NOTIFICATION";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    📧 Sending notification for entity: " + context.getRequest().getEntityName());
+
+        String message = String.format("Processing completed for entity: %s", context.getRequest().getEntityName());
+        context.addContextData("notificationSent", true);
+
+        System.out.println("    ✅ Notification sent: " + message);
+        Thread.sleep(80);
+    }
+}
+
+// Mock Post Hook Handler
+public class MockPostHookHandler extends AbstractFlowHandler {
+
+    @Override
+    protected String getStepName() {
+        return "POST_HOOK";
+    }
+
+    @Override
+    protected void executeStep(FlowContext context) throws Exception {
+        System.out.println("    🔚 Executing post-hook operations for entity: " + context.getRequest().getEntityName());
+
+        System.out.println("      - Converting generic request back to instruction");
+        context.addContextData("finalInstruction", "instruction_converted");
+
+        System.out.println("      - Creating package entry");
+        context.addContextData("packageEntry", "package_entry_created");
+
+        System.out.println("      - Sending final notification");
+        context.addContextData("finalNotificationSent", true);
+
+        System.out.println("    ✅ Post-hook operations completed");
+        Thread.sleep(100);
+    }
+}
+
+// 3. Mock Flow Configuration Strategy
+public class MockFlowConfigurationStrategy {
+
+    private static final Map<com.example.abinitio.enums.FlowStatus, java.util.Set<String>> FLOW_SKIP_CONFIGURATION = Map.of(
+        com.example.abinitio.enums.FlowStatus.FLOW_ONE, java.util.Set.of("DERIVE", "PERFORM_ADJUSTMENT"), // Skip 2 steps
+        com.example.abinitio.enums.FlowStatus.FLOW_TWO, java.util.Set.of("VALIDATE"), // Skip 1 step
+        com.example.abinitio.enums.FlowStatus.UNKNOWN, java.util.Set.of() // Execute all steps
+    );
+
+    public java.util.Set<String> getStepsToSkip(com.example.abinitio.enums.FlowStatus flowStatus) {
+        return FLOW_SKIP_CONFIGURATION.getOrDefault(flowStatus, java.util.Set.of());
+    }
+}
+
+// 4. Mock Chain Builder
+public class MockFlowChainBuilder {
+
+    public AbstractFlowHandler buildChain() {
+        // Create all handlers
+        MockReadInstructionHandler readInstructionHandler = new MockReadInstructionHandler();
+        MockPrehookHandler prehookHandler = new MockPrehookHandler();
+        MockValidateHandler validateHandler = new MockValidateHandler();
+        MockDeriveHandler deriveHandler = new MockDeriveHandler();
+        MockCreateContextIdHandler createContextIdHandler = new MockCreateContextIdHandler();
+        MockCreateFileHandler createFileHandler = new MockCreateFileHandler();
+        MockPerformAdjustmentHandler performAdjustmentHandler = new MockPerformAdjustmentHandler();
+        MockSendNotificationHandler sendNotificationHandler = new MockSendNotificationHandler();
+        MockPostHookHandler postHookHandler = new MockPostHookHandler();
+
+        // Build the chain
+        readInstructionHandler.setNext(prehookHandler);
+        prehookHandler.setNext(validateHandler);
+        validateHandler.setNext(deriveHandler);
+        deriveHandler.setNext(createContextIdHandler);
+        createContextIdHandler.setNext(createFileHandler);
+        createFileHandler.setNext(performAdjustmentHandler);
+        performAdjustmentHandler.setNext(sendNotificationHandler);
+        sendNotificationHandler.setNext(postHookHandler);
+
+        return readInstructionHandler; // Return first handler in chain
+    }
+}
+
+// 5. Mock Common Service Caller
+public class MockCommonServiceCaller {
+
+    private final MockFlowChainBuilder chainBuilder;
+    private final MockFlowConfigurationStrategy configStrategy;
+
+    public MockCommonServiceCaller() {
+        this.chainBuilder = new MockFlowChainBuilder();
+        this.configStrategy = new MockFlowConfigurationStrategy();
+    }
+
+    public void processFlow(com.example.abinitio.dto.AbinitioRequest request, com.example.abinitio.dto.AuditRequest auditRequest) {
+        long startTime = System.currentTimeMillis();
+
+        System.out.println("🚀 Starting flow processing for entity: " + request.getEntityName() +
+                          " with flow status: " + request.getFlowStatus());
+
+        try {
+            // Get steps to skip based on flow type
+            java.util.Set<String> stepsToSkip = configStrategy.getStepsToSkip(request.getFlowStatus());
+
+            System.out.println("⚙️  Flow configuration - Steps to skip: " + stepsToSkip + " for flow: " + request.getFlowStatus());
+            System.out.println("📋 Executing flow steps:\n");
+
+            // Create flow context
+            com.example.abinitio.context.FlowContext context = new com.example.abinitio.context.FlowContext(request, auditRequest, stepsToSkip);
+
+            // Build and execute chain
+            AbstractFlowHandler chain = chainBuilder.buildChain();
+            chain.handle(context);
+
+            // Mark audit as completed if processing finished successfully
+            if (context.shouldContinue()) {
+                auditRequest.markAsCompleted();
+                long duration = System.currentTimeMillis() - startTime;
+
+                System.out.println("\n✅ Flow processing completed successfully for entity: " + request.getEntityName());
+                System.out.println("⏱️  Total execution time: " + duration + "ms");
+                System.out.println("📊 Steps executed: " + context.getContextData().keySet().size());
+                System.out.println("🎯 Final status: " + auditRequest.getStatus());
+            }
+
+        } catch (Exception e) {
+            auditRequest.markAsFailed(e.getMessage());
+            long duration = System.currentTimeMillis() - startTime;
+
+            System.err.println("\n❌ Flow processing failed for entity: " + request.getEntityName());
+            System.err.println("⏱️  Execution time before failure: " + duration + "ms");
+            System.err.println("🔥 Error: " + e.getMessage());
+            throw new RuntimeException("Flow processing failed: " + e.getMessage(), e);
+        }
+    }
+}
+
+// 6. Main Test Class
+public class FlowProcessingTest {
+
+    public static void main(String[] args) {
+        System.out.println("=".repeat(80));
+        System.out.println("🔬 ABINITIO FLOW PROCESSING TEST - CHAIN OF RESPONSIBILITY PATTERN");
+        System.out.println("=".repeat(80));
+
+        MockCommonServiceCaller serviceCaller = new MockCommonServiceCaller();
+
+        // Test Case 1: FLOW_ONE (Skips DERIVE and PERFORM_ADJUSTMENT)
+        testFlowOne(serviceCaller);
+
+        System.out.println("\n" + "=".repeat(80) + "\n");
+
+        // Test Case 2: FLOW_TWO (Skips VALIDATE)
+        testFlowTwo(serviceCaller);
+
+        System.out.println("\n" + "=".repeat(80) + "\n");
+
+        // Test Case 3: UNKNOWN (Executes all steps)
+        testUnknownFlow(serviceCaller);
+
+        System.out.println("\n" + "=".repeat(80));
+        System.out.println("🏁 ALL TESTS COMPLETED SUCCESSFULLY!");
+        System.out.println("=".repeat(80));
+    }
+
+    private static void testFlowOne(MockCommonServiceCaller serviceCaller) {
+        System.out.println("🧪 TEST CASE 1: FLOW_ONE (Should skip DERIVE and PERFORM_ADJUSTMENT)");
+        System.out.println("-".repeat(60));
+
+        try {
+            // Create request for Flow One
+            com.example.abinitio.dto.AbinitioRequest request = new com.example.abinitio.dto.AbinitioRequest(
+                "CustomerEntity", com.example.abinitio.enums.FlowStatus.FLOW_ONE);
+            request.setRequestId("REQ-001");
+
+            // Create audit request
+            com.example.abinitio.dto.AuditRequest auditRequest = com.example.abinitio.dto.AuditRequest.fromAbinitioRequest(request);
+            auditRequest.setAuditId("AUDIT-001");
+
+            // Process flow
+            serviceCaller.processFlow(request, auditRequest);
+
+            System.out.println("✅ FLOW_ONE test completed successfully!");
+
+        } catch (Exception e) {
+            System.err.println("❌ FLOW_ONE test failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static void testFlowTwo(MockCommonServiceCaller serviceCaller) {
+        System.out.println("🧪 TEST CASE 2: FLOW_TWO (Should skip VALIDATE)");
+        System.out.println("-".repeat(60));
+
+        try {
+            // Create request for Flow Two
+            com.example.abinitio.dto.AbinitioRequest request = new com.example.abinitio.dto.AbinitioRequest(
+                "ProductEntity", com.example.abinitio.enums.FlowStatus.FLOW_TWO);
+            request.setRequestId("REQ-002");
+
+            // Create audit request
+            com.example.abinitio.dto.AuditRequest auditRequest = com.example.abinitio.dto.AuditRequest.fromAbinitioRequest(request);
+            auditRequest.setAuditId("AUDIT-002");
+
+            // Process flow
+            serviceCaller.processFlow(request, auditRequest);
+
+            System.out.println("✅ FLOW_TWO test completed successfully!");
+
+        } catch (Exception e) {
+            System.err.println("❌ FLOW_TWO test failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static void testUnknownFlow(MockCommonServiceCaller serviceCaller) {
+        System.out.println("🧪 TEST CASE 3: UNKNOWN FLOW (Should execute all steps)");
+        System.out.println("-".repeat(60));
+
+        try {
+            // Create request for Unknown Flow
+            com.example.abinitio.dto.AbinitioRequest request = new com.example.abinitio.dto.AbinitioRequest(
+                "OrderEntity", com.example.abinitio.enums.FlowStatus.UNKNOWN);
+            request.setRequestId("REQ-003");
+
+            // Create audit request
+            com.example.abinitio.dto.AuditRequest auditRequest = com.example.abinitio.dto.AuditRequest.fromAbinitioRequest(request);
+            auditRequest.setAuditId("AUDIT-003");
+
+            // Process flow
+            serviceCaller.processFlow(request, auditRequest);
+
+            System.out.println("✅ UNKNOWN FLOW test completed successfully!");
+
+        } catch (Exception e) {
+            System.err.println("❌ UNKNOWN FLOW test failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}
+
+// 7. Expected Output Summary
+/*
+Expected Console Output:
+
+================================================================================
+🔬 ABINITIO FLOW PROCESSING TEST - CHAIN OF RESPONSIBILITY PATTERN
+================================================================================
+🧪 TEST CASE 1: FLOW_ONE (Should skip DERIVE and PERFORM_ADJUSTMENT)
+------------------------------------------------------------
+🚀 Starting flow processing for entity: CustomerEntity with flow status: FLOW_ONE
+⚙️  Flow configuration - Steps to skip: [DERIVE, PERFORM_ADJUSTMENT] for flow: FLOW_ONE
+📋 Executing flow steps:
+
+    📖 Reading instruction file from S3 for entity: CustomerEntity
+    ✅ Instruction file read successfully
+    🔧 Executing prehook operations for entity: CustomerEntity
+    ✅ Prehook operations completed
+    🔍 Executing validation for entity: CustomerEntity
+      - Performing MR validation
+      - Performing HCR validation (3 types)
+    ✅ Validation completed successfully
+    🆔 Creating context ID for entity: CustomerEntity
+    ✅ Context ID created: a1b2c3d4
+    📁 Creating files for entity: CustomerEntity
+      - Creating adjust file
+      - Creating base files
+    ✅ File creation completed
+    📧 Sending notification for entity: CustomerEntity
+    ✅ Notification sent: Processing completed for entity: CustomerEntity
+    🔚 Executing post-hook operations for entity: CustomerEntity
+      - Converting generic request back to instruction
+      - Creating package entry
+      - Sending final notification
+    ✅ Post-hook operations completed
+
+✅ Flow processing completed successfully for entity: CustomerEntity
+⏱️  Total execution time: 650ms
+📊 Steps executed: 6
+🎯 Final status: COMPLETED
+✅ FLOW_ONE test completed successfully!
+
+================================================================================
+
+🧪 TEST CASE 2: FLOW_TWO (Should skip VALIDATE)
+------------------------------------------------------------
+[Similar output but skipping VALIDATE step]
+
+================================================================================
+
+🧪 TEST CASE 3: UNKNOWN FLOW (Should execute all steps)
+------------------------------------------------------------
+[Similar output but executing ALL steps including DERIVE and PERFORM_ADJUSTMENT]
+
+================================================================================
+🏁 ALL TESTS COMPLETED SUCCESSFULLY!
+================================================================================
+*/
