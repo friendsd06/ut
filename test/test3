@@ -1,0 +1,140 @@
+python# Cell 1: Simple Spark Listener Class
+import time
+import json
+from pyspark.sql import SparkSession
+
+class SimpleSparkListener:
+    def __init__(self, spark_session):
+        self.spark = spark_session
+        self.sc = spark_session.sparkContext
+        self.application_id = self.sc.applicationId
+        self.application_name = self.sc.appName
+        self.events = []
+
+        print(f"🚀 Listener initialized for: {self.application_name}")
+        print(f"📱 Application ID: {self.application_id}")
+
+    def log_event(self, event_type, details=None):
+        """Log events with timestamp"""
+        timestamp = int(time.time() * 1000)
+        event = {
+            'timestamp': timestamp,
+            'application_id': self.application_id,
+            'event_type': event_type,
+            'details': details or {}
+        }
+        self.events.append(event)
+
+        # Print to console for immediate feedback
+        print(f"⏰ {time.strftime('%H:%M:%S')} - {event_type}")
+        if details:
+            print(f"   📋 Details: {details}")
+
+    def on_job_start(self, job_id):
+        self.log_event("JOB_STARTED", {"job_id": job_id})
+
+    def on_job_end(self, job_id, status):
+        self.log_event("JOB_ENDED", {"job_id": job_id, "status": status})
+
+    def on_stage_start(self, stage_id, num_tasks):
+        self.log_event("STAGE_STARTED", {"stage_id": stage_id, "num_tasks": num_tasks})
+
+    def on_stage_end(self, stage_id, status):
+        self.log_event("STAGE_COMPLETED", {"stage_id": stage_id, "status": status})
+
+    def get_events(self):
+        """Return all captured events"""
+        return self.events
+
+    def print_summary(self):
+        """Print a summary of all events"""
+        print("\n" + "="*50)
+        print("🔍 LISTENER SUMMARY")
+        print("="*50)
+
+        for event in self.events:
+            time_str = time.strftime('%H:%M:%S', time.localtime(event['timestamp']/1000))
+            print(f"{time_str} | {event['event_type']} | {event['details']}")
+
+        print(f"\n📊 Total Events Captured: {len(self.events)}")
+        print("="*50)
+
+# Initialize the listener
+spark = SparkSession.getActiveSession()
+listener = SimpleSparkListener(spark)
+
+==
+
+# Cell 2: Test Spark Job with Listener
+import random
+from pyspark.sql.functions import col, count, avg, sum as spark_sum
+
+def run_test_job_with_listener():
+    """Run a test Spark job with manual listener tracking"""
+
+    print("🏁 Starting Test Job...")
+    listener.log_event("TEST_JOB_STARTED")
+
+    try:
+        # Job 1: Create sample data
+        print("\n📊 Job 1: Creating sample data...")
+        listener.on_job_start(1)
+
+        # Stage 1: Generate data
+        listener.on_stage_start(1, 100)
+        df = spark.range(1, 100000).toDF("id")
+        df = df.withColumn("value", col("id") * 2)
+        df = df.withColumn("category", col("id") % 10)
+        df.cache()  # This will trigger an action
+        count1 = df.count()
+        listener.on_stage_end(1, "SUCCESS")
+        listener.on_job_end(1, "SUCCESS")
+
+        print(f"✅ Created DataFrame with {count1} rows")
+
+        # Job 2: Aggregation
+        print("\n📊 Job 2: Running aggregations...")
+        listener.on_job_start(2)
+
+        # Stage 2: Aggregation
+        listener.on_stage_start(2, 10)
+        agg_df = df.groupBy("category").agg(
+            count("id").alias("count"),
+            avg("value").alias("avg_value"),
+            spark_sum("value").alias("sum_value")
+        )
+        result = agg_df.collect()
+        listener.on_stage_end(2, "SUCCESS")
+        listener.on_job_end(2, "SUCCESS")
+
+        print(f"✅ Aggregation completed with {len(result)} groups")
+
+        # Job 3: Filtering
+        print("\n📊 Job 3: Filtering data...")
+        listener.on_job_start(3)
+
+        # Stage 3: Filter
+        listener.on_stage_start(3, 50)
+        filtered_df = df.filter(col("value") > 50000)
+        count2 = filtered_df.count()
+        listener.on_stage_end(3, "SUCCESS")
+        listener.on_job_end(3, "SUCCESS")
+
+        print(f"✅ Filtered to {count2} rows")
+
+        listener.log_event("TEST_JOB_COMPLETED", {
+            "total_rows": count1,
+            "filtered_rows": count2,
+            "aggregation_groups": len(result)
+        })
+
+        print("\n🎉 Test job completed successfully!")
+        return True
+
+    except Exception as e:
+        listener.log_event("TEST_JOB_FAILED", {"error": str(e)})
+        print(f"❌ Test job failed: {e}")
+        return False
+
+# Run the test
+success = run_test_job_with_listener()
