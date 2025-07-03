@@ -1,1 +1,344 @@
-gfhbf
+# Databricks setJobGroup Example - Fire Data Analysis
+
+## Use Case: Organizing Fire Department Data Analysis with Job Groups
+
+This example shows how `setJobGroup` helps organize and monitor different phases of your fire data analysis in Databricks.
+
+## Complete Working Example
+
+### Cell 1: Setup and Data Loading
+
+```python
+# Cell 1: Import and initialize
+import pyspark.sql.functions as f
+from pyspark.sql.functions import col, count, avg, sum as spark_sum, max as spark_max, desc
+import time
+
+# Get Spark context
+spark = SparkSession.getActiveSession()
+sc = spark.sparkContext
+
+print("🔥 Fire Data Analysis with Job Groups")
+print(f"Application ID: {sc.applicationId}")
+print("="*50)
+```
+
+### Cell 2: Data Ingestion Phase
+
+```python
+# Cell 2: Data Ingestion with Job Group
+print("\n📊 PHASE 1: DATA INGESTION")
+print("-" * 30)
+
+# Set job group for data loading operations
+sc.setJobGroup("01_Data_Ingestion", "Loading and validating fire incident data")
+
+# Load fire data (using your original code structure)
+fire_df = spark.read \
+    .format("csv") \
+    .option("header", "true") \
+    .option("inferSchema", "true") \
+    .load("/databricks-datasets/learning-spark-v2/sf-fire/sf-fire-calls.csv")
+
+# Cache the data for multiple operations
+fire_df.cache()
+
+# Get initial count (this will show up under "01_Data_Ingestion" job group)
+print("🔄 Loading fire incident data...")
+total_records = fire_df.count()
+print(f"✅ Loaded {total_records:,} fire incident records")
+
+# Show schema
+print("\n📋 Data Schema:")
+fire_df.printSchema()
+
+# Clear job group
+sc.setJobGroup(None, None)
+```
+
+### Cell 3: Data Quality Analysis Phase
+
+```python
+# Cell 3: Data Quality Analysis
+print("\n🔍 PHASE 2: DATA QUALITY ANALYSIS")
+print("-" * 35)
+
+# Set job group for data quality operations
+sc.setJobGroup("02_Data_Quality", "Analyzing data quality and completeness")
+
+print("🔄 Checking data quality...")
+
+# Check for null values in key columns
+key_columns = ["CallType", "CallDate", "Address", "City"]
+quality_report = {}
+
+for column in key_columns:
+    null_count = fire_df.filter(col(column).isNull()).count()
+    total_count = fire_df.count()
+    null_percentage = (null_count / total_count) * 100
+    
+    quality_report[column] = {
+        'null_count': null_count,
+        'null_percentage': null_percentage
+    }
+    
+    print(f"  {column}: {null_count:,} nulls ({null_percentage:.1f}%)")
+
+# Check distinct call types (your original Q1 logic)
+print("\n🔄 Analyzing call types...")
+distinct_call_types = fire_df.filter(col("CallType").isNotNull()) \
+                           .select("CallType") \
+                           .distinct() \
+                           .count()
+
+print(f"✅ Found {distinct_call_types} distinct call types")
+
+# Clear job group
+sc.setJobGroup(None, None)
+```
+
+### Cell 4: Call Type Analysis Phase
+
+```python
+# Cell 4: Call Type Analysis (Your original queries)
+print("\n📈 PHASE 3: CALL TYPE ANALYSIS")
+print("-" * 30)
+
+# Set job group for call type analysis
+sc.setJobGroup("03_Call_Analysis", "Detailed analysis of emergency call types")
+
+print("🔄 Running call type analysis...")
+
+# Your original Q1 query
+print("\n📋 Q1: Distinct Call Types")
+q1_df = fire_df.where(col("CallType").isNotNull()) \
+             .select("CallType") \
+             .distinct()
+
+q1_count = q1_df.count()
+print(f"Result: {q1_count} distinct call types")
+
+# Your original Q2 query  
+print("\n📋 Q2: Call Types with Alias")
+q2_df = fire_df.where(col("CallType").isNotNull()) \
+             .selectExpr("CallType as distinct_call_type") \
+             .distinct()
+
+print("Sample call types:")
+sample_types = q2_df.limit(5).collect()
+for i, row in enumerate(sample_types, 1):
+    print(f"  {i}. {row['distinct_call_type']}")
+
+# Show total count
+q2_count = q2_df.count()
+print(f"\nTotal distinct call types: {q2_count}")
+
+# Clear job group
+sc.setJobGroup(None, None)
+```
+
+### Cell 5: Advanced Analytics Phase
+
+```python
+# Cell 5: Advanced Analytics
+print("\n📊 PHASE 4: ADVANCED ANALYTICS")
+print("-" * 30)
+
+# Set job group for advanced analytics
+sc.setJobGroup("04_Advanced_Analytics", "Advanced fire incident analytics and insights")
+
+print("🔄 Running advanced analytics...")
+
+# Top call types by frequency
+print("\n📈 Top 10 Call Types by Frequency:")
+top_call_types = fire_df.filter(col("CallType").isNotNull()) \
+                       .groupBy("CallType") \
+                       .agg(count("*").alias("incident_count")) \
+                       .orderBy(desc("incident_count")) \
+                       .limit(10)
+
+top_results = top_call_types.collect()
+for i, row in enumerate(top_results, 1):
+    print(f"  {i:2d}. {row['CallType']}: {row['incident_count']:,} incidents")
+
+# Response time analysis (if available)
+print("\n⏱️ Response Time Analysis:")
+if "Delay" in fire_df.columns:
+    response_stats = fire_df.filter(col("Delay").isNotNull() & (col("Delay") > 0)) \
+                           .agg(
+                               avg("Delay").alias("avg_delay"),
+                               spark_max("Delay").alias("max_delay"),
+                               count("*").alias("records_with_delay")
+                           ).collect()[0]
+    
+    print(f"  Average response time: {response_stats['avg_delay']:.1f} minutes")
+    print(f"  Maximum response time: {response_stats['max_delay']:.1f} minutes")
+    print(f"  Records with delay data: {response_stats['records_with_delay']:,}")
+else:
+    print("  No delay/response time data available")
+
+# Clear job group
+sc.setJobGroup(None, None)
+```
+
+### Cell 6: Results Summary and Job Group Monitoring
+
+```python
+# Cell 6: Summary and Job Group Monitoring
+print("\n📊 PHASE 5: RESULTS SUMMARY")
+print("-" * 25)
+
+# Set job group for final summary
+sc.setJobGroup("05_Summary", "Final results compilation and reporting")
+
+print("🔄 Compiling final results...")
+
+# Create summary
+summary_results = {
+    'total_records': total_records,
+    'distinct_call_types': distinct_call_types,
+    'data_quality_issues': sum(1 for col, data in quality_report.items() if data['null_count'] > 0),
+    'top_call_type': top_results[0]['CallType'] if top_results else 'Unknown',
+    'top_call_type_count': top_results[0]['incident_count'] if top_results else 0
+}
+
+print("\n🎉 ANALYSIS COMPLETE!")
+print("=" * 40)
+print(f"📊 Total Records Analyzed: {summary_results['total_records']:,}")
+print(f"🏷️  Distinct Call Types: {summary_results['distinct_call_types']}")
+print(f"🔍 Data Quality Issues: {summary_results['data_quality_issues']} columns with nulls")
+print(f"🥇 Most Common Call Type: {summary_results['top_call_type']} ({summary_results['top_call_type_count']:,} incidents)")
+
+# Clear job group
+sc.setJobGroup(None, None)
+
+print("\n✅ All job groups completed successfully!")
+```
+
+### Cell 7: Job Group Monitoring (Optional)
+
+```python
+# Cell 7: Monitor Job Groups (Optional - for demonstration)
+print("\n🔍 JOB GROUP MONITORING")
+print("=" * 30)
+
+def monitor_job_groups():
+    """Function to demonstrate job group monitoring"""
+    
+    # Set a job group for monitoring operations
+    sc.setJobGroup("06_Monitoring", "Monitoring and tracking job group execution")
+    
+    # Get status tracker
+    status_tracker = sc.statusTracker()
+    
+    # Show active jobs (if any)
+    active_jobs = status_tracker.getActiveJobIds()
+    print(f"Active Jobs: {len(active_jobs)}")
+    
+    # Show executor information
+    executor_info = status_tracker.getExecutorInfos()
+    print(f"Active Executors: {len(executor_info)}")
+    
+    for executor in executor_info:
+        print(f"  Executor {executor.executorId}: {executor.totalCores} cores, {executor.maxMemory} MB memory")
+    
+    # Clear monitoring job group
+    sc.setJobGroup(None, None)
+    
+    print("\n💡 Job Groups Benefits:")
+    print("  ✅ Organized operations by business phase")
+    print("  ✅ Easy to track progress in Spark UI")
+    print("  ✅ Better debugging and monitoring")
+    print("  ✅ Clear separation of concerns")
+
+# Run monitoring
+monitor_job_groups()
+```
+
+## How to Use This Example
+
+### 1. **Copy to Databricks**
+- Create a new Databricks notebook
+- Copy each cell above into separate notebook cells
+- Run cells in order (1 → 2 → 3 → 4 → 5 → 6 → 7)
+
+### 2. **View in Spark UI**
+- Go to **Spark UI** in Databricks
+- Click on **Jobs** tab
+- You'll see jobs organized by groups:
+  - `01_Data_Ingestion`
+  - `02_Data_Quality` 
+  - `03_Call_Analysis`
+  - `04_Advanced_Analytics`
+  - `05_Summary`
+
+### 3. **Expected Output**
+```
+🔥 Fire Data Analysis with Job Groups
+Application ID: application_1234567890123_4567
+==================================================
+
+📊 PHASE 1: DATA INGESTION
+------------------------------
+🔄 Loading fire incident data...
+✅ Loaded 175,296 fire incident records
+
+🔍 PHASE 2: DATA QUALITY ANALYSIS
+-----------------------------------
+🔄 Checking data quality...
+  CallType: 0 nulls (0.0%)
+  CallDate: 0 nulls (0.0%)
+  Address: 591 nulls (0.3%)
+  City: 0 nulls (0.0%)
+
+🔄 Analyzing call types...
+✅ Found 32 distinct call types
+
+📈 PHASE 3: CALL TYPE ANALYSIS
+------------------------------
+🔄 Running call type analysis...
+
+📋 Q1: Distinct Call Types
+Result: 32 distinct call types
+
+📋 Q2: Call Types with Alias
+Sample call types:
+  1. Medical Incident
+  2. Structure Fire
+  3. Alarms
+  4. Traffic Collision
+  5. Citizen Assist / Service Call
+
+Total distinct call types: 32
+```
+
+## Key Benefits Demonstrated
+
+### 🎯 **For Your Team:**
+
+1. **Organized Execution**
+   - Each phase has its own job group
+   - Easy to track which phase is running
+   - Clear progress monitoring
+
+2. **Better Debugging**
+   - Failed jobs are grouped by business function
+   - Easy to identify which phase failed
+   - Faster troubleshooting
+
+3. **Spark UI Clarity**
+   - Jobs organized by purpose in Spark UI
+   - No more mystery jobs
+   - Clear execution timeline
+
+4. **Production Monitoring**
+   - Can kill specific job groups if needed
+   - Monitor resource usage by phase
+   - Better alerting and logging
+
+### 🚀 **Immediate Value:**
+- **Before**: All operations show as generic "Spark Job"
+- **After**: Clear labels like "Data_Quality", "Call_Analysis", etc.
+- **Result**: Much easier to monitor and debug!
+
+This example takes your exact fire data analysis and makes it production-ready with proper job organization! 🔥
