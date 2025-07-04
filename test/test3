@@ -491,3 +491,58 @@ print("\n" + "="*60)
 print("🎯 setJobGroup DEMONSTRATION COMPLETE!")
 print("Check your Spark UI to see the dramatic difference in job organization!")
 print("="*60)
+
+=======================
+
+ Complete Notebook Structure:
+Part 1: Without Job Groups (The Problem)
+
+Shows messy, confusing job names
+Demonstrates the chaos in Spark UI
+
+Part 2: With Job Groups (The Solution)
+
+4 organized phases with clear job groups
+Sample data processing with business context
+
+Part 3: Fire Data Analysis (Your Real Use Case)
+
+Your original fire data queries with job groups
+4 phases: Ingestion → Quality → Analysis → Advanced Analytics
+Includes your Q1 and Q2 queries
+
+Part 4: Summary & Verification
+
+Shows what you should see in Spark UI
+Highlights the benefits
+
+🚀 How to Use:
+
+Copy the entire code into a single Databricks notebook cell
+Run the cell and watch the console output
+Open Spark UI while it's running (click "Spark UI" in cluster)
+Go to Jobs tab to see organized job names vs chaos
+
+📊 What You'll See in Spark UI:
+Instead of:
+❌ Job 0: count at Dataset.scala:3116
+❌ Job 1: collect at RDD.scala:945
+❌ Job 2: show at Dataset.scala:2856
+You'll see:
+✅ 01_Data_Creation: Creating and preparing sample dataset
+✅ Fire_01_Data_Ingestion: Loading San Francisco fire incident data
+✅ Fire_03_Call_Analysis: Analyzing emergency call types and patterns
+✅ Fire_04_Advanced_Analytics: Computing fire department operational insights
+🎉 Expected Console Output:
+🔥 COMPLETE setJobGroup DEMONSTRATION
+==================================================
+✅ Loaded 175,296 fire incident records
+✅ Q1 Result: Found 32 distinct emergency call types
+✅ Top 5 Emergency Call Types:
+   1. Medical Incident: 67,423 incidents (38.5%)
+   2. Alarms: 24,194 incidents (13.8%)
+   3. Structure Fire: 5,698 incidents (3.3%)
+
+🎯 setJobGroup DEMONSTRATION COMPLETE!
+Check your Spark UI to see the dramatic difference in job organization!
+This single notebook gives your team a complete, hands-on demonstration of how setJobGroup transforms chaotic Spark monitoring into professional, organized operations!
