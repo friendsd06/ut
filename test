@@ -1,0 +1,589 @@
+package com.yourcompany.config.mybatis;
+
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Aspect;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * MyBatis SQL Logging Aspect
+ *
+ * Features:
+ * - Logs executable SQL queries that can be copied and run directly
+ * - Handles all Java types and collections
+ * - Configurable logging levels and formatting
+ * - Performance optimized with caching
+ */
+@Aspect
+@Component
+public class SqlLoggingAspect {
+
+    private static final Logger logger = LoggerFactory.getLogger(SqlLoggingAspect.class);
+
+    // Thread-safe caches for performance
+    private static final Map<Class<?>, Boolean> SIMPLE_TYPE_CACHE = new ConcurrentHashMap<>();
+
+    // Date formatters - thread-safe in Java 8+
+    private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final SimpleDateFormat LEGACY_DATETIME_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    private static final SimpleDateFormat LEGACY_DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
+    private static final SimpleDateFormat LEGACY_TIME_FORMAT = new SimpleDateFormat("HH:mm:ss");
+
+    // Configuration properties
+    @Value("${mybatis.sql.logging.enabled:true}")
+    private boolean sqlLoggingEnabled;
+
+    @Value("${mybatis.sql.logging.slow-query-threshold:1000}")
+    private long slowQueryThreshold;
+
+    @Value("${mybatis.sql.logging.format-sql:true}")
+    private boolean formatSql;
+
+    @Value("${mybatis.sql.logging.max-sql-length:10000}")
+    private int maxSqlLength;
+
+    @Value("${mybatis.sql.logging.exclude-mappers:}")
+    private String excludeMappers;
+
+    private Set<String> excludeMapperSet;
+
+    /**
+     * Intercept all MyBatis mapper method calls
+     */
+    @Around("execution(* *..*Mapper.*(..))")
+    public Object logSqlExecution(ProceedingJoinPoint joinPoint) throws Throwable {
+        if (!sqlLoggingEnabled) {
+            return joinPoint.proceed();
+        }
+
+        initializeExcludeMappers();
+
+        String methodName = getFullMethodName(joinPoint);
+
+        // Check if this mapper should be excluded
+        if (shouldExcludeMapper(methodName)) {
+            return joinPoint.proceed();
+        }
+
+        long startTime = System.nanoTime();
+        Object result = null;
+        Exception exception = null;
+
+        try {
+            result = joinPoint.proceed();
+            return result;
+        } catch (Exception e) {
+            exception = e;
+            throw e;
+        } finally {
+            try {
+                logExecutableSql(joinPoint, methodName, startTime, result, exception);
+            } catch (Exception e) {
+                logger.warn("Failed to log SQL execution: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void initializeExcludeMappers() {
+        if (excludeMapperSet == null && StringUtils.hasText(excludeMappers)) {
+            excludeMapperSet = new HashSet<>(Arrays.asList(excludeMappers.split(",")));
+        }
+    }
+
+    private String getFullMethodName(ProceedingJoinPoint joinPoint) {
+        return joinPoint.getTarget().getClass().getName() + "." + joinPoint.getSignature().getName();
+    }
+
+    private boolean shouldExcludeMapper(String methodName) {
+        if (excludeMapperSet == null || excludeMapperSet.isEmpty()) {
+            return false;
+        }
+        return excludeMapperSet.stream().anyMatch(methodName::contains);
+    }
+
+    private void logExecutableSql(ProceedingJoinPoint joinPoint, String methodName, long startTime, Object result, Exception exception) {
+        long executionTime = (System.nanoTime() - startTime) / 1_000_000; // Convert to ms
+
+        // Build executable SQL from method and parameters
+        String executableSql = buildExecutableSqlFromMethod(joinPoint);
+
+        // Truncate if too long
+        if (executableSql.length() > maxSqlLength) {
+            executableSql = executableSql.substring(0, maxSqlLength) + "... [TRUNCATED]";
+        }
+
+        logFormattedSql(methodName, executableSql, executionTime, result, exception);
+    }
+
+    /**
+     * Build executable SQL by analyzing method annotations and parameters
+     */
+    private String buildExecutableSqlFromMethod(ProceedingJoinPoint joinPoint) {
+        try {
+            Method method = ((org.aspectj.lang.reflect.MethodSignature) joinPoint.getSignature()).getMethod();
+            Object[] args = joinPoint.getArgs();
+
+            // Try to get SQL from @Select, @Insert, @Update, @Delete annotations
+            String sql = extractSqlFromAnnotations(method);
+
+            if (sql != null && !sql.isEmpty()) {
+                return replacePlaceholdersWithValues(sql, method.getParameters(), args);
+            }
+
+            // Fallback: show method call with parameters
+            return buildMethodCallSql(joinPoint.getSignature().getName(), method.getParameters(), args);
+
+        } catch (Exception e) {
+            return "-- Unable to extract SQL: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Extract SQL from MyBatis annotations including SQL providers
+     */
+    private String extractSqlFromAnnotations(Method method) {
+        // Check for @Select annotation
+        org.apache.ibatis.annotations.Select select = method.getAnnotation(org.apache.ibatis.annotations.Select.class);
+        if (select != null && select.value().length > 0) {
+            return String.join(" ", select.value());
+        }
+
+        // Check for @Insert annotation
+        org.apache.ibatis.annotations.Insert insert = method.getAnnotation(org.apache.ibatis.annotations.Insert.class);
+        if (insert != null && insert.value().length > 0) {
+            return String.join(" ", insert.value());
+        }
+
+        // Check for @Update annotation
+        org.apache.ibatis.annotations.Update update = method.getAnnotation(org.apache.ibatis.annotations.Update.class);
+        if (update != null && update.value().length > 0) {
+            return String.join(" ", update.value());
+        }
+
+        // Check for @Delete annotation
+        org.apache.ibatis.annotations.Delete delete = method.getAnnotation(org.apache.ibatis.annotations.Delete.class);
+        if (delete != null && delete.value().length > 0) {
+            return String.join(" ", delete.value());
+        }
+
+        // Check for SQL Provider annotations
+        String providerSql = extractSqlFromProviders(method);
+        if (providerSql != null) {
+            return providerSql;
+        }
+
+        return null; // SQL is in XML mapper file
+    }
+
+    /**
+     * Extract SQL from provider annotations (@SelectProvider, @InsertProvider, etc.)
+     */
+    private String extractSqlFromProviders(Method method) {
+        try {
+            // Check for @SelectProvider
+            org.apache.ibatis.annotations.SelectProvider selectProvider = method.getAnnotation(org.apache.ibatis.annotations.SelectProvider.class);
+            if (selectProvider != null) {
+                return generateSqlFromProvider(selectProvider.type(), selectProvider.method(), method);
+            }
+
+            // Check for @InsertProvider
+            org.apache.ibatis.annotations.InsertProvider insertProvider = method.getAnnotation(org.apache.ibatis.annotations.InsertProvider.class);
+            if (insertProvider != null) {
+                return generateSqlFromProvider(insertProvider.type(), insertProvider.method(), method);
+            }
+
+            // Check for @UpdateProvider
+            org.apache.ibatis.annotations.UpdateProvider updateProvider = method.getAnnotation(org.apache.ibatis.annotations.UpdateProvider.class);
+            if (updateProvider != null) {
+                return generateSqlFromProvider(updateProvider.type(), updateProvider.method(), method);
+            }
+
+            // Check for @DeleteProvider
+            org.apache.ibatis.annotations.DeleteProvider deleteProvider = method.getAnnotation(org.apache.ibatis.annotations.DeleteProvider.class);
+            if (deleteProvider != null) {
+                return generateSqlFromProvider(deleteProvider.type(), deleteProvider.method(), method);
+            }
+
+        } catch (Exception e) {
+            logger.debug("Failed to extract SQL from provider: {}", e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * Generate SQL by calling the provider method
+     */
+    private String generateSqlFromProvider(Class<?> providerClass, String providerMethodName, Method originalMethod) {
+        try {
+            // Create instance of provider class
+            Object providerInstance = providerClass.getDeclaredConstructor().newInstance();
+
+            // Find the provider method
+            Method providerMethod = findProviderMethod(providerClass, providerMethodName, originalMethod);
+            if (providerMethod == null) {
+                return "-- Provider method not found: " + providerClass.getSimpleName() + "." + providerMethodName;
+            }
+
+            // Call provider method to generate SQL
+            Object sqlResult = null;
+
+            // Handle different provider method signatures
+            if (providerMethod.getParameterCount() == 0) {
+                // No parameters
+                sqlResult = providerMethod.invoke(providerInstance);
+            } else if (providerMethod.getParameterCount() == 1) {
+                // Single parameter - usually Map or specific type
+                Map<String, Object> context = new HashMap<>();
+                context.put("method", originalMethod.getName());
+                context.put("class", originalMethod.getDeclaringClass().getSimpleName());
+                sqlResult = providerMethod.invoke(providerInstance, context);
+            } else {
+                // Multiple parameters - try with context map
+                Object[] args = new Object[providerMethod.getParameterCount()];
+                Arrays.fill(args, new HashMap<String, Object>());
+                sqlResult = providerMethod.invoke(providerInstance, args);
+            }
+
+            if (sqlResult instanceof String) {
+                return (String) sqlResult;
+            } else if (sqlResult != null) {
+                return sqlResult.toString();
+            }
+
+        } catch (Exception e) {
+            logger.debug("Failed to generate SQL from provider {}.{}: {}",
+                providerClass.getSimpleName(), providerMethodName, e.getMessage());
+            return "-- SQL Provider: " + providerClass.getSimpleName() + "." + providerMethodName + "() [Error: " + e.getMessage() + "]";
+        }
+
+        return "-- SQL Provider: " + providerClass.getSimpleName() + "." + providerMethodName + "()";
+    }
+
+    /**
+     * Find the provider method by name and compatible signature
+     */
+    private Method findProviderMethod(Class<?> providerClass, String methodName, Method originalMethod) {
+        Method[] methods = providerClass.getDeclaredMethods();
+
+        // First try to find exact method name
+        for (Method method : methods) {
+            if (method.getName().equals(methodName)) {
+                method.setAccessible(true);
+                return method;
+            }
+        }
+
+        // If not found, try case-insensitive search
+        for (Method method : methods) {
+            if (method.getName().equalsIgnoreCase(methodName)) {
+                method.setAccessible(true);
+                return method;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Replace #{} and ${} placeholders with actual parameter values
+     */
+    private String replacePlaceholdersWithValues(String sql, Parameter[] parameters, Object[] args) {
+        if (parameters == null || args == null || parameters.length != args.length) {
+            return sql;
+        }
+
+        String result = sql;
+
+        for (int i = 0; i < parameters.length; i++) {
+            String paramName = parameters[i].getName();
+            Object paramValue = args[i];
+            String formattedValue = formatParameterValue(paramValue);
+
+            // Replace #{paramName} and ${paramName} with actual values
+            result = result.replaceAll("#\\{" + paramName + "\\}", formattedValue);
+            result = result.replaceAll("\\$\\{" + paramName + "\\}", formattedValue);
+        }
+
+        // Also handle ? placeholders (prepared statement style)
+        for (Object arg : args) {
+            if (result.contains("?")) {
+                String formattedValue = formatParameterValue(arg);
+                result = result.replaceFirst("\\?", formattedValue);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Build method call representation when SQL extraction fails
+     */
+    private String buildMethodCallSql(String methodName, Parameter[] parameters, Object[] args) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("-- Method Call: ").append(methodName).append("(");
+
+        if (parameters != null && args != null && parameters.length > 0) {
+            for (int i = 0; i < parameters.length && i < args.length; i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(parameters[i].getName()).append("=").append(formatParameterValue(args[i]));
+            }
+        }
+
+        sb.append(")");
+        return sb.toString();
+    }
+
+    /**
+     * Format parameter values for direct SQL execution
+     */
+    private String formatParameterValue(Object value) {
+        if (value == null) {
+            return "NULL";
+        }
+
+        // Handle primitives and numbers
+        if (isSimpleType(value.getClass())) {
+            return formatSimpleType(value);
+        }
+
+        // Handle collections and arrays
+        if (value instanceof Collection) {
+            return formatCollection((Collection<?>) value);
+        }
+
+        if (value.getClass().isArray()) {
+            return formatArray(value);
+        }
+
+        // Handle dates and times
+        if (value instanceof java.util.Date) {
+            return formatLegacyDate((java.util.Date) value);
+        }
+
+        if (value instanceof LocalDateTime) {
+            return "'" + ((LocalDateTime) value).format(DATETIME_FORMATTER) + "'";
+        }
+
+        if (value instanceof LocalDate) {
+            return "'" + ((LocalDate) value).format(DATE_FORMATTER) + "'";
+        }
+
+        if (value instanceof LocalTime) {
+            return "'" + ((LocalTime) value).format(TIME_FORMATTER) + "'";
+        }
+
+        if (value instanceof Instant) {
+            return "'" + LocalDateTime.ofInstant((Instant) value, ZoneId.systemDefault()).format(DATETIME_FORMATTER) + "'";
+        }
+
+        if (value instanceof ZonedDateTime) {
+            return "'" + ((ZonedDateTime) value).format(DATETIME_FORMATTER) + "'";
+        }
+
+        if (value instanceof OffsetDateTime) {
+            return "'" + ((OffsetDateTime) value).format(DATETIME_FORMATTER) + "'";
+        }
+
+        // Handle enum
+        if (value instanceof Enum) {
+            return "'" + ((Enum<?>) value).name() + "'";
+        }
+
+        // Default: treat as string
+        return "'" + escapeSqlString(value.toString()) + "'";
+    }
+
+    private boolean isSimpleType(Class<?> clazz) {
+        return SIMPLE_TYPE_CACHE.computeIfAbsent(clazz, this::checkSimpleType);
+    }
+
+    private boolean checkSimpleType(Class<?> clazz) {
+        return clazz.isPrimitive() ||
+               Number.class.isAssignableFrom(clazz) ||
+               Boolean.class == clazz ||
+               String.class == clazz ||
+               Character.class == clazz;
+    }
+
+    private String formatSimpleType(Object value) {
+        if (value instanceof String) {
+            return "'" + escapeSqlString((String) value) + "'";
+        }
+
+        if (value instanceof Character) {
+            return "'" + escapeSqlString(value.toString()) + "'";
+        }
+
+        if (value instanceof Boolean) {
+            return ((Boolean) value) ? "1" : "0";
+        }
+
+        // Numbers (Integer, Long, Double, BigDecimal, etc.)
+        return value.toString();
+    }
+
+    private String formatCollection(Collection<?> collection) {
+        if (collection.isEmpty()) {
+            return "()";
+        }
+
+        StringBuilder sb = new StringBuilder("(");
+        Iterator<?> iterator = collection.iterator();
+
+        while (iterator.hasNext()) {
+            sb.append(formatParameterValue(iterator.next()));
+            if (iterator.hasNext()) {
+                sb.append(", ");
+            }
+        }
+
+        sb.append(")");
+        return sb.toString();
+    }
+
+    private String formatArray(Object array) {
+        List<Object> list = new ArrayList<>();
+
+        if (array instanceof Object[]) {
+            Collections.addAll(list, (Object[]) array);
+        } else if (array instanceof int[]) {
+            for (int i : (int[]) array) list.add(i);
+        } else if (array instanceof long[]) {
+            for (long l : (long[]) array) list.add(l);
+        } else if (array instanceof double[]) {
+            for (double d : (double[]) array) list.add(d);
+        } else if (array instanceof float[]) {
+            for (float f : (float[]) array) list.add(f);
+        } else if (array instanceof boolean[]) {
+            for (boolean b : (boolean[]) array) list.add(b);
+        } else if (array instanceof char[]) {
+            for (char c : (char[]) array) list.add(c);
+        } else if (array instanceof byte[]) {
+            for (byte b : (byte[]) array) list.add(b);
+        } else if (array instanceof short[]) {
+            for (short s : (short[]) array) list.add(s);
+        }
+
+        return formatCollection(list);
+    }
+
+    private String formatLegacyDate(java.util.Date date) {
+        synchronized (LEGACY_DATETIME_FORMAT) {
+            if (date instanceof java.sql.Date) {
+                return "'" + LEGACY_DATE_FORMAT.format(date) + "'";
+            } else if (date instanceof Time) {
+                return "'" + LEGACY_TIME_FORMAT.format(date) + "'";
+            } else if (date instanceof Timestamp) {
+                return "'" + LEGACY_DATETIME_FORMAT.format(date) + "'";
+            } else {
+                return "'" + LEGACY_DATETIME_FORMAT.format(date) + "'";
+            }
+        }
+    }
+
+    private String escapeSqlString(String value) {
+        if (value == null) {
+            return "";
+        }
+        // Escape single quotes by doubling them
+        return value.replace("'", "''");
+    }
+
+    private void logFormattedSql(String methodName, String executableSql, long executionTime, Object result, Exception exception) {
+        StringBuilder logMessage = new StringBuilder();
+
+        // Header
+        logMessage.append("\n").append("=".repeat(80)).append("\n");
+        logMessage.append("Mapper Method: ").append(methodName).append("\n");
+        logMessage.append("Execution Time: ").append(executionTime).append(" ms");
+
+        if (executionTime > slowQueryThreshold) {
+            logMessage.append(" [SLOW QUERY]");
+        }
+        logMessage.append("\n");
+
+        // Status
+        if (exception != null) {
+            logMessage.append("Status: FAILED - ").append(exception.getClass().getSimpleName()).append("\n");
+            logMessage.append("Error: ").append(exception.getMessage()).append("\n");
+        } else {
+            logMessage.append("Status: SUCCESS");
+            if (result != null) {
+                logMessage.append(" (").append(getResultCount(result)).append(" rows)");
+            }
+            logMessage.append("\n");
+        }
+
+        // SQL
+        logMessage.append("\nExecutable SQL:\n");
+        if (formatSql && !executableSql.startsWith("-- Method Call:")) {
+            logMessage.append(formatSqlForReadability(executableSql));
+        } else {
+            logMessage.append(executableSql.replaceAll("\\s+", " ").trim());
+        }
+
+        logMessage.append("\n").append("=".repeat(80));
+
+        // Log at appropriate level
+        if (exception != null) {
+            logger.error(logMessage.toString());
+        } else if (executionTime > slowQueryThreshold) {
+            logger.warn(logMessage.toString());
+        } else {
+            logger.info(logMessage.toString());
+        }
+    }
+
+    private String getResultCount(Object result) {
+        if (result instanceof Collection) {
+            return String.valueOf(((Collection<?>) result).size());
+        } else if (result instanceof Integer) {
+            return String.valueOf(result);
+        } else if (result != null) {
+            return "1";
+        }
+        return "0";
+    }
+
+    private String formatSqlForReadability(String sql) {
+        if (!formatSql || sql == null) {
+            return sql;
+        }
+
+        return sql
+            .replaceAll("(?i)\\b(SELECT|FROM|WHERE|AND|OR|ORDER\\s+BY|GROUP\\s+BY|HAVING|LIMIT|OFFSET|INSERT|UPDATE|DELETE|SET|VALUES|INTO|JOIN|LEFT\\s+JOIN|RIGHT\\s+JOIN|INNER\\s+JOIN|ON)\\b", "\n$1")
+            .replaceAll("\\s+", " ")
+            .replaceAll("\n ", "\n")
+            .trim();
+    }
+}
+
+/**
+ * Configuration to enable AspectJ and register the SQL logging aspect
+ */
+@org.springframework.context.annotation.Configuration
+@org.springframework.context.annotation.EnableAspectJAutoProxy
+public class SqlLoggingAspectConfig {
+
+    @org.springframework.context.annotation.Bean
+    public SqlLoggingAspect sqlLoggingAspect() {
+        return new SqlLoggingAspect();
+    }
+}
