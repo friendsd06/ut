@@ -587,3 +587,23 @@ public class SqlLoggingAspectConfig {
         return new SqlLoggingAspect();
     }
 }
+
+-------------------------
+mybatis:
+  sql:
+    logging:
+      enabled: true
+      slow-query-threshold: 1000
+      format-sql: true
+      max-sql-length: 10000
+      exclude-mappers: ""
+
+logging:
+  level:
+    com.yourcompany.config.mybatis.SqlLoggingAspect: INFO
+    org.apache.ibatis: WARN
+
+spring:
+  aop:
+    auto: true
+    proxy-target-class: true
