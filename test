@@ -609,3 +609,4 @@ spring:
     proxy-target-class: true
 
     -----------------
+    ---
