@@ -614,6 +614,8 @@ spring:
 
 package com.yourcompany.config.mybatis;
 
+package com.yourcompany.config.mybatis;
+
 import org.apache.ibatis.annotations.*;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.Signature;
@@ -628,11 +630,17 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
+import uk.org.lidalia.slf4jtest.LoggingEvent;
+import uk.org.lidalia.slf4jtest.TestLogger;
+import uk.org.lidalia.slf4jtest.TestLoggerFactory;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.math.BigDecimal;
@@ -645,12 +653,14 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static uk.org.lidalia.slf4jtest.LoggingEvent.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("SqlLoggingAspect Tests")
 class SqlLoggingAspectTest {
 
     private SqlLoggingAspect aspect;
+    private TestLogger testLogger;
 
     @Mock
     private ProceedingJoinPoint joinPoint;
@@ -660,9 +670,6 @@ class SqlLoggingAspectTest {
 
     @Mock
     private Signature signature;
-
-    @Mock
-    private Logger logger;
 
     private static final String TEST_METHOD_NAME = "selectById";
     private static final String TEST_CLASS_NAME = "com.yourcompany.mapper.UserMapper";
@@ -674,13 +681,16 @@ class SqlLoggingAspectTest {
         // Create actual instance of the aspect
         aspect = new SqlLoggingAspect();
 
+        // Set up test logger for @Slf4j generated logger
+        testLogger = TestLoggerFactory.getTestLogger(SqlLoggingAspect.class);
+        testLogger.clearAll();
+
         // Set default configuration values using reflection
         ReflectionTestUtils.setField(aspect, "sqlLoggingEnabled", true);
         ReflectionTestUtils.setField(aspect, "slowQueryThreshold", 1000L);
         ReflectionTestUtils.setField(aspect, "formatSql", true);
         ReflectionTestUtils.setField(aspect, "maxSqlLength", 10000);
         ReflectionTestUtils.setField(aspect, "excludeMappers", "");
-        ReflectionTestUtils.setField(aspect, "logger", logger);
     }
 
     @Test
@@ -697,7 +707,7 @@ class SqlLoggingAspectTest {
         // Then
         assertThat(result).isEqualTo(expectedResult);
         verify(joinPoint, times(1)).proceed();
-        verifyNoInteractions(logger);
+        assertThat(testLogger.getLoggingEvents()).isEmpty();
     }
 
     @Test
@@ -714,7 +724,12 @@ class SqlLoggingAspectTest {
         // Then
         assertThat(result).isEqualTo(expectedResult);
         verify(joinPoint).proceed();
-        verify(logger).info(anyString());
+
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getLevel()).isEqualTo(info().getLevel());
+        assertThat(loggingEvents.get(0).getMessage()).contains("Mapper Method:");
+        assertThat(loggingEvents.get(0).getMessage()).contains("SUCCESS");
     }
 
     @Test
@@ -730,7 +745,11 @@ class SqlLoggingAspectTest {
             .isInstanceOf(RuntimeException.class)
             .hasMessage("Database error");
 
-        verify(logger).error(anyString());
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getLevel()).isEqualTo(error().getLevel());
+        assertThat(loggingEvents.get(0).getMessage()).contains("FAILED");
+        assertThat(loggingEvents.get(0).getMessage()).contains("Database error");
     }
 
     @Test
@@ -748,7 +767,10 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        verify(logger).warn(anyString());
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getLevel()).isEqualTo(warn().getLevel());
+        assertThat(loggingEvents.get(0).getMessage()).contains("[SLOW QUERY]");
     }
 
     @Test
@@ -765,7 +787,7 @@ class SqlLoggingAspectTest {
 
         // Then
         verify(joinPoint).proceed();
-        verifyNoInteractions(logger);
+        assertThat(testLogger.getLoggingEvents()).isEmpty();
     }
 
     @Test
@@ -785,9 +807,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("[TRUNCATED]");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getMessage()).contains("[TRUNCATED]");
     }
 
     @Test
@@ -804,9 +826,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("SELECT * FROM users WHERE id = 123");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getMessage()).contains("SELECT * FROM users WHERE id = 123");
     }
 
     @Test
@@ -823,9 +845,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("INSERT INTO users (id, name) VALUES (1, 'John')");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getMessage()).contains("INSERT INTO users (id, name) VALUES (1, 'John')");
     }
 
     @Test
@@ -842,9 +864,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("UPDATE users SET name = 'Jane' WHERE id = 2");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getMessage()).contains("UPDATE users SET name = 'Jane' WHERE id = 2");
     }
 
     @Test
@@ -861,9 +883,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("DELETE FROM users WHERE id = 3");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getMessage()).contains("DELETE FROM users WHERE id = 3");
     }
 
     @Test
@@ -880,12 +902,13 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("-- Method Call:");
-        assertThat(logCaptor.getValue()).contains("methodWithoutAnnotation");
-        assertThat(logCaptor.getValue()).contains("arg0='test'");
-        assertThat(logCaptor.getValue()).contains("arg1=100");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        String message = loggingEvents.get(0).getMessage();
+        assertThat(message).contains("-- Method Call:");
+        assertThat(message).contains("methodWithoutAnnotation");
+        assertThat(message).contains("arg0='test'");
+        assertThat(message).contains("arg1=100");
     }
 
     @Test
@@ -902,9 +925,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        assertThat(logCaptor.getValue()).contains("id = NULL");
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getMessage()).contains("id = NULL");
     }
 
     @ParameterizedTest
@@ -1122,7 +1145,10 @@ class SqlLoggingAspectTest {
         assertThatCode(() -> aspect.logSqlExecution(joinPoint))
             .doesNotThrowAnyException();
 
-        verify(logger).warn(contains("Failed to log SQL execution"));
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        assertThat(loggingEvents.get(0).getLevel()).isEqualTo(warn().getLevel());
+        assertThat(loggingEvents.get(0).getMessage()).contains("Failed to log SQL execution");
     }
 
     @Test
@@ -1139,9 +1165,9 @@ class SqlLoggingAspectTest {
         aspect.logSqlExecution(joinPoint);
 
         // Then
-        ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
-        verify(logger).info(logCaptor.capture());
-        String loggedSql = logCaptor.getValue();
+        List<LoggingEvent> loggingEvents = testLogger.getLoggingEvents();
+        assertThat(loggingEvents).hasSize(1);
+        String loggedSql = loggingEvents.get(0).getMessage();
         assertThat(loggedSql).contains("SELECT");
         assertThat(loggedSql).contains("users");
         assertThat(loggedSql).contains("status = 'active'");
@@ -1165,6 +1191,38 @@ class SqlLoggingAspectTest {
 
         // Then
         assertThat(result).isEqualTo("'CustomObject[id=1, name=test]'");
+    }
+
+    @Test
+    @DisplayName("Should handle different result types correctly")
+    void testDifferentResultTypes() throws Throwable {
+        // Test with empty collection
+        setupBasicMocks();
+        when(joinPoint.proceed()).thenReturn(Collections.emptyList());
+        aspect.logSqlExecution(joinPoint);
+
+        List<LoggingEvent> events = testLogger.getLoggingEvents();
+        assertThat(events.get(0).getMessage()).contains("(0 rows)");
+
+        // Test with update count
+        testLogger.clearAll();
+        when(joinPoint.proceed()).thenReturn(5);
+        aspect.logSqlExecution(joinPoint);
+
+        events = testLogger.getLoggingEvents();
+        assertThat(events.get(0).getMessage()).contains("(5 rows)");
+    }
+
+    @Test
+    @DisplayName("Should handle ZonedDateTime and OffsetDateTime correctly")
+    void testZonedAndOffsetDateTime() {
+        // Given
+        ZonedDateTime zdt = ZonedDateTime.of(2024, 1, 15, 10, 30, 45, 0, ZoneId.of("UTC"));
+        OffsetDateTime odt = OffsetDateTime.of(2024, 1, 15, 10, 30, 45, 0, ZoneOffset.UTC);
+
+        // When & Then
+        assertThat(invokeFormatParameterValue(zdt)).matches("'\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}'");
+        assertThat(invokeFormatParameterValue(odt)).matches("'\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}'");
     }
 
     // Test Mapper interface for testing annotations
@@ -1267,4 +1325,3 @@ class SqlLoggingAspectTest {
             throw new RuntimeException(e);
         }
     }
-}
