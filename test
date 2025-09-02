@@ -610,3 +610,604 @@ spring:
 
     -----------------
     ---
+
+
+    package com.yourcompany.config.mybatis;
+
+    import org.apache.ibatis.binding.MapperMethod;
+    import org.apache.ibatis.executor.Executor;
+    import org.apache.ibatis.mapping.BoundSql;
+    import org.apache.ibatis.mapping.MappedStatement;
+    import org.apache.ibatis.mapping.ParameterMapping;
+    import org.apache.ibatis.plugin.Invocation;
+    import org.apache.ibatis.plugin.Plugin;
+    import org.apache.ibatis.reflection.MetaObject;
+    import org.apache.ibatis.session.Configuration;
+    import org.apache.ibatis.session.ResultHandler;
+    import org.apache.ibatis.session.RowBounds;
+    import org.apache.ibatis.type.TypeHandlerRegistry;
+    import org.junit.jupiter.api.BeforeEach;
+    import org.junit.jupiter.api.DisplayName;
+    import org.junit.jupiter.api.Test;
+    import org.junit.jupiter.api.extension.ExtendWith;
+    import org.junit.jupiter.params.ParameterizedTest;
+    import org.junit.jupiter.params.provider.Arguments;
+    import org.junit.jupiter.params.provider.MethodSource;
+    import org.junit.jupiter.params.provider.NullSource;
+    import org.junit.jupiter.params.provider.ValueSource;
+    import org.mockito.ArgumentCaptor;
+    import org.mockito.InjectMocks;
+    import org.mockito.Mock;
+    import org.mockito.Spy;
+    import org.mockito.junit.jupiter.MockitoExtension;
+    import org.slf4j.Logger;
+    import org.springframework.test.util.ReflectionTestUtils;
+
+    import java.lang.reflect.Method;
+    import java.math.BigDecimal;
+    import java.sql.Time;
+    import java.sql.Timestamp;
+    import java.time.*;
+    import java.util.*;
+    import java.util.stream.Stream;
+
+    import static org.assertj.core.api.Assertions.*;
+    import static org.mockito.ArgumentMatchers.*;
+    import static org.mockito.Mockito.*;
+
+    @ExtendWith(MockitoExtension.class)
+    @DisplayName("SqlLoggingInterceptor Tests")
+    class SqlLoggingInterceptorTest {
+
+        @InjectMocks
+        @Spy
+        private SqlLoggingInterceptor interceptor;
+
+        @Mock
+        private Invocation invocation;
+
+        @Mock
+        private MappedStatement mappedStatement;
+
+        @Mock
+        private BoundSql boundSql;
+
+        @Mock
+        private Configuration configuration;
+
+        @Mock
+        private TypeHandlerRegistry typeHandlerRegistry;
+
+        @Mock
+        private Executor executor;
+
+        @Mock
+        private MetaObject metaObject;
+
+        @Mock
+        private Logger logger;
+
+        private static final String TEST_SQL = "SELECT * FROM users WHERE id = ? AND name = ?";
+        private static final String TEST_SQL_ID = "com.yourcompany.mapper.UserMapper.selectById";
+
+        @BeforeEach
+        void setUp() {
+            // Set default configuration values
+            ReflectionTestUtils.setField(interceptor, "sqlLoggingEnabled", true);
+            ReflectionTestUtils.setField(interceptor, "slowQueryThreshold", 1000L);
+            ReflectionTestUtils.setField(interceptor, "formatSql", true);
+            ReflectionTestUtils.setField(interceptor, "includeParameters", true);
+            ReflectionTestUtils.setField(interceptor, "maxSqlLength", 10000);
+            ReflectionTestUtils.setField(interceptor, "excludeMappers", "");
+            ReflectionTestUtils.setField(interceptor, "logger", logger);
+        }
+
+        @Test
+        @DisplayName("Should proceed without logging when logging is disabled")
+        void testInterceptWhenLoggingDisabled() throws Throwable {
+            // Given
+            ReflectionTestUtils.setField(interceptor, "sqlLoggingEnabled", false);
+            Object expectedResult = new Object();
+            when(invocation.proceed()).thenReturn(expectedResult);
+
+            // When
+            Object result = interceptor.intercept(invocation);
+
+            // Then
+            assertThat(result).isEqualTo(expectedResult);
+            verify(invocation, times(1)).proceed();
+            verifyNoInteractions(mappedStatement, boundSql);
+        }
+
+        @Test
+        @DisplayName("Should log SQL execution successfully")
+        void testInterceptWithSuccessfulExecution() throws Throwable {
+            // Given
+            setupBasicMocks();
+            List<String> expectedResult = Arrays.asList("user1", "user2");
+            when(invocation.proceed()).thenReturn(expectedResult);
+
+            // When
+            Object result = interceptor.intercept(invocation);
+
+            // Then
+            assertThat(result).isEqualTo(expectedResult);
+            verify(invocation).proceed();
+            verify(logger).info(anyString());
+        }
+
+        @Test
+        @DisplayName("Should log SQL execution with exception")
+        void testInterceptWithException() throws Throwable {
+            // Given
+            setupBasicMocks();
+            RuntimeException exception = new RuntimeException("Database error");
+            when(invocation.proceed()).thenThrow(exception);
+
+            // When & Then
+            assertThatThrownBy(() -> interceptor.intercept(invocation))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Database error");
+
+            verify(logger).error(anyString());
+        }
+
+        @Test
+        @DisplayName("Should log slow query warning")
+        void testSlowQueryLogging() throws Throwable {
+            // Given
+            setupBasicMocks();
+            ReflectionTestUtils.setField(interceptor, "slowQueryThreshold", 0L); // Set threshold to 0 to trigger slow query
+            when(invocation.proceed()).thenAnswer(inv -> {
+                Thread.sleep(10); // Simulate slow query
+                return Collections.emptyList();
+            });
+
+            // When
+            interceptor.intercept(invocation);
+
+            // Then
+            verify(logger).warn(anyString());
+        }
+
+        @Test
+        @DisplayName("Should exclude specified mappers from logging")
+        void testExcludeMappers() throws Throwable {
+            // Given
+            ReflectionTestUtils.setField(interceptor, "excludeMappers", "UserMapper,OrderMapper");
+            setupBasicMocks();
+            when(invocation.proceed()).thenReturn(new Object());
+
+            // When
+            interceptor.intercept(invocation);
+
+            // Then
+            verify(invocation).proceed();
+            verifyNoInteractions(logger);
+        }
+
+        @Test
+        @DisplayName("Should truncate long SQL statements")
+        void testSqlTruncation() throws Throwable {
+            // Given
+            ReflectionTestUtils.setField(interceptor, "maxSqlLength", 50);
+            String longSql = "SELECT " + "a".repeat(100) + " FROM table";
+            setupBasicMocks();
+            when(boundSql.getSql()).thenReturn(longSql);
+            when(invocation.proceed()).thenReturn(new Object());
+
+            // When
+            interceptor.intercept(invocation);
+
+            // Then
+            ArgumentCaptor<String> logCaptor = ArgumentCaptor.forClass(String.class);
+            verify(logger).info(logCaptor.capture());
+            assertThat(logCaptor.getValue()).contains("[TRUNCATED]");
+        }
+
+        @ParameterizedTest
+        @DisplayName("Should format simple parameter values correctly")
+        @MethodSource("provideSimpleParameterValues")
+        void testFormatSimpleParameterValues(Object value, String expected) {
+            // When
+            String result = invokeFormatParameterValue(value);
+
+            // Then
+            assertThat(result).isEqualTo(expected);
+        }
+
+        private static Stream<Arguments> provideSimpleParameterValues() {
+            return Stream.of(
+                Arguments.of(null, "NULL"),
+                Arguments.of("test", "'test'"),
+                Arguments.of("test's", "'test''s'"), // Test SQL escaping
+                Arguments.of(123, "123"),
+                Arguments.of(123L, "123"),
+                Arguments.of(123.45, "123.45"),
+                Arguments.of(new BigDecimal("123.45"), "123.45"),
+                Arguments.of(true, "1"),
+                Arguments.of(false, "0"),
+                Arguments.of('A', "'A'")
+            );
+        }
+
+        @ParameterizedTest
+        @DisplayName("Should format date/time parameter values correctly")
+        @MethodSource("provideDateTimeParameterValues")
+        void testFormatDateTimeParameterValues(Object value, String expectedPattern) {
+            // When
+            String result = invokeFormatParameterValue(value);
+
+            // Then
+            assertThat(result).matches(expectedPattern);
+        }
+
+        private static Stream<Arguments> provideDateTimeParameterValues() {
+            LocalDateTime ldt = LocalDateTime.of(2024, 1, 15, 10, 30, 45);
+            LocalDate ld = LocalDate.of(2024, 1, 15);
+            LocalTime lt = LocalTime.of(10, 30, 45);
+            Instant instant = Instant.parse("2024-01-15T10:30:45Z");
+
+            return Stream.of(
+                Arguments.of(ldt, "'2024-01-15 10:30:45'"),
+                Arguments.of(ld, "'2024-01-15'"),
+                Arguments.of(lt, "'10:30:45'"),
+                Arguments.of(Date.from(instant), "'\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}'"),
+                Arguments.of(new java.sql.Date(System.currentTimeMillis()), "'\\d{4}-\\d{2}-\\d{2}'"),
+                Arguments.of(new Time(System.currentTimeMillis()), "'\\d{2}:\\d{2}:\\d{2}'"),
+                Arguments.of(new Timestamp(System.currentTimeMillis()), "'\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}'")
+            );
+        }
+
+        @Test
+        @DisplayName("Should format collection parameter values correctly")
+        void testFormatCollectionParameterValues() {
+            // Given
+            List<Integer> intList = Arrays.asList(1, 2, 3);
+            Set<String> stringSet = new HashSet<>(Arrays.asList("a", "b", "c"));
+            List<Object> emptyList = Collections.emptyList();
+
+            // When & Then
+            assertThat(invokeFormatParameterValue(intList)).isEqualTo("(1, 2, 3)");
+            assertThat(invokeFormatParameterValue(emptyList)).isEqualTo("()");
+
+            String setResult = invokeFormatParameterValue(stringSet);
+            assertThat(setResult).containsAnyOf("('a', 'b', 'c')", "('a', 'c', 'b')",
+                                              "('b', 'a', 'c')", "('b', 'c', 'a')",
+                                              "('c', 'a', 'b')", "('c', 'b', 'a')");
+        }
+
+        @Test
+        @DisplayName("Should format array parameter values correctly")
+        void testFormatArrayParameterValues() {
+            // Given
+            int[] intArray = {1, 2, 3};
+            String[] stringArray = {"a", "b", "c"};
+            long[] longArray = {100L, 200L, 300L};
+            double[] doubleArray = {1.1, 2.2, 3.3};
+            boolean[] boolArray = {true, false, true};
+
+            // When & Then
+            assertThat(invokeFormatParameterValue(intArray)).isEqualTo("(1, 2, 3)");
+            assertThat(invokeFormatParameterValue(stringArray)).isEqualTo("('a', 'b', 'c')");
+            assertThat(invokeFormatParameterValue(longArray)).isEqualTo("(100, 200, 300)");
+            assertThat(invokeFormatParameterValue(doubleArray)).isEqualTo("(1.1, 2.2, 3.3)");
+            assertThat(invokeFormatParameterValue(boolArray)).isEqualTo("(1, 0, 1)");
+        }
+
+        @Test
+        @DisplayName("Should format enum parameter values correctly")
+        void testFormatEnumParameterValues() {
+            // Given
+            enum TestEnum { VALUE1, VALUE2 }
+
+            // When & Then
+            assertThat(invokeFormatParameterValue(TestEnum.VALUE1)).isEqualTo("'VALUE1'");
+            assertThat(invokeFormatParameterValue(TestEnum.VALUE2)).isEqualTo("'VALUE2'");
+        }
+
+        @Test
+        @DisplayName("Should build executable SQL with no parameters")
+        void testBuildExecutableSqlNoParameters() {
+            // Given
+            String sql = "SELECT * FROM users";
+            when(boundSql.getSql()).thenReturn(sql);
+            when(boundSql.getParameterMappings()).thenReturn(Collections.emptyList());
+
+            // When
+            String result = invokeBuildExecutableSql(configuration, boundSql, null);
+
+            // Then
+            assertThat(result).isEqualTo(sql);
+        }
+
+        @Test
+        @DisplayName("Should build executable SQL with null parameter object")
+        void testBuildExecutableSqlNullParameterObject() {
+            // Given
+            String sql = "SELECT * FROM users WHERE id = ? AND name = ?";
+            List<ParameterMapping> mappings = Arrays.asList(mock(ParameterMapping.class), mock(ParameterMapping.class));
+            when(boundSql.getSql()).thenReturn(sql);
+            when(boundSql.getParameterMappings()).thenReturn(mappings);
+
+            // When
+            String result = invokeBuildExecutableSql(configuration, boundSql, null);
+
+            // Then
+            assertThat(result).isEqualTo("SELECT * FROM users WHERE id = NULL AND name = NULL");
+        }
+
+        @Test
+        @DisplayName("Should build executable SQL with simple parameter")
+        void testBuildExecutableSqlSimpleParameter() {
+            // Given
+            String sql = "SELECT * FROM users WHERE id = ?";
+            List<ParameterMapping> mappings = Collections.singletonList(mock(ParameterMapping.class));
+            when(boundSql.getSql()).thenReturn(sql);
+            when(boundSql.getParameterMappings()).thenReturn(mappings);
+            when(configuration.getTypeHandlerRegistry()).thenReturn(typeHandlerRegistry);
+            when(typeHandlerRegistry.hasTypeHandler(Integer.class)).thenReturn(true);
+
+            // When
+            String result = invokeBuildExecutableSql(configuration, boundSql, 123);
+
+            // Then
+            assertThat(result).isEqualTo("SELECT * FROM users WHERE id = 123");
+        }
+
+        @Test
+        @DisplayName("Should build executable SQL with complex parameters")
+        void testBuildExecutableSqlComplexParameters() {
+            // Given
+            String sql = "SELECT * FROM users WHERE id = ? AND name = ?";
+            ParameterMapping mapping1 = mock(ParameterMapping.class);
+            ParameterMapping mapping2 = mock(ParameterMapping.class);
+            when(mapping1.getProperty()).thenReturn("id");
+            when(mapping2.getProperty()).thenReturn("name");
+
+            List<ParameterMapping> mappings = Arrays.asList(mapping1, mapping2);
+            when(boundSql.getSql()).thenReturn(sql);
+            when(boundSql.getParameterMappings()).thenReturn(mappings);
+            when(configuration.getTypeHandlerRegistry()).thenReturn(typeHandlerRegistry);
+            when(typeHandlerRegistry.hasTypeHandler(any())).thenReturn(false);
+
+            Map<String, Object> paramMap = new HashMap<>();
+            paramMap.put("id", 123);
+            paramMap.put("name", "John");
+
+            when(configuration.newMetaObject(paramMap)).thenReturn(metaObject);
+            when(metaObject.hasGetter("id")).thenReturn(true);
+            when(metaObject.hasGetter("name")).thenReturn(true);
+            when(metaObject.getValue("id")).thenReturn(123);
+            when(metaObject.getValue("name")).thenReturn("John");
+
+            // When
+            String result = invokeBuildExecutableSql(configuration, boundSql, paramMap);
+
+            // Then
+            assertThat(result).isEqualTo("SELECT * FROM users WHERE id = 123 AND name = 'John'");
+        }
+
+        @Test
+        @DisplayName("Should handle foreach parameters correctly")
+        void testForeachParameters() {
+            // Given
+            String sql = "SELECT * FROM users WHERE id IN (?, ?, ?)";
+            MapperMethod.ParamMap<Object> paramMap = new MapperMethod.ParamMap<>();
+            paramMap.put("__frch_item_0", 1);
+            paramMap.put("__frch_item_1", 2);
+            paramMap.put("__frch_item_2", 3);
+
+            ParameterMapping mapping1 = mock(ParameterMapping.class);
+            ParameterMapping mapping2 = mock(ParameterMapping.class);
+            ParameterMapping mapping3 = mock(ParameterMapping.class);
+            when(mapping1.getProperty()).thenReturn("__frch_item_0");
+            when(mapping2.getProperty()).thenReturn("__frch_item_1");
+            when(mapping3.getProperty()).thenReturn("__frch_item_2");
+
+            List<ParameterMapping> mappings = Arrays.asList(mapping1, mapping2, mapping3);
+            when(boundSql.getSql()).thenReturn(sql);
+            when(boundSql.getParameterMappings()).thenReturn(mappings);
+            when(configuration.getTypeHandlerRegistry()).thenReturn(typeHandlerRegistry);
+            when(typeHandlerRegistry.hasTypeHandler(any())).thenReturn(false);
+            when(configuration.newMetaObject(paramMap)).thenReturn(metaObject);
+            when(metaObject.hasGetter(anyString())).thenReturn(false);
+
+            // When
+            String result = invokeBuildExecutableSql(configuration, boundSql, paramMap);
+
+            // Then
+            assertThat(result).isEqualTo("SELECT * FROM users WHERE id IN (1, 2, 3)");
+        }
+
+        @Test
+        @DisplayName("Should format SQL for readability when enabled")
+        void testFormatSqlForReadability() {
+            // Given
+            String unformattedSql = "SELECT id, name FROM users WHERE status = 'active' AND created_date > '2024-01-01' ORDER BY created_date DESC";
+
+            // When
+            String result = invokeFormatSqlForReadability(unformattedSql);
+
+            // Then
+            assertThat(result).contains("\nSELECT");
+            assertThat(result).contains("\nFROM");
+            assertThat(result).contains("\nWHERE");
+            assertThat(result).contains("\nAND");
+            assertThat(result).contains("\nORDER BY");
+        }
+
+        @Test
+        @DisplayName("Should not format SQL when disabled")
+        void testFormatSqlDisabled() {
+            // Given
+            ReflectionTestUtils.setField(interceptor, "formatSql", false);
+            String sql = "SELECT id FROM users WHERE status = 'active'";
+
+            // When
+            String result = invokeFormatSqlForReadability(sql);
+
+            // Then
+            assertThat(result).isEqualTo(sql);
+        }
+
+        @Test
+        @DisplayName("Should handle additional parameters from BoundSql")
+        void testAdditionalParameters() {
+            // Given
+            String sql = "SELECT * FROM users WHERE id = ?";
+            ParameterMapping mapping = mock(ParameterMapping.class);
+            when(mapping.getProperty()).thenReturn("additionalParam");
+
+            List<ParameterMapping> mappings = Collections.singletonList(mapping);
+            when(boundSql.getSql()).thenReturn(sql);
+            when(boundSql.getParameterMappings()).thenReturn(mappings);
+            when(boundSql.hasAdditionalParameter("additionalParam")).thenReturn(true);
+            when(boundSql.getAdditionalParameter("additionalParam")).thenReturn("testValue");
+
+            when(configuration.getTypeHandlerRegistry()).thenReturn(typeHandlerRegistry);
+            when(typeHandlerRegistry.hasTypeHandler(any())).thenReturn(false);
+            when(configuration.newMetaObject(any())).thenReturn(metaObject);
+            when(metaObject.hasGetter("additionalParam")).thenReturn(false);
+
+            // When
+            String result = invokeBuildExecutableSql(configuration, boundSql, new Object());
+
+            // Then
+            assertThat(result).isEqualTo("SELECT * FROM users WHERE id = 'testValue'");
+        }
+
+        @Test
+        @DisplayName("Should wrap target with plugin")
+        void testPlugin() {
+            // Given
+            Object target = mock(Executor.class);
+
+            // When
+            Object result = interceptor.plugin(target);
+
+            // Then
+            assertThat(result).isNotNull();
+            // Plugin.wrap creates a proxy, so the result should be different from target
+            assertThat(result).isNotSameAs(target);
+        }
+
+        @Test
+        @DisplayName("Should set properties correctly")
+        void testSetProperties() {
+            // Given
+            Properties properties = new Properties();
+            properties.setProperty("test.property", "test.value");
+
+            // When & Then (should not throw exception)
+            assertThatCode(() -> interceptor.setProperties(properties))
+                .doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("Should handle logging exceptions gracefully")
+        void testLoggingExceptionHandling() throws Throwable {
+            // Given
+            setupBasicMocks();
+            when(mappedStatement.getBoundSql(any())).thenThrow(new RuntimeException("BoundSql error"));
+            when(invocation.proceed()).thenReturn(new Object());
+
+            // When & Then
+            assertThatCode(() -> interceptor.intercept(invocation))
+                .doesNotThrowAnyException();
+
+            verify(logger).warn(contains("Failed to log SQL execution"));
+        }
+
+        @Test
+        @DisplayName("Should calculate result count correctly")
+        void testResultCount() {
+            // Test with Collection
+            List<String> listResult = Arrays.asList("a", "b", "c");
+            assertThat(invokeGetResultCount(listResult)).isEqualTo("3");
+
+            // Test with Integer (update/delete count)
+            assertThat(invokeGetResultCount(5)).isEqualTo("5");
+
+            // Test with single object
+            assertThat(invokeGetResultCount(new Object())).isEqualTo("1");
+
+            // Test with null
+            assertThat(invokeGetResultCount(null)).isEqualTo("0");
+        }
+
+        @Test
+        @DisplayName("Should escape SQL strings correctly")
+        void testEscapeSqlString() {
+            // Given
+            String input1 = "John's car";
+            String input2 = "It's a 'test'";
+            String input3 = null;
+
+            // When & Then
+            assertThat(invokeEscapeSqlString(input1)).isEqualTo("John''s car");
+            assertThat(invokeEscapeSqlString(input2)).isEqualTo("It''s a ''test''");
+            assertThat(invokeEscapeSqlString(input3)).isEqualTo("");
+        }
+
+        // Helper methods for reflection-based invocations
+        private void setupBasicMocks() throws Throwable {
+            when(invocation.getArgs()).thenReturn(new Object[]{mappedStatement, new Object()});
+            when(mappedStatement.getId()).thenReturn(TEST_SQL_ID);
+            when(mappedStatement.getBoundSql(any())).thenReturn(boundSql);
+            when(mappedStatement.getConfiguration()).thenReturn(configuration);
+            when(boundSql.getSql()).thenReturn(TEST_SQL);
+            when(boundSql.getParameterMappings()).thenReturn(Collections.emptyList());
+        }
+
+        private String invokeFormatParameterValue(Object value) {
+            try {
+                Method method = SqlLoggingInterceptor.class.getDeclaredMethod("formatParameterValue", Object.class);
+                method.setAccessible(true);
+                return (String) method.invoke(interceptor, value);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private String invokeBuildExecutableSql(Configuration config, BoundSql boundSql, Object param) {
+            try {
+                Method method = SqlLoggingInterceptor.class.getDeclaredMethod(
+                    "buildExecutableSql", Configuration.class, BoundSql.class, Object.class);
+                method.setAccessible(true);
+                return (String) method.invoke(interceptor, config, boundSql, param);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private String invokeFormatSqlForReadability(String sql) {
+            try {
+                Method method = SqlLoggingInterceptor.class.getDeclaredMethod("formatSqlForReadability", String.class);
+                method.setAccessible(true);
+                return (String) method.invoke(interceptor, sql);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private String invokeGetResultCount(Object result) {
+            try {
+                Method method = SqlLoggingInterceptor.class.getDeclaredMethod("getResultCount", Object.class);
+                method.setAccessible(true);
+                return (String) method.invoke(interceptor, result);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private String invokeEscapeSqlString(String value) {
+            try {
+                Method method = SqlLoggingInterceptor.class.getDeclaredMethod("escapeSqlString", String.class);
+                method.setAccessible(true);
+                return (String) method.invoke(interceptor, value);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
