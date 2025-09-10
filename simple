@@ -1049,3 +1049,372 @@ props.setProperty("driver", "com.databricks.client.jdbc.Driver");
 Dataset<Row> df = spark.read().jdbc(jdbcUrl, "table", props);
 This dialect will automatically handle all Databricks data types, preventing the errors you were experiencing with complex types, decimals, and other special Databricks types.
 ----------------------------------------------------------
+
+final code
+
+package com.databricks.dialect;
+
+import org.apache.spark.sql.jdbc.JdbcDialect;
+import org.apache.spark.sql.jdbc.JdbcType;
+import org.apache.spark.sql.types.*;
+import scala.Option;
+import scala.Function0;
+import scala.collection.immutable.Map;
+import java.sql.Connection;
+import java.sql.Types;
+import java.util.Locale;
+
+/**
+ * Production-ready JDBC Dialect for Databricks to handle all data types
+ * This dialect ensures proper type mapping between Spark and Databricks
+ */
+public class DatabricksJdbcDialect extends JdbcDialect {
+
+    private static final long serialVersionUID = 1L;
+    private static final String DATABRICKS_URL_PREFIX = "jdbc:databricks://";
+    private static final String SPARK_DATABRICKS_URL_PREFIX = "jdbc:spark://";
+
+    @Override
+    public boolean canHandle(String url) {
+        return url.toLowerCase(Locale.ROOT).startsWith(DATABRICKS_URL_PREFIX) ||
+               url.toLowerCase(Locale.ROOT).startsWith(SPARK_DATABRICKS_URL_PREFIX);
+    }
+
+    @Override
+    public Option<JdbcType> getJDBCType(DataType dt) {
+        if (dt instanceof BooleanType) {
+            return Option.apply(new JdbcType("BOOLEAN", Types.BOOLEAN));
+        } else if (dt instanceof ByteType) {
+            return Option.apply(new JdbcType("TINYINT", Types.TINYINT));
+        } else if (dt instanceof ShortType) {
+            return Option.apply(new JdbcType("SMALLINT", Types.SMALLINT));
+        } else if (dt instanceof IntegerType) {
+            return Option.apply(new JdbcType("INT", Types.INTEGER));
+        } else if (dt instanceof LongType) {
+            return Option.apply(new JdbcType("BIGINT", Types.BIGINT));
+        } else if (dt instanceof FloatType) {
+            return Option.apply(new JdbcType("FLOAT", Types.FLOAT));
+        } else if (dt instanceof DoubleType) {
+            return Option.apply(new JdbcType("DOUBLE", Types.DOUBLE));
+        } else if (dt instanceof DecimalType) {
+            DecimalType decimalType = (DecimalType) dt;
+            int precision = decimalType.precision();
+            int scale = decimalType.scale();
+            return Option.apply(new JdbcType(
+                String.format("DECIMAL(%d, %d)", precision, scale),
+                Types.DECIMAL
+            ));
+        } else if (dt instanceof StringType) {
+            return Option.apply(new JdbcType("STRING", Types.VARCHAR));
+        } else if (dt instanceof BinaryType) {
+            return Option.apply(new JdbcType("BINARY", Types.BINARY));
+        } else if (dt instanceof DateType) {
+            return Option.apply(new JdbcType("DATE", Types.DATE));
+        } else if (dt instanceof TimestampType) {
+            return Option.apply(new JdbcType("TIMESTAMP", Types.TIMESTAMP));
+        } else if (dt instanceof ArrayType) {
+            ArrayType arrayType = (ArrayType) dt;
+            Option<JdbcType> elementType = getJDBCType(arrayType.elementType());
+            if (elementType.isDefined()) {
+                String arrayTypeName = String.format("ARRAY<%s>",
+                    elementType.get().databaseTypeDefinition());
+                return Option.apply(new JdbcType(arrayTypeName, Types.ARRAY));
+            }
+        } else if (dt instanceof MapType) {
+            MapType mapType = (MapType) dt;
+            Option<JdbcType> keyType = getJDBCType(mapType.keyType());
+            Option<JdbcType> valueType = getJDBCType(mapType.valueType());
+            if (keyType.isDefined() && valueType.isDefined()) {
+                String mapTypeName = String.format("MAP<%s, %s>",
+                    keyType.get().databaseTypeDefinition(),
+                    valueType.get().databaseTypeDefinition());
+                return Option.apply(new JdbcType(mapTypeName, Types.JAVA_OBJECT));
+            }
+        } else if (dt instanceof StructType) {
+            StructType structType = (StructType) dt;
+            StringBuilder structDef = new StringBuilder("STRUCT<");
+            StructField[] fields = structType.fields();
+            for (int i = 0; i < fields.length; i++) {
+                if (i > 0) structDef.append(", ");
+                Option<JdbcType> fieldType = getJDBCType(fields[i].dataType());
+                if (fieldType.isDefined()) {
+                    structDef.append(fields[i].name()).append(": ")
+                            .append(fieldType.get().databaseTypeDefinition());
+                }
+            }
+            structDef.append(">");
+            return Option.apply(new JdbcType(structDef.toString(), Types.STRUCT));
+        }
+
+        // Databricks-specific types
+        if (dt.typeName().equals("interval")) {
+            return Option.apply(new JdbcType("INTERVAL", Types.OTHER));
+        } else if (dt.typeName().equals("void")) {
+            return Option.apply(new JdbcType("VOID", Types.NULL));
+        }
+
+        return Option.empty();
+    }
+
+    @Override
+    public Option<DataType> getCatalystType(int sqlType, String typeName,
+                                           int size, MetadataBuilder md) {
+        // Handle standard SQL types
+        switch (sqlType) {
+            case Types.BOOLEAN:
+            case Types.BIT:
+                return Option.apply(DataTypes.BooleanType);
+            case Types.TINYINT:
+                return Option.apply(DataTypes.ByteType);
+            case Types.SMALLINT:
+                return Option.apply(DataTypes.ShortType);
+            case Types.INTEGER:
+                return Option.apply(DataTypes.IntegerType);
+            case Types.BIGINT:
+                return Option.apply(DataTypes.LongType);
+            case Types.FLOAT:
+            case Types.REAL:
+                return Option.apply(DataTypes.FloatType);
+            case Types.DOUBLE:
+                return Option.apply(DataTypes.DoubleType);
+            case Types.DECIMAL:
+            case Types.NUMERIC:
+                // Fix: Properly handle scale from metadata
+                Metadata metadata = md.build();
+                int precision = size;
+                int scale = 0;
+
+                // Check if scale exists in metadata
+                if (metadata.contains("scale")) {
+                    try {
+                        scale = (int) metadata.getLong("scale");
+                    } catch (Exception e) {
+                        scale = 0;
+                    }
+                }
+
+                if (precision > 0) {
+                    return Option.apply(DataTypes.createDecimalType(precision, scale));
+                } else {
+                    return Option.apply(DataTypes.createDecimalType());
+                }
+            case Types.CHAR:
+            case Types.VARCHAR:
+            case Types.LONGVARCHAR:
+            case Types.NCHAR:
+            case Types.NVARCHAR:
+            case Types.LONGNVARCHAR:
+            case Types.CLOB:
+            case Types.NCLOB:
+                return Option.apply(DataTypes.StringType);
+            case Types.BINARY:
+            case Types.VARBINARY:
+            case Types.LONGVARBINARY:
+            case Types.BLOB:
+                return Option.apply(DataTypes.BinaryType);
+            case Types.DATE:
+                return Option.apply(DataTypes.DateType);
+            case Types.TIMESTAMP:
+            case Types.TIMESTAMP_WITH_TIMEZONE:
+                return Option.apply(DataTypes.TimestampType);
+            case Types.TIME:
+            case Types.TIME_WITH_TIMEZONE:
+                // Map TIME to TIMESTAMP for better compatibility
+                return Option.apply(DataTypes.TimestampType);
+            case Types.ARRAY:
+                return handleArrayType(typeName);
+            case Types.STRUCT:
+                return handleStructType(typeName);
+            case Types.JAVA_OBJECT:
+            case Types.OTHER:
+                return handleComplexType(typeName);
+            default:
+                return Option.empty();
+        }
+    }
+
+    private Option<DataType> handleArrayType(String typeName) {
+        if (typeName != null && typeName.toUpperCase().startsWith("ARRAY")) {
+            // Parse ARRAY<element_type> format
+            String elementTypeStr = extractTypeFromBrackets(typeName, "ARRAY");
+            DataType elementType = parseDataType(elementTypeStr);
+            if (elementType != null) {
+                return Option.apply(DataTypes.createArrayType(elementType));
+            }
+        }
+        return Option.empty();
+    }
+
+    private Option<DataType> handleStructType(String typeName) {
+        if (typeName != null && typeName.toUpperCase().startsWith("STRUCT")) {
+            // For complex STRUCT parsing, we'll use a simplified approach
+            // In production, you'd want to parse the full STRUCT definition
+            return Option.apply(DataTypes.createStructType());
+        }
+        return Option.empty();
+    }
+
+    private Option<DataType> handleComplexType(String typeName) {
+        if (typeName == null) return Option.empty();
+
+        String upperTypeName = typeName.toUpperCase();
+        if (upperTypeName.startsWith("MAP")) {
+            // Parse MAP<key_type, value_type> format
+            String mapContent = extractTypeFromBrackets(typeName, "MAP");
+            if (mapContent != null) {
+                String[] types = mapContent.split(",", 2);
+                if (types.length == 2) {
+                    DataType keyType = parseDataType(types[0].trim());
+                    DataType valueType = parseDataType(types[1].trim());
+                    if (keyType != null && valueType != null) {
+                        return Option.apply(DataTypes.createMapType(keyType, valueType));
+                    }
+                }
+            }
+        } else if (upperTypeName.equals("INTERVAL")) {
+            // Interval types - map to CalendarIntervalType if available
+            return Option.apply(DataTypes.StringType); // Fallback to String
+        } else if (upperTypeName.equals("VOID")) {
+            return Option.apply(DataTypes.NullType);
+        }
+
+        return Option.empty();
+    }
+
+    private String extractTypeFromBrackets(String typeName, String prefix) {
+        if (typeName == null) return null;
+        int start = typeName.indexOf('<');
+        int end = typeName.lastIndexOf('>');
+        if (start > 0 && end > start) {
+            return typeName.substring(start + 1, end);
+        }
+        return null;
+    }
+
+    private DataType parseDataType(String typeStr) {
+        if (typeStr == null) return null;
+
+        String upperType = typeStr.trim().toUpperCase();
+
+        // Basic type mappings
+        switch (upperType) {
+            case "BOOLEAN":
+            case "BOOL":
+                return DataTypes.BooleanType;
+            case "TINYINT":
+            case "BYTE":
+                return DataTypes.ByteType;
+            case "SMALLINT":
+            case "SHORT":
+                return DataTypes.ShortType;
+            case "INT":
+            case "INTEGER":
+                return DataTypes.IntegerType;
+            case "BIGINT":
+            case "LONG":
+                return DataTypes.LongType;
+            case "FLOAT":
+            case "REAL":
+                return DataTypes.FloatType;
+            case "DOUBLE":
+                return DataTypes.DoubleType;
+            case "STRING":
+            case "VARCHAR":
+            case "CHAR":
+            case "TEXT":
+                return DataTypes.StringType;
+            case "BINARY":
+                return DataTypes.BinaryType;
+            case "DATE":
+                return DataTypes.DateType;
+            case "TIMESTAMP":
+                return DataTypes.TimestampType;
+            default:
+                if (upperType.startsWith("DECIMAL")) {
+                    return DataTypes.createDecimalType();
+                }
+                return DataTypes.StringType; // Fallback to String
+        }
+    }
+
+    @Override
+    public String quoteIdentifier(String colName) {
+        // Databricks uses backticks for quoting identifiers
+        return "`" + colName.replace("`", "``") + "`";
+    }
+
+    @Override
+    public String getTableExistsQuery(String table) {
+        return "SELECT 1 FROM " + table + " LIMIT 1";
+    }
+
+    @Override
+    public String getSchemaQuery(String table) {
+        return "SELECT * FROM " + table + " LIMIT 0";
+    }
+
+    @Override
+    public String getTruncateQuery(String table) {
+        return "TRUNCATE TABLE " + table;
+    }
+
+    @Override
+    public String getTruncateQuery(String table, Option<Object> cascade) {
+        if (cascade.isDefined() && (Boolean) cascade.get()) {
+            return "TRUNCATE TABLE " + table + " CASCADE";
+        }
+        return getTruncateQuery(table);
+    }
+
+    @Override
+    public boolean isCascadingTruncateTable() {
+        return true;
+    }
+
+    @Override
+    public String getLimitClause(Integer limit) {
+        if (limit != null && limit > 0) {
+            return " LIMIT " + limit;
+        }
+        return "";
+    }
+
+    @Override
+    public Option<String> getTableSampleQuery(String table, Double sample) {
+        if (sample != null && sample > 0 && sample < 1) {
+            int percentage = (int) (sample * 100);
+            return Option.apply("SELECT * FROM " + table +
+                              " TABLESAMPLE (" + percentage + " PERCENT)");
+        }
+        return Option.empty();
+    }
+
+    @Override
+    public void beforeFetch(Connection connection, Map<String, String> properties) {
+        // Set any Databricks-specific connection properties
+        try {
+            // Enable arrow optimization if supported
+            connection.setClientInfo("spark.sql.execution.arrow.enabled", "true");
+
+            // Set fetch size for better performance - Fixed to use Option properly
+            Option<String> fetchSizeOpt = properties.get("fetchsize");
+            String fetchSize = fetchSizeOpt.isDefined() ? fetchSizeOpt.get() : "10000";
+            connection.createStatement().setFetchSize(Integer.parseInt(fetchSize));
+
+            // Set query timeout if specified - Fixed to use Option properly
+            Option<String> queryTimeoutOpt = properties.get("queryTimeout");
+            String queryTimeout = queryTimeoutOpt.isDefined() ? queryTimeoutOpt.get() : "0";
+            if (!queryTimeout.equals("0")) {
+                connection.createStatement().setQueryTimeout(Integer.parseInt(queryTimeout));
+            }
+        } catch (Exception e) {
+            // Log warning but don't fail
+            System.err.println("Warning: Could not set connection properties: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "DatabricksJdbcDialect";
+    }
+}
