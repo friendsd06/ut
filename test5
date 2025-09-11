@@ -2913,3 +2913,341 @@ databricks.log.path=/tmp/databricks-dev.log
 # Environment Specific Settings
 environment.name=DEV
 environment.description=Development Environment for Spark Data Processing
+--------------
+// EnhancedDatasetMappingConfig.java
+package com.company.spark.config;
+
+import com.company.spark.dialect.DatabricksDialect;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+
+/**
+ * Enhanced configuration class for dataset ID to Databricks catalog table mapping
+ * Handles Unity Catalog format validation and provides catalog-aware operations
+ */
+public class EnhancedDatasetMappingConfig {
+
+    private static final Logger logger = LoggerFactory.getLogger(EnhancedDatasetMappingConfig.class);
+    private static final String CONFIG_FILE = "dataset-mapping.properties";
+    private static final String MAPPING_PREFIX = "dataset.mapping.";
+
+    private final Map<String, String> datasetToTableMapping;
+    private final Map<String, DatasetInfo> datasetInfoMapping;
+    private final DatabricksDialect dialect;
+
+    public EnhancedDatasetMappingConfig() {
+        this.datasetToTableMapping = new HashMap<>();
+        this.datasetInfoMapping = new HashMap<>();
+        this.dialect = new DatabricksDialect();
+        loadMappings();
+    }
+
+    public EnhancedDatasetMappingConfig(String configFile) {
+        this.datasetToTableMapping = new HashMap<>();
+        this.datasetInfoMapping = new HashMap<>();
+        this.dialect = new DatabricksDialect();
+        loadMappings(configFile);
+    }
+
+    /**
+     * Load dataset mappings from default properties file
+     */
+    private void loadMappings() {
+        loadMappings(CONFIG_FILE);
+    }
+
+    /**
+     * Load dataset mappings from specified properties file
+     */
+    private void loadMappings(String configFile) {
+        Properties props = new Properties();
+
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(configFile)) {
+            if (input == null) {
+                logger.error("Configuration file not found: {}", configFile);
+                throw new RuntimeException("Unable to find " + configFile);
+            }
+
+            props.load(input);
+
+            // Load all dataset mappings
+            for (String key : props.stringPropertyNames()) {
+                if (key.startsWith(MAPPING_PREFIX)) {
+                    String datasetId = key.substring(MAPPING_PREFIX.length());
+                    String tableName = props.getProperty(key);
+
+                    // Validate Databricks table name format
+                    if (!dialect.isValidDatabricksTableName(tableName)) {
+                        logger.error("Invalid Databricks table name format for dataset {}: {}", datasetId, tableName);
+                        throw new RuntimeException("Invalid table name format: " + tableName);
+                    }
+
+                    // Store mapping
+                    datasetToTableMapping.put(datasetId, tableName);
+
+                    // Parse and store dataset info
+                    DatasetInfo info = parseTableName(datasetId, tableName);
+                    datasetInfoMapping.put(datasetId, info);
+
+                    logger.info("Loaded mapping: {} -> {} (Catalog: {}, Schema: {}, Table: {})",
+                               datasetId, tableName, info.getCatalog(), info.getSchema(), info.getTable());
+                }
+            }
+
+            logger.info("Loaded {} dataset mappings", datasetToTableMapping.size());
+
+        } catch (IOException e) {
+            logger.error("Error loading dataset mappings", e);
+            throw new RuntimeException("Failed to load dataset mappings", e);
+        }
+    }
+
+    /**
+     * Parse table name into catalog, schema, and table components
+     */
+    private DatasetInfo parseTableName(String datasetId, String tableName) {
+        String[] parts = tableName.split("\\.");
+        if (parts.length != 3) {
+            throw new RuntimeException("Invalid Unity Catalog table name format: " + tableName);
+        }
+
+        String catalog = parts[0];
+        String schema = parts[1];
+        String table = parts[2];
+
+        // Determine dataset category based on catalog
+        DatasetCategory category = determineCategory(catalog, datasetId);
+
+        return new DatasetInfo(datasetId, catalog, schema, table, tableName, category);
+    }
+
+    /**
+     * Determine dataset category based on catalog name and dataset ID
+     */
+    private DatasetCategory determineCategory(String catalog, String datasetId) {
+        if (catalog.contains("trading")) {
+            return DatasetCategory.TRADING;
+        } else if (catalog.contains("risk")) {
+            return DatasetCategory.RISK;
+        } else if (catalog.contains("reference")) {
+            return DatasetCategory.REFERENCE;
+        } else if (catalog.contains("regulatory")) {
+            return DatasetCategory.REGULATORY;
+        } else if (catalog.contains("market")) {
+            return DatasetCategory.MARKET_DATA;
+        } else {
+            return DatasetCategory.UNKNOWN;
+        }
+    }
+
+    /**
+     * Get table name for given dataset ID
+     */
+    public String getTableName(String datasetId) {
+        return datasetToTableMapping.get(datasetId);
+    }
+
+    /**
+     * Get dataset info for given dataset ID
+     */
+    public DatasetInfo getDatasetInfo(String datasetId) {
+        return datasetInfoMapping.get(datasetId);
+    }
+
+    /**
+     * Get catalog name for given dataset ID
+     */
+    public String getCatalog(String datasetId) {
+        DatasetInfo info = datasetInfoMapping.get(datasetId);
+        return info != null ? info.getCatalog() : null;
+    }
+
+    /**
+     * Get schema name for given dataset ID
+     */
+    public String getSchema(String datasetId) {
+        DatasetInfo info = datasetInfoMapping.get(datasetId);
+        return info != null ? info.getSchema() : null;
+    }
+
+    /**
+     * Get table name (without catalog and schema) for given dataset ID
+     */
+    public String getTableOnly(String datasetId) {
+        DatasetInfo info = datasetInfoMapping.get(datasetId);
+        return info != null ? info.getTable() : null;
+    }
+
+    /**
+     * Check if dataset ID exists
+     */
+    public boolean hasDataset(String datasetId) {
+        return datasetToTableMapping.containsKey(datasetId);
+    }
+
+    /**
+     * Get all dataset IDs
+     */
+    public Set<String> getAllDatasetIds() {
+        return datasetToTableMapping.keySet();
+    }
+
+    /**
+     * Get all mappings
+     */
+    public Map<String, String> getAllMappings() {
+        return new HashMap<>(datasetToTableMapping);
+    }
+
+    /**
+     * Get all dataset info
+     */
+    public Map<String, DatasetInfo> getAllDatasetInfo() {
+        return new HashMap<>(datasetInfoMapping);
+    }
+
+    /**
+     * Get datasets by category
+     */
+    public Map<String, DatasetInfo> getDatasetsByCategory(DatasetCategory category) {
+        Map<String, DatasetInfo> result = new HashMap<>();
+        for (Map.Entry<String, DatasetInfo> entry : datasetInfoMapping.entrySet()) {
+            if (entry.getValue().getCategory() == category) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Get datasets by catalog
+     */
+    public Map<String, DatasetInfo> getDatasetsByCatalog(String catalog) {
+        Map<String, DatasetInfo> result = new HashMap<>();
+        for (Map.Entry<String, DatasetInfo> entry : datasetInfoMapping.entrySet()) {
+            if (entry.getValue().getCatalog().equals(catalog)) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Add or update a mapping programmatically
+     */
+    public void addMapping(String datasetId, String tableName) {
+        if (!dialect.isValidDatabricksTableName(tableName)) {
+            throw new IllegalArgumentException("Invalid Databricks table name format: " + tableName);
+        }
+
+        datasetToTableMapping.put(datasetId, tableName);
+        DatasetInfo info = parseTableName(datasetId, tableName);
+        datasetInfoMapping.put(datasetId, info);
+
+        logger.info("Added/Updated mapping: {} -> {}", datasetId, tableName);
+    }
+
+    /**
+     * Remove mapping
+     */
+    public void removeMapping(String datasetId) {
+        String removed = datasetToTableMapping.remove(datasetId);
+        DatasetInfo removedInfo = datasetInfoMapping.remove(datasetId);
+
+        if (removed != null) {
+            logger.info("Removed mapping: {} -> {}", datasetId, removed);
+        }
+    }
+
+    /**
+     * Validate all mappings
+     */
+    public boolean validateAllMappings() {
+        boolean allValid = true;
+
+        for (Map.Entry<String, String> entry : datasetToTableMapping.entrySet()) {
+            if (!dialect.isValidDatabricksTableName(entry.getValue())) {
+                logger.error("Invalid table name for dataset {}: {}", entry.getKey(), entry.getValue());
+                allValid = false;
+            }
+        }
+
+        return allValid;
+    }
+
+    /**
+     * Get formatted Unity Catalog table name
+     */
+    public String getFormattedTableName(String datasetId) {
+        DatasetInfo info = datasetInfoMapping.get(datasetId);
+        if (info == null) {
+            return null;
+        }
+
+        return dialect.formatUnityTableName(info.getCatalog(), info.getSchema(), info.getTable());
+    }
+
+    /**
+     * Inner class to hold dataset information
+     */
+    public static class DatasetInfo {
+        private final String datasetId;
+        private final String catalog;
+        private final String schema;
+        private final String table;
+        private final String fullTableName;
+        private final DatasetCategory category;
+
+        public DatasetInfo(String datasetId, String catalog, String schema, String table,
+                          String fullTableName, DatasetCategory category) {
+            this.datasetId = datasetId;
+            this.catalog = catalog;
+            this.schema = schema;
+            this.table = table;
+            this.fullTableName = fullTableName;
+            this.category = category;
+        }
+
+        // Getters
+        public String getDatasetId() { return datasetId; }
+        public String getCatalog() { return catalog; }
+        public String getSchema() { return schema; }
+        public String getTable() { return table; }
+        public String getFullTableName() { return fullTableName; }
+        public DatasetCategory getCategory() { return category; }
+
+        @Override
+        public String toString() {
+            return String.format("DatasetInfo{id=%s, catalog=%s, schema=%s, table=%s, category=%s}",
+                               datasetId, catalog, schema, table, category);
+        }
+    }
+
+    /**
+     * Enum for dataset categories
+     */
+    public enum DatasetCategory {
+        TRADING("Trading Data"),
+        RISK("Risk Analytics"),
+        REFERENCE("Reference Data"),
+        REGULATORY("Regulatory Reporting"),
+        MARKET_DATA("Market Data"),
+        UNKNOWN("Unknown Category");
+
+        private final String description;
+
+        DatasetCategory(String description) {
+            this.description = description;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+    }
+}
