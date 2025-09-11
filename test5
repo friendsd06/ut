@@ -2611,3 +2611,305 @@ The user specifically asked for:
 ✅ All code written in Java
 All requirements have been met and the implementation is comprehensive, production-ready, and well-documented
 Finished
+
+// DatabricksConnectionManager.java
+package com.company.spark.config;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.Map;
+
+/**
+ * Connection Manager for Databricks JDBC connections
+ * Manages connection pooling and health checks across different environments
+ */
+public class DatabricksConnectionManager {
+
+    private static final Logger logger = LoggerFactory.getLogger(DatabricksConnectionManager.class);
+
+    private static DatabricksConnectionManager instance;
+    private final Map<String, DatabricksConnectionConfig> connectionConfigs;
+    private final ScheduledExecutorService healthCheckExecutor;
+
+    // Singleton pattern for connection manager
+    private DatabricksConnectionManager() {
+        this.connectionConfigs = new ConcurrentHashMap<>();
+        this.healthCheckExecutor = Executors.newScheduledThreadPool(2);
+        initializeHealthChecks();
+    }
+
+    /**
+     * Get singleton instance
+     */
+    public static synchronized DatabricksConnectionManager getInstance() {
+        if (instance == null) {
+            instance = new DatabricksConnectionManager();
+        }
+        return instance;
+    }
+
+    /**
+     * Register configuration for an environment
+     */
+    public void registerEnvironmentConfig(String environment) {
+        try {
+            DatabricksConnectionConfig config = new DatabricksConnectionConfig(environment);
+            connectionConfigs.put(environment, config);
+            logger.info("Registered Databricks configuration for environment: {}", environment);
+        } catch (Exception e) {
+            logger.error("Failed to register configuration for environment: {}", environment, e);
+            throw new RuntimeException("Failed to register environment configuration", e);
+        }
+    }
+
+    /**
+     * Register custom configuration
+     */
+    public void registerCustomConfig(String environment, String configFile) {
+        try {
+            DatabricksConnectionConfig config = new DatabricksConnectionConfig(environment, configFile);
+            connectionConfigs.put(environment, config);
+            logger.info("Registered custom Databricks configuration for environment: {}", environment);
+        } catch (Exception e) {
+            logger.error("Failed to register custom configuration for environment: {}", environment, e);
+            throw new RuntimeException("Failed to register custom environment configuration", e);
+        }
+    }
+
+    /**
+     * Get connection for specific environment
+     */
+    public Connection getConnection(String environment) throws SQLException {
+        DatabricksConnectionConfig config = connectionConfigs.get(environment);
+        if (config == null) {
+            throw new IllegalArgumentException("No configuration found for environment: " + environment);
+        }
+
+        return config.createConnection();
+    }
+
+    /**
+     * Get connection configuration for environment
+     */
+    public DatabricksConnectionConfig getConnectionConfig(String environment) {
+        return connectionConfigs.get(environment);
+    }
+
+    /**
+     * Test connection for specific environment
+     */
+    public boolean testConnection(String environment) {
+        DatabricksConnectionConfig config = connectionConfigs.get(environment);
+        if (config == null) {
+            logger.error("No configuration found for environment: {}", environment);
+            return false;
+        }
+
+        return config.testConnection();
+    }
+
+    /**
+     * Test all registered environment connections
+     */
+    public Map<String, Boolean> testAllConnections() {
+        Map<String, Boolean> results = new ConcurrentHashMap<>();
+
+        for (String environment : connectionConfigs.keySet()) {
+            boolean isHealthy = testConnection(environment);
+            results.put(environment, isHealthy);
+            logger.info("Connection test for {}: {}", environment, isHealthy ? "PASSED" : "FAILED");
+        }
+
+        return results;
+    }
+
+    /**
+     * Initialize periodic health checks
+     */
+    private void initializeHealthChecks() {
+        // Schedule health checks every 5 minutes
+        healthCheckExecutor.scheduleAtFixedRate(() -> {
+            logger.debug("Running periodic health checks for all environments");
+
+            for (String environment : connectionConfigs.keySet()) {
+                try {
+                    boolean isHealthy = testConnection(environment);
+                    if (!isHealthy) {
+                        logger.warn("Health check failed for environment: {}", environment);
+                        // Could trigger alerts or failover logic here
+                    }
+                } catch (Exception e) {
+                    logger.error("Error during health check for environment: {}", environment, e);
+                }
+            }
+        }, 1, 5, TimeUnit.MINUTES);
+    }
+
+    /**
+     * Initialize all standard environments
+     */
+    public void initializeAllEnvironments() {
+        String[] environments = {"dev", "test", "uat", "prod"};
+
+        for (String env : environments) {
+            try {
+                registerEnvironmentConfig(env);
+                logger.info("Initialized configuration for environment: {}", env);
+            } catch (Exception e) {
+                logger.error("Failed to initialize environment: {}", env, e);
+            }
+        }
+    }
+
+    /**
+     * Get all registered environments
+     */
+    public String[] getRegisteredEnvironments() {
+        return connectionConfigs.keySet().toArray(new String[0]);
+    }
+
+    /**
+     * Remove environment configuration
+     */
+    public void removeEnvironmentConfig(String environment) {
+        DatabricksConnectionConfig removed = connectionConfigs.remove(environment);
+        if (removed != null) {
+            logger.info("Removed configuration for environment: {}", environment);
+        } else {
+            logger.warn("No configuration found to remove for environment: {}", environment);
+        }
+    }
+
+    /**
+     * Close connection safely
+     */
+    public void closeConnection(Connection connection) {
+        DatabricksConnectionConfig.closeConnection(connection);
+    }
+
+    /**
+     * Shutdown connection manager
+     */
+    public void shutdown() {
+        try {
+            healthCheckExecutor.shutdown();
+            if (!healthCheckExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                healthCheckExecutor.shutdownNow();
+            }
+            logger.info("Connection manager shutdown completed");
+        } catch (InterruptedException e) {
+            logger.error("Error during shutdown", e);
+            healthCheckExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Get connection statistics
+     */
+    public ConnectionStats getConnectionStats(String environment) {
+        DatabricksConnectionConfig config = connectionConfigs.get(environment);
+        if (config == null) {
+            return null;
+        }
+
+        boolean isHealthy = testConnection(environment);
+        return new ConnectionStats(environment, isHealthy, config.isConfigurationValid());
+    }
+
+    /**
+     * Inner class for connection statistics
+     */
+    public static class ConnectionStats {
+        private final String environment;
+        private final boolean isHealthy;
+        private final boolean isConfigValid;
+        private final long timestamp;
+
+        public ConnectionStats(String environment, boolean isHealthy, boolean isConfigValid) {
+            this.environment = environment;
+            this.isHealthy = isHealthy;
+            this.isConfigValid = isConfigValid;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        public String getEnvironment() { return environment; }
+        public boolean isHealthy() { return isHealthy; }
+        public boolean isConfigValid() { return isConfigValid; }
+        public long getTimestamp() { return timestamp; }
+
+        @Override
+        public String toString() {
+            return String.format("ConnectionStats{env=%s, healthy=%s, configValid=%s, timestamp=%d}",
+                               environment, isHealthy, isConfigValid, timestamp);
+        }
+    }
+}
+
+=================
+# databricks-dev.properties
+# Databricks JDBC Configuration for Development Environment
+# Environment: DEV
+
+# JDBC Driver Configuration
+databricks.driver.class=com.databricks.client.jdbc.Driver
+
+# Databricks SQL Data Warehouse Connection Details
+# Format: jdbc:databricks://<server-hostname>:443/default;transportMode=http;ssl=1;AuthMech=3
+databricks.jdbc.url=jdbc:databricks://adb-1234567890123456.7.azuredatabricks.net:443/default;transportMode=http;ssl=1;AuthMech=3;httpPath=/sql/1.0/warehouses/a1b2c3d4e5f6g7h8
+
+# Authentication - Personal Access Token
+# Replace with actual token from Databricks workspace
+databricks.access.token=${DATABRICKS_DEV_TOKEN}
+
+# Connection Pool Settings
+databricks.connection.timeout=30000
+databricks.socket.timeout=30000
+databricks.login.timeout=30
+
+# Retry Configuration
+databricks.max.retry=3
+databricks.retry.interval=1000
+
+# SSL Configuration
+databricks.ssl=1
+
+# User Agent for tracking
+databricks.user.agent=SparkDataProcessingService-DEV/1.0
+
+# Additional JDBC Properties
+databricks.use.native.query=1
+databricks.connection.pool.enabled=true
+databricks.connection.pool.max.size=10
+databricks.connection.pool.min.size=2
+databricks.connection.pool.max.idle.time=300000
+databricks.connection.pool.validation.query=SELECT 1
+
+# SQL Warehouse Specific Settings
+databricks.warehouse.id=a1b2c3d4e5f6g7h8
+databricks.warehouse.channel=CHANNEL_NAME_CURRENT
+databricks.warehouse.auto.stop.mins=120
+
+# Catalog and Schema Configuration
+databricks.default.catalog=dev_catalog
+databricks.default.schema=default
+
+# Query Execution Settings
+databricks.query.timeout=300
+databricks.fetch.size=1000
+databricks.max.rows=100000
+
+# Logging Configuration
+databricks.log.level=DEBUG
+databricks.log.path=/tmp/databricks-dev.log
+
+# Environment Specific Settings
+environment.name=DEV
+environment.description=Development Environment for Spark Data Processing
