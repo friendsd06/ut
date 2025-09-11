@@ -3251,3 +3251,595 @@ public class EnhancedDatasetMappingConfig {
         }
     }
 }
+
+==================
+// CompleteDataProcessingServiceImpl.java
+package com.company.spark.service.impl;
+
+import com.company.spark.config.EnhancedDatasetMappingConfig;
+import com.company.spark.config.DatabricksConnectionConfig;
+import com.company.spark.config.DatabricksConnectionManager;
+import com.company.spark.dialect.DatabricksDialect;
+import com.company.spark.exception.DataServiceException;
+import com.company.spark.service.DataProcessingService;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Map;
+import java.util.Properties;
+
+/**
+ * Complete implementation of DataProcessingService with proper dataset-to-table mapping
+ * Handles Databricks catalog-aware dataset loading and query execution
+ */
+public class CompleteDataProcessingServiceImpl implements DataProcessingService {
+
+    private static final Logger logger = LoggerFactory.getLogger(CompleteDataProcessingServiceImpl.class);
+
+    private final EnhancedDatasetMappingConfig mappingConfig;
+    private final DatabricksDialect dialect;
+    private final DatabricksConnectionManager connectionManager;
+    private final String environment;
+    private final boolean useJdbc;
+
+    /**
+     * Default constructor - uses Spark SQL and dev environment
+     */
+    public CompleteDataProcessingServiceImpl() {
+        this("dev", false);
+    }
+
+    /**
+     * Constructor with environment specification
+     */
+    public CompleteDataProcessingServiceImpl(String environment, boolean useJdbc) {
+        this.mappingConfig = new EnhancedDatasetMappingConfig();
+        this.dialect = new DatabricksDialect();
+        this.connectionManager = DatabricksConnectionManager.getInstance();
+        this.environment = environment;
+        this.useJdbc = useJdbc;
+
+        initializeEnvironment();
+    }
+
+    /**
+     * Constructor with custom mapping config
+     */
+    public CompleteDataProcessingServiceImpl(EnhancedDatasetMappingConfig mappingConfig,
+                                           String environment, boolean useJdbc) {
+        this.mappingConfig = mappingConfig;
+        this.dialect = new DatabricksDialect();
+        this.connectionManager = DatabricksConnectionManager.getInstance();
+        this.environment = environment;
+        this.useJdbc = useJdbc;
+
+        initializeEnvironment();
+    }
+
+    /**
+     * Initialize environment configuration
+     */
+    private void initializeEnvironment() {
+        try {
+            connectionManager.registerEnvironmentConfig(environment);
+            logger.info("Initialized environment configuration for: {}", environment);
+        } catch (Exception e) {
+            logger.error("Failed to initialize environment: {}", environment, e);
+            throw new RuntimeException("Failed to initialize environment configuration", e);
+        }
+    }
+
+    @Override
+    public Dataset<Row> executeQuery(SparkSession sparkSession, Map<String, Object> params) {
+        logger.info("Executing query with parameters: {} for environment: {}", params, environment);
+
+        try {
+            // Extract and validate parameters
+            String datasetId = extractParameter(params, "datasetId", String.class);
+            String cobDate = extractParameter(params, "cobDate", String.class);
+
+            validateParameters(datasetId, cobDate);
+
+            // Get dataset information from mapping
+            EnhancedDatasetMappingConfig.DatasetInfo datasetInfo = mappingConfig.getDatasetInfo(datasetId);
+            if (datasetInfo == null) {
+                throw new DataServiceException(
+                    String.format("No dataset mapping found for dataset ID: %s", datasetId)
+                );
+            }
+
+            String tableName = datasetInfo.getFullTableName();
+            logger.info("Dataset ID: {} mapped to table: {} (Catalog: {}, Schema: {}, Table: {})",
+                       datasetId, tableName, datasetInfo.getCatalog(),
+                       datasetInfo.getSchema(), datasetInfo.getTable());
+
+            // Log dataset category for analytics
+            logger.info("Processing {} dataset from {} catalog",
+                       datasetInfo.getCategory().getDescription(),
+                       datasetInfo.getCatalog());
+
+            // Build and optimize query for the specific catalog table
+            String query = buildCatalogAwareQuery(datasetInfo, cobDate, params);
+            logger.info("Executing catalog-aware SQL query: {}", query);
+
+            // Execute query based on configuration
+            Dataset<Row> resultDataset;
+            if (useJdbc) {
+                resultDataset = executeQueryViaJdbc(sparkSession, query, datasetInfo, params);
+            } else {
+                resultDataset = executeQueryViaSpark(sparkSession, query);
+            }
+
+            // Log execution details with catalog information
+            long recordCount = resultDataset.count();
+            logger.info("Query executed successfully for dataset {} from {}.{}.{}. Records returned: {}",
+                       datasetId, datasetInfo.getCatalog(), datasetInfo.getSchema(),
+                       datasetInfo.getTable(), recordCount);
+
+            return resultDataset;
+
+        } catch (Exception e) {
+            logger.error("Error executing query for dataset", e);
+            throw new DataServiceException("Failed to execute query: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Build catalog-aware optimized query using Databricks dialect
+     */
+    private String buildCatalogAwareQuery(EnhancedDatasetMappingConfig.DatasetInfo datasetInfo,
+                                        String cobDate, Map<String, Object> params) {
+        StringBuilder queryBuilder = new StringBuilder();
+
+        // Use full Unity Catalog table name
+        String fullTableName = datasetInfo.getFullTableName();
+        queryBuilder.append("SELECT * FROM ").append(fullTableName);
+
+        // Add catalog-specific optimizations based on dataset category
+        String baseQuery = queryBuilder.toString();
+        String optimizedQuery = applyDatasetCategoryOptimizations(baseQuery, datasetInfo, cobDate);
+
+        // Parse optimized query back to StringBuilder
+        queryBuilder = new StringBuilder(optimizedQuery);
+
+        // Add additional filters if present
+        if (params.containsKey("additionalFilters")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> filters = (Map<String, Object>) params.get("additionalFilters");
+
+            for (Map.Entry<String, Object> filter : filters.entrySet()) {
+                queryBuilder.append(" AND ")
+                           .append(filter.getKey())
+                           .append(" = '")
+                           .append(filter.getValue())
+                           .append("'");
+            }
+        }
+
+        // Add dataset-specific filters based on category
+        addCategorySpecificFilters(queryBuilder, datasetInfo, params);
+
+        // Add LIMIT if specified
+        if (params.containsKey("limit")) {
+            Integer limit = extractParameter(params, "limit", Integer.class);
+            if (limit != null && limit > 0) {
+                queryBuilder.append(" LIMIT ").append(limit);
+            }
+        }
+
+        String finalQuery = queryBuilder.toString();
+
+        // Apply optimization hints based on dataset characteristics
+        DatabricksDialect.QueryHintType hintType = determineOptimizationHintForDataset(datasetInfo, params);
+        finalQuery = dialect.addOptimizationHints(finalQuery, hintType);
+
+        // Add broadcast hint for reference data tables
+        if (shouldUseBroadcastHint(datasetInfo)) {
+            finalQuery = dialect.addBroadcastHint(finalQuery, datasetInfo.getTable());
+        }
+
+        return finalQuery;
+    }
+
+    /**
+     * Apply dataset category-specific optimizations
+     */
+    private String applyDatasetCategoryOptimizations(String baseQuery,
+                                                   EnhancedDatasetMappingConfig.DatasetInfo datasetInfo,
+                                                   String cobDate) {
+        String optimizedQuery = baseQuery;
+
+        switch (datasetInfo.getCategory()) {
+            case TRADING:
+                // Trading data is typically partitioned by trade_date or cob_date
+                optimizedQuery = dialect.optimizeWhereClause(baseQuery, "cob_date", cobDate);
+                logger.debug("Applied trading data optimization for dataset: {}", datasetInfo.getDatasetId());
+                break;
+
+            case RISK:
+                // Risk data might be partitioned by calculation_date or cob_date
+                optimizedQuery = dialect.optimizeWhereClause(baseQuery, "cob_date", cobDate);
+                logger.debug("Applied risk data optimization for dataset: {}", datasetInfo.getDatasetId());
+                break;
+
+            case MARKET_DATA:
+                // Market data is typically partitioned by price_date or cob_date
+                optimizedQuery = dialect.optimizeWhereClause(baseQuery, "cob_date", cobDate);
+                logger.debug("Applied market data optimization for dataset: {}", datasetInfo.getDatasetId());
+                break;
+
+            case REGULATORY:
+                // Regulatory data might be partitioned by report_date or cob_date
+                optimizedQuery = dialect.optimizeWhereClause(baseQuery, "cob_date", cobDate);
+                logger.debug("Applied regulatory data optimization for dataset: {}", datasetInfo.getDatasetId());
+                break;
+
+            case REFERENCE:
+                // Reference data might not need date partitioning but could use other filters
+                logger.debug("Processing reference data, no date partition optimization applied for dataset: {}",
+                           datasetInfo.getDatasetId());
+                break;
+
+            default:
+                // Apply standard date optimization for unknown categories
+                optimizedQuery = dialect.optimizeWhereClause(baseQuery, "cob_date", cobDate);
+                logger.debug("Applied default optimization for unknown category dataset: {}", datasetInfo.getDatasetId());
+                break;
+        }
+
+        return optimizedQuery;
+    }
+
+    /**
+     * Add category-specific filters
+     */
+    private void addCategorySpecificFilters(StringBuilder queryBuilder,
+                                          EnhancedDatasetMappingConfig.DatasetInfo datasetInfo,
+                                          Map<String, Object> params) {
+        switch (datasetInfo.getCategory()) {
+            case TRADING:
+                // Add trading-specific filters like trade_status = 'SETTLED'
+                if (params.containsKey("tradeStatus")) {
+                    String tradeStatus = extractParameter(params, "tradeStatus", String.class);
+                    queryBuilder.append(" AND trade_status = '").append(tradeStatus).append("'");
+                }
+                break;
+
+            case RISK:
+                // Add risk-specific filters like risk_type or portfolio_id
+                if (params.containsKey("riskType")) {
+                    String riskType = extractParameter(params, "riskType", String.class);
+                    queryBuilder.append(" AND risk_type = '").append(riskType).append("'");
+                }
+                break;
+
+            case MARKET_DATA:
+                // Add market data filters like source or instrument_type
+                if (params.containsKey("dataSource")) {
+                    String dataSource = extractParameter(params, "dataSource", String.class);
+                    queryBuilder.append(" AND data_source = '").append(dataSource).append("'");
+                }
+                break;
+
+            case REGULATORY:
+                // Add regulatory filters like regulation_type
+                if (params.containsKey("regulationType")) {
+                    String regulationType = extractParameter(params, "regulationType", String.class);
+                    queryBuilder.append(" AND regulation_type = '").append(regulationType).append("'");
+                }
+                break;
+
+            case REFERENCE:
+                // Reference data might filter by active status
+                if (params.containsKey("activeOnly") && (Boolean) params.get("activeOnly")) {
+                    queryBuilder.append(" AND status = 'ACTIVE'");
+                }
+                break;
+
+            default:
+                // No specific filters for unknown categories
+                break;
+        }
+    }
+
+    /**
+     * Determine optimization hint based on dataset characteristics
+     */
+    private DatabricksDialect.QueryHintType determineOptimizationHintForDataset(
+            EnhancedDatasetMappingConfig.DatasetInfo datasetInfo, Map<String, Object> params) {
+
+        // Large analytical queries benefit from OPTIMIZE hint
+        if (datasetInfo.getCategory() == EnhancedDatasetMappingConfig.DatasetCategory.RISK ||
+            datasetInfo.getCategory() == EnhancedDatasetMappingConfig.DatasetCategory.TRADING) {
+            return DatabricksDialect.QueryHintType.OPTIMIZE;
+        }
+
+        // Reference data joins benefit from MERGE hint
+        if (datasetInfo.getCategory() == EnhancedDatasetMappingConfig.DatasetCategory.REFERENCE &&
+            params.containsKey("joinQuery") && (Boolean) params.get("joinQuery")) {
+            return DatabricksDialect.QueryHintType.MERGE;
+        }
+
+        return DatabricksDialect.QueryHintType.NONE;
+    }
+
+    /**
+     * Determine if broadcast hint should be used
+     */
+    private boolean shouldUseBroadcastHint(EnhancedDatasetMappingConfig.DatasetInfo datasetInfo) {
+        // Small reference tables benefit from broadcast joins
+        return datasetInfo.getCategory() == EnhancedDatasetMappingConfig.DatasetCategory.REFERENCE;
+    }
+
+    /**
+     * Execute query via Spark SQL
+     */
+    private Dataset<Row> executeQueryViaSpark(SparkSession sparkSession, String query) {
+        logger.debug("Executing query via Spark SQL");
+        return sparkSession.sql(query);
+    }
+
+    /**
+     * Execute query via JDBC connection with catalog awareness
+     */
+    private Dataset<Row> executeQueryViaJdbc(SparkSession sparkSession, String query,
+                                           EnhancedDatasetMappingConfig.DatasetInfo datasetInfo,
+                                           Map<String, Object> params) {
+        logger.debug("Executing query via JDBC connection for catalog: {}", datasetInfo.getCatalog());
+
+        try {
+            DatabricksConnectionConfig config = connectionManager.getConnectionConfig(environment);
+            if (config == null) {
+                throw new DataServiceException("No connection configuration found for environment: " + environment);
+            }
+
+            // Create JDBC options with catalog-specific settings
+            Properties jdbcOptions = createJdbcOptions(config, datasetInfo);
+
+            // Handle partitioning for large datasets
+            if (shouldUsePartitioning(datasetInfo, params)) {
+                return executePartitionedJdbcQuery(sparkSession, query, jdbcOptions, datasetInfo, params);
+            } else {
+                return executeSimpleJdbcQuery(sparkSession, query, jdbcOptions);
+            }
+
+        } catch (Exception e) {
+            logger.error("Error executing query via JDBC for dataset: {}", datasetInfo.getDatasetId(), e);
+            throw new DataServiceException("Failed to execute query via JDBC: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Create JDBC options with catalog-specific settings
+     */
+    private Properties createJdbcOptions(DatabricksConnectionConfig config,
+                                       EnhancedDatasetMappingConfig.DatasetInfo datasetInfo) {
+        Properties jdbcOptions = new Properties();
+        jdbcOptions.setProperty("url", config.getJdbcUrl());
+        jdbcOptions.setProperty("driver", config.getProperty("databricks.driver.class"));
+        jdbcOptions.setProperty("user", "token");
+        jdbcOptions.setProperty("password", config.getProperty("databricks.access.token"));
+
+        // Set fetch size based on dataset category
+        String fetchSize = determineFetchSize(datasetInfo);
+        jdbcOptions.setProperty("fetchsize", fetchSize);
+
+        // Set catalog-specific properties
+        jdbcOptions.setProperty("catalog", datasetInfo.getCatalog());
+        jdbcOptions.setProperty("schema", datasetInfo.getSchema());
+
+        return jdbcOptions;
+    }
+
+    /**
+     * Determine appropriate fetch size based on dataset category
+     */
+    private String determineFetchSize(EnhancedDatasetMappingConfig.DatasetInfo datasetInfo) {
+        switch (datasetInfo.getCategory()) {
+            case TRADING:
+            case MARKET_DATA:
+                return "10000"; // Large fetch size for high-volume data
+            case RISK:
+                return "5000";  // Medium fetch size for analytical data
+            case REFERENCE:
+                return "1000";  // Small fetch size for reference data
+            case REGULATORY:
+                return "2000";  // Medium fetch size for regulatory data
+            default:
+                return "1000";  // Default fetch size
+        }
+    }
+
+    /**
+     * Determine if partitioning should be used
+     */
+    private boolean shouldUsePartitioning(EnhancedDatasetMappingConfig.DatasetInfo datasetInfo,
+                                        Map<String, Object> params) {
+        // Use partitioning for large datasets
+        return (datasetInfo.getCategory() == EnhancedDatasetMappingConfig.DatasetCategory.TRADING ||
+                datasetInfo.getCategory() == EnhancedDatasetMappingConfig.DatasetCategory.MARKET_DATA) &&
+               params.containsKey("partitionColumn") && params.containsKey("numPartitions");
+    }
+
+    /**
+     * Execute partitioned JDBC query
+     */
+    private Dataset<Row> executePartitionedJdbcQuery(SparkSession sparkSession, String query,
+                                                   Properties jdbcOptions,
+                                                   EnhancedDatasetMappingConfig.DatasetInfo datasetInfo,
+                                                   Map<String, Object> params) {
+        String partitionColumn = extractParameter(params, "partitionColumn", String.class);
+        Integer numPartitions = extractParameter(params, "numPartitions", Integer.class);
+
+        logger.info("Executing partitioned JDBC query for dataset {} with {} partitions on column {}",
+                   datasetInfo.getDatasetId(), numPartitions, partitionColumn);
+
+        return sparkSession.read()
+            .format("jdbc")
+            .option("url", jdbcOptions.getProperty("url"))
+            .option("query", query)
+            .option("driver", jdbcOptions.getProperty("driver"))
+            .option("user", jdbcOptions.getProperty("user"))
+            .option("password", jdbcOptions.getProperty("password"))
+            .option("partitionColumn", partitionColumn)
+            .option("numPartitions", numPartitions)
+            .option("fetchsize", jdbcOptions.getProperty("fetchsize"))
+            .load();
+    }
+
+    /**
+     * Execute simple JDBC query
+     */
+    private Dataset<Row> executeSimpleJdbcQuery(SparkSession sparkSession, String query, Properties jdbcOptions) {
+        return sparkSession.read()
+            .format("jdbc")
+            .option("url", jdbcOptions.getProperty("url"))
+            .option("query", query)
+            .option("driver", jdbcOptions.getProperty("driver"))
+            .option("user", jdbcOptions.getProperty("user"))
+            .option("password", jdbcOptions.getProperty("password"))
+            .option("fetchsize", jdbcOptions.getProperty("fetchsize"))
+            .load();
+    }
+
+    /**
+     * Get dataset information
+     */
+    public EnhancedDatasetMappingConfig.DatasetInfo getDatasetInfo(String datasetId) {
+        return mappingConfig.getDatasetInfo(datasetId);
+    }
+
+    /**
+     * Get all available datasets
+     */
+    public Map<String, EnhancedDatasetMappingConfig.DatasetInfo> getAllDatasets() {
+        return mappingConfig.getAllDatasetInfo();
+    }
+
+    /**
+     * Get datasets by category
+     */
+    public Map<String, EnhancedDatasetMappingConfig.DatasetInfo> getDatasetsByCategory(
+            EnhancedDatasetMappingConfig.DatasetCategory category) {
+        return mappingConfig.getDatasetsByCategory(category);
+    }
+
+    /**
+     * Get datasets by catalog
+     */
+    public Map<String, EnhancedDatasetMappingConfig.DatasetInfo> getDatasetsByCatalog(String catalog) {
+        return mappingConfig.getDatasetsByCatalog(catalog);
+    }
+
+    /**
+     * Test connection for current environment
+     */
+    public boolean testConnection() {
+        return connectionManager.testConnection(environment);
+    }
+
+    /**
+     * Validate dataset exists and is accessible
+     */
+    public boolean validateDataset(String datasetId) {
+        EnhancedDatasetMappingConfig.DatasetInfo datasetInfo = mappingConfig.getDatasetInfo(datasetId);
+        if (datasetInfo == null) {
+            logger.warn("Dataset not found: {}", datasetId);
+            return false;
+        }
+
+        try (Connection connection = connectionManager.getConnection(environment)) {
+            String describeQuery = dialect.generateDescribeTableQuery(datasetInfo.getFullTableName());
+
+            try (var statement = connection.createStatement();
+                 var resultSet = statement.executeQuery(describeQuery)) {
+
+                boolean hasColumns = resultSet.next();
+                logger.info("Dataset validation for '{}' ({}): {}",
+                           datasetId, datasetInfo.getFullTableName(),
+                           hasColumns ? "EXISTS" : "NOT_FOUND");
+                return hasColumns;
+            }
+
+        } catch (SQLException e) {
+            logger.error("Error validating dataset: {}", datasetId, e);
+            return false;
+        }
+    }
+
+    /**
+     * Extract parameter from map with type safety
+     */
+    @SuppressWarnings("unchecked")
+    private <T> T extractParameter(Map<String, Object> params, String key, Class<T> type) {
+        Object value = params.get(key);
+
+        if (value == null) {
+            return null;
+        }
+
+        if (!type.isInstance(value)) {
+            throw new DataServiceException(
+                String.format("Parameter '%s' is not of expected type %s", key, type.getSimpleName())
+            );
+        }
+
+        return (T) value;
+    }
+
+    /**
+     * Validate input parameters
+     */
+    private void validateParameters(String datasetId, String cobDate) {
+        if (datasetId == null || datasetId.trim().isEmpty()) {
+            throw new DataServiceException("Dataset ID is required");
+        }
+
+        if (cobDate == null || cobDate.trim().isEmpty()) {
+            throw new DataServiceException("COB date is required");
+        }
+
+        // Validate date format
+        try {
+            LocalDate.parse(cobDate, DateTimeFormatter.ISO_DATE);
+        } catch (Exception e) {
+            throw new DataServiceException(
+                "Invalid COB date format. Expected format: YYYY-MM-DD, received: " + cobDate
+            );
+        }
+    }
+
+    /**
+     * Get current environment
+     */
+    public String getEnvironment() {
+        return environment;
+    }
+
+    /**
+     * Check if using JDBC
+     */
+    public boolean isUsingJdbc() {
+        return useJdbc;
+    }
+
+    /**
+     * Get dialect instance
+     */
+    public DatabricksDialect getDialect() {
+        return dialect;
+    }
+
+    /**
+     * Get mapping configuration
+     */
+    public EnhancedDatasetMappingConfig getMappingConfig() {
+        return mappingConfig;
+    }
+}
