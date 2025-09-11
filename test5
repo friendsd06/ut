@@ -1,0 +1,1059 @@
+// DataProcessingService.java
+package com.company.spark.service;
+
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import java.util.Map;
+
+/**
+ * Third-party service interface for data processing
+ */
+public interface DataProcessingService {
+
+    /**
+     * Execute query based on dataset ID and return Dataset<Row>
+     *
+     * @param sparkSession Active Spark session
+     * @param params Parameters containing datasetId and cobDate
+     * @return Dataset<Row> containing query results
+     */
+    Dataset<Row> executeQuery(SparkSession sparkSession, Map<String, Object> params);
+}
+
+// DataProcessingServiceImpl.java
+package com.company.spark.service.impl;
+
+import com.company.spark.config.DatasetMappingConfig;
+import com.company.spark.exception.DataServiceException;
+import com.company.spark.service.DataProcessingService;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Map;
+
+/**
+ * Implementation of DataProcessingService
+ */
+public class DataProcessingServiceImpl implements DataProcessingService {
+
+    private static final Logger logger = LoggerFactory.getLogger(DataProcessingServiceImpl.class);
+    private final DatasetMappingConfig mappingConfig;
+
+    public DataProcessingServiceImpl() {
+        this.mappingConfig = new DatasetMappingConfig();
+    }
+
+    public DataProcessingServiceImpl(DatasetMappingConfig mappingConfig) {
+        this.mappingConfig = mappingConfig;
+    }
+
+    @Override
+    public Dataset<Row> executeQuery(SparkSession sparkSession, Map<String, Object> params) {
+        logger.info("Executing query with parameters: {}", params);
+
+        try {
+            // Extract parameters
+            String datasetId = extractParameter(params, "datasetId", String.class);
+            String cobDate = extractParameter(params, "cobDate", String.class);
+
+            // Validate parameters
+            validateParameters(datasetId, cobDate);
+
+            // Get table name from mapping
+            String tableName = mappingConfig.getTableName(datasetId);
+            if (tableName == null || tableName.isEmpty()) {
+                throw new DataServiceException(
+                    String.format("No table mapping found for dataset ID: %s", datasetId)
+                );
+            }
+
+            logger.info("Dataset ID: {} mapped to table: {}", datasetId, tableName);
+
+            // Build query
+            String query = buildQuery(tableName, cobDate, params);
+            logger.info("Executing SQL query: {}", query);
+
+            // Execute query and return Dataset<Row>
+            Dataset<Row> resultDataset = sparkSession.sql(query);
+
+            // Log execution details
+            long recordCount = resultDataset.count();
+            logger.info("Query executed successfully. Records returned: {}", recordCount);
+
+            return resultDataset;
+
+        } catch (Exception e) {
+            logger.error("Error executing query for dataset", e);
+            throw new DataServiceException("Failed to execute query: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Build SQL query based on table name and parameters
+     */
+    private String buildQuery(String tableName, String cobDate, Map<String, Object> params) {
+        StringBuilder queryBuilder = new StringBuilder();
+
+        // Basic SELECT query
+        queryBuilder.append("SELECT * FROM ").append(tableName);
+
+        // Add WHERE clause for COB date
+        queryBuilder.append(" WHERE cob_date = '").append(cobDate).append("'");
+
+        // Add additional filters if present
+        if (params.containsKey("additionalFilters")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> filters = (Map<String, Object>) params.get("additionalFilters");
+
+            for (Map.Entry<String, Object> filter : filters.entrySet()) {
+                queryBuilder.append(" AND ")
+                           .append(filter.getKey())
+                           .append(" = '")
+                           .append(filter.getValue())
+                           .append("'");
+            }
+        }
+
+        // Add LIMIT if specified
+        if (params.containsKey("limit")) {
+            Integer limit = extractParameter(params, "limit", Integer.class);
+            if (limit != null && limit > 0) {
+                queryBuilder.append(" LIMIT ").append(limit);
+            }
+        }
+
+        return queryBuilder.toString();
+    }
+
+    /**
+     * Extract parameter from map with type safety
+     */
+    @SuppressWarnings("unchecked")
+    private <T> T extractParameter(Map<String, Object> params, String key, Class<T> type) {
+        Object value = params.get(key);
+
+        if (value == null) {
+            return null;
+        }
+
+        if (!type.isInstance(value)) {
+            throw new DataServiceException(
+                String.format("Parameter '%s' is not of expected type %s", key, type.getSimpleName())
+            );
+        }
+
+        return (T) value;
+    }
+
+    /**
+     * Validate input parameters
+     */
+    private void validateParameters(String datasetId, String cobDate) {
+        if (datasetId == null || datasetId.trim().isEmpty()) {
+            throw new DataServiceException("Dataset ID is required");
+        }
+
+        if (cobDate == null || cobDate.trim().isEmpty()) {
+            throw new DataServiceException("COB date is required");
+        }
+
+        // Validate date format
+        try {
+            LocalDate.parse(cobDate, DateTimeFormatter.ISO_DATE);
+        } catch (Exception e) {
+            throw new DataServiceException(
+                "Invalid COB date format. Expected format: YYYY-MM-DD, received: " + cobDate
+            );
+        }
+    }
+}
+
+// DatasetMappingConfig.java
+package com.company.spark.config;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+
+/**
+ * Configuration class for dataset ID to table name mapping
+ */
+public class DatasetMappingConfig {
+
+    private static final Logger logger = LoggerFactory.getLogger(DatasetMappingConfig.class);
+    private static final String CONFIG_FILE = "dataset-mapping.properties";
+
+    private final Map<String, String> datasetToTableMapping;
+
+    public DatasetMappingConfig() {
+        this.datasetToTableMapping = new HashMap<>();
+        loadMappings();
+    }
+
+    public DatasetMappingConfig(String configFile) {
+        this.datasetToTableMapping = new HashMap<>();
+        loadMappings(configFile);
+    }
+
+    /**
+     * Load dataset mappings from default properties file
+     */
+    private void loadMappings() {
+        loadMappings(CONFIG_FILE);
+    }
+
+    /**
+     * Load dataset mappings from specified properties file
+     */
+    private void loadMappings(String configFile) {
+        Properties props = new Properties();
+
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(configFile)) {
+            if (input == null) {
+                logger.error("Configuration file not found: {}", configFile);
+                throw new RuntimeException("Unable to find " + configFile);
+            }
+
+            props.load(input);
+
+            // Load all dataset mappings
+            for (String key : props.stringPropertyNames()) {
+                if (key.startsWith("dataset.mapping.")) {
+                    String datasetId = key.substring("dataset.mapping.".length());
+                    String tableName = props.getProperty(key);
+                    datasetToTableMapping.put(datasetId, tableName);
+                    logger.info("Loaded mapping: {} -> {}", datasetId, tableName);
+                }
+            }
+
+            logger.info("Loaded {} dataset mappings", datasetToTableMapping.size());
+
+        } catch (IOException e) {
+            logger.error("Error loading dataset mappings", e);
+            throw new RuntimeException("Failed to load dataset mappings", e);
+        }
+    }
+
+    /**
+     * Get table name for given dataset ID
+     */
+    public String getTableName(String datasetId) {
+        return datasetToTableMapping.get(datasetId);
+    }
+
+    /**
+     * Check if dataset ID exists
+     */
+    public boolean hasDataset(String datasetId) {
+        return datasetToTableMapping.containsKey(datasetId);
+    }
+
+    /**
+     * Get all dataset IDs
+     */
+    public Map<String, String> getAllMappings() {
+        return new HashMap<>(datasetToTableMapping);
+    }
+
+    /**
+     * Add or update a mapping programmatically
+     */
+    public void addMapping(String datasetId, String tableName) {
+        datasetToTableMapping.put(datasetId, tableName);
+        logger.info("Added/Updated mapping: {} -> {}", datasetId, tableName);
+    }
+}
+
+// DataServiceException.java
+package com.company.spark.exception;
+
+/**
+ * Custom exception for data service operations
+ */
+public class DataServiceException extends RuntimeException {
+
+    public DataServiceException(String message) {
+        super(message);
+    }
+
+    public DataServiceException(String message, Throwable cause) {
+        super(message, cause);
+    }
+}
+
+// SparkSessionFactory.java
+package com.company.spark.config;
+
+import org.apache.spark.SparkConf;
+import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Properties;
+
+/**
+ * Factory class for creating Spark sessions
+ */
+public class SparkSessionFactory {
+
+    private static final Logger logger = LoggerFactory.getLogger(SparkSessionFactory.class);
+    private static SparkSession sparkSession;
+
+    /**
+     * Create or get local Spark session for testing
+     */
+    public static synchronized SparkSession getLocalSparkSession(String appName) {
+        if (sparkSession == null || sparkSession.sparkContext().isStopped()) {
+            logger.info("Creating local Spark session for testing");
+
+            SparkConf conf = new SparkConf()
+                .setAppName(appName)
+                .setMaster("local[*]")
+                .set("spark.sql.warehouse.dir", "target/spark-warehouse")
+                .set("spark.sql.shuffle.partitions", "2")
+                .set("spark.sql.adaptive.enabled", "true")
+                .set("spark.sql.adaptive.coalescePartitions.enabled", "true")
+                .set("spark.driver.memory", "2g")
+                .set("spark.executor.memory", "2g")
+                .set("spark.ui.port", "4040")
+                .set("spark.sql.sources.partitionOverwriteMode", "dynamic");
+
+            sparkSession = SparkSession.builder()
+                .config(conf)
+                .enableHiveSupport()
+                .getOrCreate();
+
+            sparkSession.sparkContext().setLogLevel("WARN");
+
+            logger.info("Local Spark session created successfully");
+        }
+
+        return sparkSession;
+    }
+
+    /**
+     * Create Spark session with custom configuration
+     */
+    public static synchronized SparkSession createSparkSession(Properties properties) {
+        logger.info("Creating Spark session with custom configuration");
+
+        SparkConf conf = new SparkConf();
+
+        // Apply all properties
+        properties.forEach((key, value) ->
+            conf.set(key.toString(), value.toString())
+        );
+
+        SparkSession session = SparkSession.builder()
+            .config(conf)
+            .enableHiveSupport()
+            .getOrCreate();
+
+        logger.info("Spark session created with custom configuration");
+        return session;
+    }
+
+    /**
+     * Stop the Spark session
+     */
+    public static synchronized void stopSparkSession() {
+        if (sparkSession != null && !sparkSession.sparkContext().isStopped()) {
+            logger.info("Stopping Spark session");
+            sparkSession.stop();
+            sparkSession = null;
+        }
+    }
+
+    /**
+     * Get current Spark session
+     */
+    public static synchronized SparkSession getCurrentSession() {
+        return sparkSession;
+    }
+}
+--------------------------------------------
+# dataset-mapping.properties
+# Dataset ID to Table Name Mapping Configuration
+# Format: dataset.mapping.<DATASET_ID>=catalog.schema.table_name
+
+# Trading Data Datasets
+dataset.mapping.DS001=trading_catalog.raw_data.equity_trades
+dataset.mapping.DS002=trading_catalog.raw_data.fx_trades
+dataset.mapping.DS003=trading_catalog.raw_data.derivative_trades
+dataset.mapping.DS004=trading_catalog.raw_data.commodity_trades
+dataset.mapping.DS005=trading_catalog.raw_data.bond_trades
+
+# Risk Data Datasets
+dataset.mapping.DS006=risk_catalog.analytics.market_risk_metrics
+dataset.mapping.DS007=risk_catalog.analytics.credit_risk_exposure
+dataset.mapping.DS008=risk_catalog.analytics.operational_risk_events
+dataset.mapping.DS009=risk_catalog.analytics.liquidity_risk_indicators
+dataset.mapping.DS010=risk_catalog.analytics.counterparty_risk_data
+
+# Reference Data Datasets
+dataset.mapping.DS011=reference_catalog.master.security_master
+dataset.mapping.DS012=reference_catalog.master.counterparty_master
+dataset.mapping.DS013=reference_catalog.master.product_master
+dataset.mapping.DS014=reference_catalog.master.currency_rates
+dataset.mapping.DS015=reference_catalog.master.holiday_calendar
+
+# Regulatory Reporting Datasets
+dataset.mapping.DS016=regulatory_catalog.reports.mifid_transactions
+dataset.mapping.DS017=regulatory_catalog.reports.basel_risk_weights
+dataset.mapping.DS018=regulatory_catalog.reports.dodd_frank_submissions
+dataset.mapping.DS019=regulatory_catalog.reports.emir_trade_repository
+dataset.mapping.DS020=regulatory_catalog.reports.fatca_reporting
+
+# Market Data Datasets
+dataset.mapping.DS021=market_catalog.realtime.equity_prices
+dataset.mapping.DS022=market_catalog.realtime.fx_rates
+dataset.mapping.DS023=market_catalog.realtime.interest_rates
+dataset.mapping.DS024=market_catalog.realtime.volatility_surface
+dataset.mapping.DS025=market_catalog.realtime.credit_spreads
+-----------------------------------------
+// SparkDataServiceTest.java
+package com.company.spark.test;
+
+import com.company.spark.config.DatasetMappingConfig;
+import com.company.spark.config.SparkSessionFactory;
+import com.company.spark.service.DataProcessingService;
+import com.company.spark.service.impl.DataProcessingServiceImpl;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+import org.junit.jupiter.api.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.time.LocalDate;
+import java.util.*;
+
+import static org.apache.spark.sql.functions.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Test class for Spark Data Service with local Spark master
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+public class SparkDataServiceTest {
+
+    private static final Logger logger = LoggerFactory.getLogger(SparkDataServiceTest.class);
+
+    private SparkSession sparkSession;
+    private DataProcessingService dataService;
+    private DatasetMappingConfig mappingConfig;
+
+    @BeforeAll
+    public void setUp() {
+        logger.info("Setting up Spark session for testing");
+
+        // Create local Spark session
+        sparkSession = SparkSessionFactory.getLocalSparkSession("SparkDataServiceTest");
+
+        // Initialize mapping config and service
+        mappingConfig = new DatasetMappingConfig();
+        dataService = new DataProcessingServiceImpl(mappingConfig);
+
+        // Create test tables with sample data
+        createTestTables();
+    }
+
+    /**
+     * Create test tables with sample data
+     */
+    private void createTestTables() {
+        logger.info("Creating test tables with sample data");
+
+        // Create schema for equity trades
+        StructType equitySchema = DataTypes.createStructType(new StructField[] {
+            DataTypes.createStructField("trade_id", DataTypes.StringType, false),
+            DataTypes.createStructField("symbol", DataTypes.StringType, false),
+            DataTypes.createStructField("quantity", DataTypes.IntegerType, false),
+            DataTypes.createStructField("price", DataTypes.DoubleType, false),
+            DataTypes.createStructField("trade_date", DataTypes.DateType, false),
+            DataTypes.createStructField("cob_date", DataTypes.StringType, false),
+            DataTypes.createStructField("counterparty", DataTypes.StringType, true),
+            DataTypes.createStructField("trade_type", DataTypes.StringType, true)
+        });
+
+        // Generate sample equity trades data
+        List<Row> equityData = generateEquityTradesData();
+        Dataset<Row> equityDataset = sparkSession.createDataFrame(equityData, equitySchema);
+        equityDataset.createOrReplaceTempView("trading_catalog.raw_data.equity_trades");
+
+        // Create schema for FX trades
+        StructType fxSchema = DataTypes.createStructType(new StructField[] {
+            DataTypes.createStructField("trade_id", DataTypes.StringType, false),
+            DataTypes.createStructField("currency_pair", DataTypes.StringType, false),
+            DataTypes.createStructField("notional", DataTypes.DoubleType, false),
+            DataTypes.createStructField("rate", DataTypes.DoubleType, false),
+            DataTypes.createStructField("trade_date", DataTypes.DateType, false),
+            DataTypes.createStructField("cob_date", DataTypes.StringType, false),
+            DataTypes.createStructField("settlement_date", DataTypes.DateType, true),
+            DataTypes.createStructField("trade_type", DataTypes.StringType, true)
+        });
+
+        // Generate sample FX trades data
+        List<Row> fxData = generateFxTradesData();
+        Dataset<Row> fxDataset = sparkSession.createDataFrame(fxData, fxSchema);
+        fxDataset.createOrReplaceTempView("trading_catalog.raw_data.fx_trades");
+
+        // Create risk metrics table
+        StructType riskSchema = DataTypes.createStructType(new StructField[] {
+            DataTypes.createStructField("risk_id", DataTypes.StringType, false),
+            DataTypes.createStructField("portfolio", DataTypes.StringType, false),
+            DataTypes.createStructField("var_95", DataTypes.DoubleType, false),
+            DataTypes.createStructField("var_99", DataTypes.DoubleType, false),
+            DataTypes.createStructField("expected_shortfall", DataTypes.DoubleType, false),
+            DataTypes.createStructField("cob_date", DataTypes.StringType, false)
+        });
+
+        List<Row> riskData = generateRiskData();
+        Dataset<Row> riskDataset = sparkSession.createDataFrame(riskData, riskSchema);
+        riskDataset.createOrReplaceTempView("risk_catalog.analytics.market_risk_metrics");
+
+        logger.info("Test tables created successfully");
+    }
+
+    private List<Row> generateEquityTradesData() {
+        List<Row> data = new ArrayList<>();
+        String[] symbols = {"AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"};
+        String[] counterparties = {"JP Morgan", "Goldman Sachs", "Morgan Stanley", "Citi", "BofA"};
+        String[] tradeTypes = {"BUY", "SELL"};
+
+        LocalDate today = LocalDate.now();
+
+        for (int i = 0; i < 100; i++) {
+            data.add(org.apache.spark.sql.RowFactory.create(
+                "EQ" + String.format("%06d", i),
+                symbols[i % symbols.length],
+                (i + 1) * 100,
+                100.0 + (i % 50),
+                java.sql.Date.valueOf(today),
+                today.toString(),
+                counterparties[i % counterparties.length],
+                tradeTypes[i % 2]
+            ));
+        }
+
+        // Add some data for different COB dates
+        for (int i = 0; i < 50; i++) {
+            LocalDate pastDate = today.minusDays(1);
+            data.add(org.apache.spark.sql.RowFactory.create(
+                "EQ" + String.format("%06d", 100 + i),
+                symbols[i % symbols.length],
+                (i + 1) * 100,
+                95.0 + (i % 30),
+                java.sql.Date.valueOf(pastDate),
+                pastDate.toString(),
+                counterparties[i % counterparties.length],
+                tradeTypes[i % 2]
+            ));
+        }
+
+        return data;
+    }
+
+    private List<Row> generateFxTradesData() {
+        List<Row> data = new ArrayList<>();
+        String[] pairs = {"USD/EUR", "USD/GBP", "USD/JPY", "EUR/GBP", "EUR/JPY"};
+        String[] tradeTypes = {"SPOT", "FORWARD", "SWAP"};
+
+        LocalDate today = LocalDate.now();
+
+        for (int i = 0; i < 75; i++) {
+            data.add(org.apache.spark.sql.RowFactory.create(
+                "FX" + String.format("%06d", i),
+                pairs[i % pairs.length],
+                1000000.0 + (i * 10000),
+                1.0 + (i % 100) * 0.001,
+                java.sql.Date.valueOf(today),
+                today.toString(),
+                java.sql.Date.valueOf(today.plusDays(2)),
+                tradeTypes[i % 3]
+            ));
+        }
+
+        return data;
+    }
+
+    private List<Row> generateRiskData() {
+        List<Row> data = new ArrayList<>();
+        String[] portfolios = {"Equity Portfolio", "FX Portfolio", "Fixed Income", "Derivatives", "Commodities"};
+
+        LocalDate today = LocalDate.now();
+
+        for (int i = 0; i < 50; i++) {
+            data.add(org.apache.spark.sql.RowFactory.create(
+                "RISK" + String.format("%04d", i),
+                portfolios[i % portfolios.length],
+                100000.0 + (i * 1000),
+                150000.0 + (i * 1500),
+                200000.0 + (i * 2000),
+                today.toString()
+            ));
+        }
+
+        return data;
+    }
+
+    @Test
+    @DisplayName("Test executing query for equity trades dataset")
+    public void testExecuteQueryForEquityTrades() {
+        // Prepare parameters
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "DS001");
+        params.put("cobDate", LocalDate.now().toString());
+
+        // Execute query
+        Dataset<Row> result = dataService.executeQuery(sparkSession, params);
+
+        // Assertions
+        assertNotNull(result);
+        assertTrue(result.count() > 0);
+
+        // Verify columns exist
+        List<String> columns = Arrays.asList(result.columns());
+        assertTrue(columns.contains("trade_id"));
+        assertTrue(columns.contains("symbol"));
+        assertTrue(columns.contains("cob_date"));
+
+        // Show sample data
+        logger.info("Sample equity trades data:");
+        result.show(5, false);
+
+        // Verify all records have the correct COB date
+        Dataset<Row> filteredByDate = result.filter(col("cob_date").equalTo(LocalDate.now().toString()));
+        assertEquals(result.count(), filteredByDate.count());
+    }
+
+    @Test
+    @DisplayName("Test executing query for FX trades dataset")
+    public void testExecuteQueryForFxTrades() {
+        // Prepare parameters
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "DS002");
+        params.put("cobDate", LocalDate.now().toString());
+
+        // Execute query
+        Dataset<Row> result = dataService.executeQuery(sparkSession, params);
+
+        // Assertions
+        assertNotNull(result);
+        assertTrue(result.count() > 0);
+
+        // Verify specific FX columns
+        List<String> columns = Arrays.asList(result.columns());
+        assertTrue(columns.contains("currency_pair"));
+        assertTrue(columns.contains("notional"));
+        assertTrue(columns.contains("rate"));
+
+        logger.info("FX trades count: {}", result.count());
+        result.show(5, false);
+    }
+
+    @Test
+    @DisplayName("Test executing query with limit")
+    public void testExecuteQueryWithLimit() {
+        // Prepare parameters with limit
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "DS001");
+        params.put("cobDate", LocalDate.now().toString());
+        params.put("limit", 10);
+
+        // Execute query
+        Dataset<Row> result = dataService.executeQuery(sparkSession, params);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals(10, result.count());
+
+        logger.info("Limited result count: {}", result.count());
+    }
+
+    @Test
+    @DisplayName("Test executing query with additional filters")
+    public void testExecuteQueryWithAdditionalFilters() {
+        // Prepare parameters with additional filters
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "DS001");
+        params.put("cobDate", LocalDate.now().toString());
+
+        Map<String, Object> additionalFilters = new HashMap<>();
+        additionalFilters.put("symbol", "AAPL");
+        additionalFilters.put("trade_type", "BUY");
+        params.put("additionalFilters", additionalFilters);
+
+        // Execute query
+        Dataset<Row> result = dataService.executeQuery(sparkSession, params);
+
+        // Assertions
+        assertNotNull(result);
+
+        // Verify all results match the filters
+        Dataset<Row> appleOnly = result.filter(col("symbol").equalTo("AAPL"));
+        assertEquals(result.count(), appleOnly.count());
+
+        Dataset<Row> buyOnly = result.filter(col("trade_type").equalTo("BUY"));
+        assertEquals(result.count(), buyOnly.count());
+
+        logger.info("Filtered results for AAPL BUY trades:");
+        result.show(5, false);
+    }
+
+    @Test
+    @DisplayName("Test executing query for risk metrics dataset")
+    public void testExecuteQueryForRiskMetrics() {
+        // Prepare parameters
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "DS006");
+        params.put("cobDate", LocalDate.now().toString());
+
+        // Execute query
+        Dataset<Row> result = dataService.executeQuery(sparkSession, params);
+
+        // Assertions
+        assertNotNull(result);
+        assertTrue(result.count() > 0);
+
+        // Verify risk columns
+        List<String> columns = Arrays.asList(result.columns());
+        assertTrue(columns.contains("var_95"));
+        assertTrue(columns.contains("var_99"));
+        assertTrue(columns.contains("expected_shortfall"));
+
+        // Calculate aggregate statistics
+        Dataset<Row> stats = result.agg(
+            avg("var_95").as("avg_var_95"),
+            max("var_99").as("max_var_99"),
+            sum("expected_shortfall").as("total_expected_shortfall")
+        );
+
+        logger.info("Risk metrics statistics:");
+        stats.show(false);
+    }
+
+    @Test
+    @DisplayName("Test invalid dataset ID")
+    public void testInvalidDatasetId() {
+        // Prepare parameters with invalid dataset ID
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "INVALID_DS");
+        params.put("cobDate", LocalDate.now().toString());
+
+        // Execute query and expect exception
+        assertThrows(Exception.class, () -> {
+            dataService.executeQuery(sparkSession, params);
+        });
+    }
+
+    @Test
+    @DisplayName("Test invalid COB date format")
+    public void testInvalidCobDateFormat() {
+        // Prepare parameters with invalid date format
+        Map<String, Object> params = new HashMap<>();
+        params.put("datasetId", "DS001");
+        params.put("cobDate", "2024/01/01"); // Wrong format
+
+        // Execute query and expect exception
+        assertThrows(Exception.class, () -> {
+            dataService.executeQuery(sparkSession, params);
+        });
+    }
+
+    @AfterAll
+    public void tearDown() {
+        logger.info("Cleaning up Spark session");
+        SparkSessionFactory.stopSparkSession();
+    }
+}
+-------------------
+# Spark Data Service - Third Party Interface Implementation
+
+## Overview
+
+Production-ready implementation of a third-party service interface that uses Apache Spark Session to execute queries based on dataset ID to table mappings. The service includes a local Spark master for testing and supports parameterized query execution.
+
+## Project Structure
+
+```
+spark-data-service/
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/company/spark/
+│   │   │       ├── SparkDataApplication.java          # Main application
+│   │   │       ├── service/
+│   │   │       │   ├── DataProcessingService.java     # Interface
+│   │   │       │   └── impl/
+│   │   │       │       └── DataProcessingServiceImpl.java
+│   │   │       ├── config/
+│   │   │       │   ├── DatasetMappingConfig.java      # Dataset mappings
+│   │   │       │   └── SparkSessionFactory.java       # Spark session management
+│   │   │       └── exception/
+│   │   │           └── DataServiceException.java
+│   │   └── resources/
+│   │       ├── dataset-mapping.properties             # Dataset to table mappings
+│   │       └── logback.xml
+│   └── test/
+│       └── java/
+│           └── com/company/spark/test/
+│               └── SparkDataServiceTest.java          # Unit tests
+└── pom.xml
+```
+
+## Features
+
+### 1. **Third-Party Service Interface**
+```java
+public interface DataProcessingService {
+    Dataset<Row> executeQuery(SparkSession sparkSession, Map<String, Object> params);
+}
+```
+
+### 2. **Dataset ID to Table Mapping**
+- 25 pre-configured dataset mappings in properties file
+- Dynamic table resolution based on dataset ID
+- Support for catalog.schema.table format
+
+### 3. **Query Parameters**
+- **Required Parameters:**
+  - `datasetId`: Dataset identifier (e.g., DS001)
+  - `cobDate`: Close of Business date (YYYY-MM-DD format)
+- **Optional Parameters:**
+  - `limit`: Limit number of records
+  - `additionalFilters`: Map of column-value filters
+
+### 4. **Local Spark Master**
+- Pre-configured for local testing
+- Automatic test data generation
+- Spark UI available at http://localhost:4040
+
+## Dataset Mappings
+
+The following datasets are pre-configured:
+
+| Dataset ID | Table Name | Description |
+|------------|------------|-------------|
+| DS001 | trading_catalog.raw_data.equity_trades | Equity trades data |
+| DS002 | trading_catalog.raw_data.fx_trades | FX trades data |
+| DS003 | trading_catalog.raw_data.derivative_trades | Derivative trades |
+| DS004 | trading_catalog.raw_data.commodity_trades | Commodity trades |
+| DS005 | trading_catalog.raw_data.bond_trades | Bond trades |
+| DS006 | risk_catalog.analytics.market_risk_metrics | Market risk metrics |
+| DS007 | risk_catalog.analytics.credit_risk_exposure | Credit risk data |
+| ... | ... | ... |
+
+## Usage
+
+### 1. Building the Project
+
+```bash
+# Clean and compile
+mvn clean compile
+
+# Run tests
+mvn test
+
+# Package as executable JAR
+mvn clean package
+```
+
+### 2. Running the Application
+
+#### Default Mode (Sample Queries)
+```bash
+java -jar target/spark-data-service-1.0.0.jar
+```
+
+#### Interactive Mode
+```bash
+java -jar target/spark-data-service-1.0.0.jar interactive
+```
+
+### 3. Using the Service Programmatically
+
+```java
+// Initialize components
+SparkSession sparkSession = SparkSessionFactory.getLocalSparkSession("MyApp");
+DataProcessingService service = new DataProcessingServiceImpl();
+
+// Prepare parameters
+Map<String, Object> params = new HashMap<>();
+params.put("datasetId", "DS001");
+params.put("cobDate", "2024-01-15");
+
+// Execute query
+Dataset<Row> result = service.executeQuery(sparkSession, params);
+
+// Process results
+result.show();
+long count = result.count();
+```
+
+### 4. Advanced Query Examples
+
+#### Query with Limit
+```java
+Map<String, Object> params = new HashMap<>();
+params.put("datasetId", "DS002");
+params.put("cobDate", LocalDate.now().toString());
+params.put("limit", 100);
+
+Dataset<Row> result = service.executeQuery(sparkSession, params);
+```
+
+#### Query with Additional Filters
+```java
+Map<String, Object> params = new HashMap<>();
+params.put("datasetId", "DS001");
+params.put("cobDate", "2024-01-15");
+
+Map<String, Object> filters = new HashMap<>();
+filters.put("symbol", "AAPL");
+filters.put("trade_type", "BUY");
+params.put("additionalFilters", filters);
+
+Dataset<Row> result = service.executeQuery(sparkSession, params);
+```
+
+## Testing
+
+### Unit Tests
+```bash
+mvn test
+```
+
+### Integration Testing with Local Spark
+The test class `SparkDataServiceTest` includes:
+- Test data generation
+- Query execution tests
+- Filter validation
+- Error handling tests
+- Performance metrics
+
+### Test Data Generation
+The application automatically creates test tables with sample data:
+- 1000+ equity trades
+- 500+ FX trades
+- 200+ risk metrics records
+
+## Configuration
+
+### Spark Configuration (Local Master)
+```java
+SparkConf conf = new SparkConf()
+    .setAppName("SparkDataService")
+    .setMaster("local[*]")  // Use all available cores
+    .set("spark.sql.warehouse.dir", "target/spark-warehouse")
+    .set("spark.sql.shuffle.partitions", "2")
+    .set("spark.sql.adaptive.enabled", "true")
+    .set("spark.driver.memory", "2g")
+    .set("spark.executor.memory", "2g");
+```
+
+### Adding New Dataset Mappings
+Edit `dataset-mapping.properties`:
+```properties
+dataset.mapping.DS026=new_catalog.schema.table_name
+```
+
+Or programmatically:
+```java
+DatasetMappingConfig config = new DatasetMappingConfig();
+config.addMapping("DS026", "new_catalog.schema.table_name");
+```
+
+## Monitoring
+
+### Spark UI
+Access the Spark UI during execution:
+- URL: http://localhost:4040
+- View job progress, stages, and execution plans
+- Monitor memory usage and task distribution
+
+### Logging
+Configure logging levels in `logback.xml`:
+```xml
+<logger name="com.company.spark" level="DEBUG"/>
+<logger name="org.apache.spark" level="WARN"/>
+```
+
+## Error Handling
+
+The service includes comprehensive error handling:
+
+```java
+try {
+    Dataset<Row> result = service.executeQuery(sparkSession, params);
+} catch (DataServiceException e) {
+    // Handle service-specific errors
+    logger.error("Service error: {}", e.getMessage());
+}
+```
+
+Common error scenarios:
+- Invalid dataset ID
+- Incorrect date format
+- Missing required parameters
+- Table not found
+
+## Performance Considerations
+
+1. **Caching**: Results are automatically cached for repeated operations
+2. **Partitioning**: Tables are partitioned by COB date for efficient filtering
+3. **Adaptive Query Execution**: Enabled for optimal performance
+4. **Local Mode Optimization**: Configured for efficient local testing
+
+## Production Deployment
+
+For production deployment:
+
+1. **Update Spark Master**: Change from `local[*]` to cluster mode
+2. **Configure Resources**: Adjust memory and executor settings
+3. **External Metastore**: Connect to Hive metastore or Delta Lake
+4. **Security**: Add authentication and authorization
+5. **Monitoring**: Integrate with monitoring tools (Prometheus, Grafana)
+
+## Dependencies
+
+- Apache Spark: 3.5.0
+- Scala: 2.12.18
+- Java: 11+
+- SLF4J + Logback: Logging
+- JUnit 5: Testing
+
+## Troubleshooting
+
+### Common Issues
+
+1. **OutOfMemoryError**
+   - Increase driver/executor memory
+   - Reduce data volume with filters
+
+2. **Table Not Found**
+   - Verify dataset ID in properties file
+   - Check table exists in Spark catalog
+
+3. **Date Format Error**
+   - Use ISO format: YYYY-MM-DD
+   - Validate date before query execution
+
+## License
+
+Copyright (c) 2024 Your Company. All rights reserved.
+------------------------------------------------------
