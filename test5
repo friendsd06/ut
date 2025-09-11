@@ -3843,3 +3843,455 @@ public class CompleteDataProcessingServiceImpl implements DataProcessingService 
         return mappingConfig;
     }
 }
+------------------
+// DatasetLoadingTest.java
+package com.company.spark.test;
+
+import com.company.spark.config.EnhancedDatasetMappingConfig;
+import com.company.spark.service.impl.CompleteDataProcessingServiceImpl;
+import com.company.spark.config.SparkSessionFactory;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Test class demonstrating proper dataset loading from Databricks catalogs
+ * Shows how dataset IDs map to specific tables in Unity Catalog
+ */
+public class DatasetLoadingTest {
+
+    private static final Logger logger = LoggerFactory.getLogger(DatasetLoadingTest.class);
+
+    public static void main(String[] args) {
+        DatasetLoadingTest test = new DatasetLoadingTest();
+        test.runDatasetLoadingTests();
+    }
+
+    /**
+     * Run comprehensive dataset loading tests
+     */
+    public void runDatasetLoadingTests() {
+        logger.info("Starting Dataset Loading Tests");
+
+        // Test dataset mapping configuration
+        testDatasetMappingConfiguration();
+
+        // Test dataset loading by category
+        testDatasetLoadingByCategory();
+
+        // Test specific dataset loading scenarios
+        testSpecificDatasetLoading();
+
+        // Test query execution with different datasets
+        testQueryExecutionWithDatasets();
+
+        logger.info("Completed Dataset Loading Tests");
+    }
+
+    /**
+     * Test dataset mapping configuration
+     */
+    public void testDatasetMappingConfiguration() {
+        logger.info("=== Testing Dataset Mapping Configuration ===");
+
+        EnhancedDatasetMappingConfig config = new EnhancedDatasetMappingConfig();
+
+        // Test all dataset mappings
+        Map<String, String> allMappings = config.getAllMappings();
+        logger.info("Total datasets configured: {}", allMappings.size());
+
+        // Display all dataset mappings
+        for (Map.Entry<String, String> entry : allMappings.entrySet()) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = config.getDatasetInfo(entry.getKey());
+            logger.info("Dataset {} -> {} (Category: {}, Catalog: {})",
+                       entry.getKey(), entry.getValue(),
+                       info.getCategory().getDescription(),
+                       info.getCatalog());
+        }
+
+        // Test specific dataset lookups
+        testSpecificDatasetLookups(config);
+    }
+
+    /**
+     * Test specific dataset lookups
+     */
+    private void testSpecificDatasetLookups(EnhancedDatasetMappingConfig config) {
+        logger.info("--- Testing Specific Dataset Lookups ---");
+
+        // Test trading datasets
+        String[] tradingDatasets = {"DS001", "DS002", "DS003", "DS004", "DS005"};
+        for (String datasetId : tradingDatasets) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = config.getDatasetInfo(datasetId);
+            logger.info("Trading Dataset {}: {} -> {}.{}.{}",
+                       datasetId, info.getCategory().getDescription(),
+                       info.getCatalog(), info.getSchema(), info.getTable());
+        }
+
+        // Test risk datasets
+        String[] riskDatasets = {"DS006", "DS007", "DS008", "DS009", "DS010"};
+        for (String datasetId : riskDatasets) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = config.getDatasetInfo(datasetId);
+            logger.info("Risk Dataset {}: {} -> {}.{}.{}",
+                       datasetId, info.getCategory().getDescription(),
+                       info.getCatalog(), info.getSchema(), info.getTable());
+        }
+
+        // Test reference datasets
+        String[] referenceDatasets = {"DS011", "DS012", "DS013", "DS014", "DS015"};
+        for (String datasetId : referenceDatasets) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = config.getDatasetInfo(datasetId);
+            logger.info("Reference Dataset {}: {} -> {}.{}.{}",
+                       datasetId, info.getCategory().getDescription(),
+                       info.getCatalog(), info.getSchema(), info.getTable());
+        }
+    }
+
+    /**
+     * Test dataset loading by category
+     */
+    public void testDatasetLoadingByCategory() {
+        logger.info("=== Testing Dataset Loading by Category ===");
+
+        EnhancedDatasetMappingConfig config = new EnhancedDatasetMappingConfig();
+
+        // Test each category
+        for (EnhancedDatasetMappingConfig.DatasetCategory category :
+             EnhancedDatasetMappingConfig.DatasetCategory.values()) {
+
+            if (category == EnhancedDatasetMappingConfig.DatasetCategory.UNKNOWN) {
+                continue; // Skip unknown category
+            }
+
+            Map<String, EnhancedDatasetMappingConfig.DatasetInfo> datasets =
+                config.getDatasetsByCategory(category);
+
+            logger.info("--- {} Category: {} datasets ---",
+                       category.getDescription(), datasets.size());
+
+            for (Map.Entry<String, EnhancedDatasetMappingConfig.DatasetInfo> entry : datasets.entrySet()) {
+                EnhancedDatasetMappingConfig.DatasetInfo info = entry.getValue();
+                logger.info("  {} -> {}.{}.{}",
+                           entry.getKey(), info.getCatalog(), info.getSchema(), info.getTable());
+            }
+        }
+    }
+
+    /**
+     * Test specific dataset loading scenarios
+     */
+    public void testSpecificDatasetLoading() {
+        logger.info("=== Testing Specific Dataset Loading Scenarios ===");
+
+        CompleteDataProcessingServiceImpl service = new CompleteDataProcessingServiceImpl("dev", false);
+
+        // Test different types of datasets
+        testTradingDatasetLoading(service);
+        testRiskDatasetLoading(service);
+        testReferenceDatasetLoading(service);
+        testMarketDatasetLoading(service);
+        testRegulatoryDatasetLoading(service);
+    }
+
+    /**
+     * Test trading dataset loading
+     */
+    private void testTradingDatasetLoading(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Trading Dataset Loading ---");
+
+        // Test equity trades dataset (DS001)
+        EnhancedDatasetMappingConfig.DatasetInfo equityInfo = service.getDatasetInfo("DS001");
+        logger.info("Equity Trades Dataset: {} -> {}",
+                   equityInfo.getDatasetId(), equityInfo.getFullTableName());
+        logger.info("  Catalog: {}, Schema: {}, Table: {}",
+                   equityInfo.getCatalog(), equityInfo.getSchema(), equityInfo.getTable());
+
+        // Test FX trades dataset (DS002)
+        EnhancedDatasetMappingConfig.DatasetInfo fxInfo = service.getDatasetInfo("DS002");
+        logger.info("FX Trades Dataset: {} -> {}",
+                   fxInfo.getDatasetId(), fxInfo.getFullTableName());
+        logger.info("  Catalog: {}, Schema: {}, Table: {}",
+                   fxInfo.getCatalog(), fxInfo.getSchema(), fxInfo.getTable());
+    }
+
+    /**
+     * Test risk dataset loading
+     */
+    private void testRiskDatasetLoading(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Risk Dataset Loading ---");
+
+        // Test market risk metrics dataset (DS006)
+        EnhancedDatasetMappingConfig.DatasetInfo riskInfo = service.getDatasetInfo("DS006");
+        logger.info("Market Risk Dataset: {} -> {}",
+                   riskInfo.getDatasetId(), riskInfo.getFullTableName());
+        logger.info("  Catalog: {}, Schema: {}, Table: {}",
+                   riskInfo.getCatalog(), riskInfo.getSchema(), riskInfo.getTable());
+    }
+
+    /**
+     * Test reference dataset loading
+     */
+    private void testReferenceDatasetLoading(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Reference Dataset Loading ---");
+
+        // Test security master dataset (DS011)
+        EnhancedDatasetMappingConfig.DatasetInfo securityInfo = service.getDatasetInfo("DS011");
+        logger.info("Security Master Dataset: {} -> {}",
+                   securityInfo.getDatasetId(), securityInfo.getFullTableName());
+        logger.info("  Catalog: {}, Schema: {}, Table: {}",
+                   securityInfo.getCatalog(), securityInfo.getSchema(), securityInfo.getTable());
+    }
+
+    /**
+     * Test market dataset loading
+     */
+    private void testMarketDatasetLoading(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Market Dataset Loading ---");
+
+        // Test equity prices dataset (DS021)
+        EnhancedDatasetMappingConfig.DatasetInfo marketInfo = service.getDatasetInfo("DS021");
+        logger.info("Equity Prices Dataset: {} -> {}",
+                   marketInfo.getDatasetId(), marketInfo.getFullTableName());
+        logger.info("  Catalog: {}, Schema: {}, Table: {}",
+                   marketInfo.getCatalog(), marketInfo.getSchema(), marketInfo.getTable());
+    }
+
+    /**
+     * Test regulatory dataset loading
+     */
+    private void testRegulatoryDatasetLoading(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Regulatory Dataset Loading ---");
+
+        // Test MiFID transactions dataset (DS016)
+        EnhancedDatasetMappingConfig.DatasetInfo regulatoryInfo = service.getDatasetInfo("DS016");
+        logger.info("MiFID Transactions Dataset: {} -> {}",
+                   regulatoryInfo.getDatasetId(), regulatoryInfo.getFullTableName());
+        logger.info("  Catalog: {}, Schema: {}, Table: {}",
+                   regulatoryInfo.getCatalog(), regulatoryInfo.getSchema(), regulatoryInfo.getTable());
+    }
+
+    /**
+     * Test query execution with different datasets
+     */
+    public void testQueryExecutionWithDatasets() {
+        logger.info("=== Testing Query Execution with Datasets ===");
+
+        // Get local Spark session for testing
+        SparkSession sparkSession = SparkSessionFactory.getLocalSparkSession("DatasetLoadingTest");
+        CompleteDataProcessingServiceImpl service = new CompleteDataProcessingServiceImpl("dev", false);
+
+        // Test different dataset queries
+        testEquityTradesQuery(sparkSession, service);
+        testRiskMetricsQuery(sparkSession, service);
+        testSecurityMasterQuery(sparkSession, service);
+        testMarketDataQuery(sparkSession, service);
+
+        // Clean up
+        SparkSessionFactory.stopSparkSession();
+    }
+
+    /**
+     * Test equity trades query
+     */
+    private void testEquityTradesQuery(SparkSession sparkSession, CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Equity Trades Query (DS001) ---");
+
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("datasetId", "DS001");  // Equity trades
+            params.put("cobDate", "2023-09-11");
+            params.put("tradeStatus", "SETTLED");
+            params.put("limit", 100);
+
+            // This would normally execute against Databricks
+            // For testing, we're just showing the parameter processing
+            EnhancedDatasetMappingConfig.DatasetInfo info = service.getDatasetInfo("DS001");
+            logger.info("Would execute query against: {}", info.getFullTableName());
+            logger.info("Query parameters: {}", params);
+            logger.info("Expected table: trading_catalog.raw_data.equity_trades");
+
+            // Dataset<Row> result = service.executeQuery(sparkSession, params);
+            // logger.info("Query executed successfully for DS001");
+
+        } catch (Exception e) {
+            logger.error("Error testing equity trades query", e);
+        }
+    }
+
+    /**
+     * Test risk metrics query
+     */
+    private void testRiskMetricsQuery(SparkSession sparkSession, CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Risk Metrics Query (DS006) ---");
+
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("datasetId", "DS006");  // Market risk metrics
+            params.put("cobDate", "2023-09-11");
+            params.put("riskType", "MARKET");
+            params.put("analyticalQuery", true);
+            params.put("limit", 500);
+
+            EnhancedDatasetMappingConfig.DatasetInfo info = service.getDatasetInfo("DS006");
+            logger.info("Would execute query against: {}", info.getFullTableName());
+            logger.info("Query parameters: {}", params);
+            logger.info("Expected table: risk_catalog.analytics.market_risk_metrics");
+
+        } catch (Exception e) {
+            logger.error("Error testing risk metrics query", e);
+        }
+    }
+
+    /**
+     * Test security master query
+     */
+    private void testSecurityMasterQuery(SparkSession sparkSession, CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Security Master Query (DS011) ---");
+
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("datasetId", "DS011");  // Security master
+            params.put("cobDate", "2023-09-11");
+            params.put("activeOnly", true);
+            params.put("limit", 1000);
+
+            EnhancedDatasetMappingConfig.DatasetInfo info = service.getDatasetInfo("DS011");
+            logger.info("Would execute query against: {}", info.getFullTableName());
+            logger.info("Query parameters: {}", params);
+            logger.info("Expected table: reference_catalog.master.security_master");
+
+        } catch (Exception e) {
+            logger.error("Error testing security master query", e);
+        }
+    }
+
+    /**
+     * Test market data query
+     */
+    private void testMarketDataQuery(SparkSession sparkSession, CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Testing Market Data Query (DS021) ---");
+
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("datasetId", "DS021");  // Equity prices
+            params.put("cobDate", "2023-09-11");
+            params.put("dataSource", "BLOOMBERG");
+            params.put("partitionColumn", "price_date");
+            params.put("numPartitions", 10);
+            params.put("limit", 10000);
+
+            EnhancedDatasetMappingConfig.DatasetInfo info = service.getDatasetInfo("DS021");
+            logger.info("Would execute query against: {}", info.getFullTableName());
+            logger.info("Query parameters: {}", params);
+            logger.info("Expected table: market_catalog.realtime.equity_prices");
+
+        } catch (Exception e) {
+            logger.error("Error testing market data query", e);
+        }
+    }
+
+    /**
+     * Demonstrate catalog-specific queries
+     */
+    public void demonstrateCatalogSpecificQueries() {
+        logger.info("=== Demonstrating Catalog-Specific Queries ===");
+
+        CompleteDataProcessingServiceImpl service = new CompleteDataProcessingServiceImpl("prod", true);
+
+        // Show how different catalogs are accessed
+        showTradingCatalogAccess(service);
+        showRiskCatalogAccess(service);
+        showReferenceCatalogAccess(service);
+        showMarketCatalogAccess(service);
+        showRegulatoryCatalogAccess(service);
+    }
+
+    /**
+     * Show trading catalog access
+     */
+    private void showTradingCatalogAccess(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Trading Catalog Access ---");
+
+        Map<String, EnhancedDatasetMappingConfig.DatasetInfo> tradingDatasets =
+            service.getDatasetsByCatalog("trading_catalog");
+
+        logger.info("Trading Catalog contains {} datasets:", tradingDatasets.size());
+        for (Map.Entry<String, EnhancedDatasetMappingConfig.DatasetInfo> entry : tradingDatasets.entrySet()) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = entry.getValue();
+            logger.info("  {} -> {}.{}.{}",
+                       entry.getKey(), info.getCatalog(), info.getSchema(), info.getTable());
+        }
+    }
+
+    /**
+     * Show risk catalog access
+     */
+    private void showRiskCatalogAccess(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Risk Catalog Access ---");
+
+        Map<String, EnhancedDatasetMappingConfig.DatasetInfo> riskDatasets =
+            service.getDatasetsByCatalog("risk_catalog");
+
+        logger.info("Risk Catalog contains {} datasets:", riskDatasets.size());
+        for (Map.Entry<String, EnhancedDatasetMappingConfig.DatasetInfo> entry : riskDatasets.entrySet()) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = entry.getValue();
+            logger.info("  {} -> {}.{}.{}",
+                       entry.getKey(), info.getCatalog(), info.getSchema(), info.getTable());
+        }
+    }
+
+    /**
+     * Show reference catalog access
+     */
+    private void showReferenceCatalogAccess(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Reference Catalog Access ---");
+
+        Map<String, EnhancedDatasetMappingConfig.DatasetInfo> referenceDatasets =
+            service.getDatasetsByCatalog("reference_catalog");
+
+        logger.info("Reference Catalog contains {} datasets:", referenceDatasets.size());
+        for (Map.Entry<String, EnhancedDatasetMappingConfig.DatasetInfo> entry : referenceDatasets.entrySet()) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = entry.getValue();
+            logger.info("  {} -> {}.{}.{}",
+                       entry.getKey(), info.getCatalog(), info.getSchema(), info.getTable());
+        }
+    }
+
+    /**
+     * Show market catalog access
+     */
+    private void showMarketCatalogAccess(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Market Catalog Access ---");
+
+        Map<String, EnhancedDatasetMappingConfig.DatasetInfo> marketDatasets =
+            service.getDatasetsByCatalog("market_catalog");
+
+        logger.info("Market Catalog contains {} datasets:", marketDatasets.size());
+        for (Map.Entry<String, EnhancedDatasetMappingConfig.DatasetInfo> entry : marketDatasets.entrySet()) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = entry.getValue();
+            logger.info("  {} -> {}.{}.{}",
+                       entry.getKey(), info.getCatalog(), info.getSchema(), info.getTable());
+        }
+    }
+
+    /**
+     * Show regulatory catalog access
+     */
+    private void showRegulatoryCatalogAccess(CompleteDataProcessingServiceImpl service) {
+        logger.info("--- Regulatory Catalog Access ---");
+
+        Map<String, EnhancedDatasetMappingConfig.DatasetInfo> regulatoryDatasets =
+            service.getDatasetsByCatalog("regulatory_catalog");
+
+        logger.info("Regulatory Catalog contains {} datasets:", regulatoryDatasets.size());
+        for (Map.Entry<String, EnhancedDatasetMappingConfig.DatasetInfo> entry : regulatoryDatasets.entrySet()) {
+            EnhancedDatasetMappingConfig.DatasetInfo info = entry.getValue();
+            logger.info("  {} -> {}.{}.{}",
+                       entry.getKey(), info.getCatalog(), info.getSchema(), info.getTable());
+        }
+    }
+}
