@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Terminal - Enterprise Command Center</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Roboto', 'Helvetica', sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Enhanced Status Bar */
+        .status-bar {
+            background: linear-gradient(135deg, #1e2740 0%, #2d3561 100%);
+            padding: 15px 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #00ff88;
+            box-shadow: 0 4px 20px rgba(0, 255, 136, 0.3);
+        }
+
+        .status-left, .status-right {
+            display: flex;
+            gap: 25px;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            padding: 8px 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .status-item:hover {
+            background: rgba(0, 255, 136, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff88;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.6;
+                transform: scale(1.2);
+            }
+        }
+
+        .status-value {
+            color: #00ff88;
+            font-weight: bold;
+        }
+
+        /* AI Model Selector */
+        .model-selector {
+            position: relative;
+        }
+
+        .model-dropdown {
+            background: #0f1429;
+            border: 1px solid #2d3561;
+            color: #e0e0e0;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+
+        .model-dropdown:hover {
+            border-color: #00ff88;
+        }
+
+        .metrics-bar {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px 25px;
+            display: flex;
+            gap: 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .metric {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .metric-label {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .metric-chart {
+            height: 20px;
+            background: rgba(0, 255, 136, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .metric-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff88, #00dd77);
+            transition: width 0.5s;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Enhanced Chat Window */
+        .chat-window {
+            flex: 2.5;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #2d3561;
+            background: #0f1429;
+            position: relative;
+        }
+
+        /* Agent Manager Panel */
+        .agent-panel {
+            background: linear-gradient(135deg, #1a1f3a, #1e2740);
+            border-bottom: 2px solid #2d3561;
+            padding: 15px 20px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            overflow-x: auto;
+        }
+
+        .agent-panel::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .agent-panel::-webkit-scrollbar-track {
+            background: #1a1f3a;
+        }
+
+        .agent-panel::-webkit-scrollbar-thumb {
+            background: #2d3561;
+            border-radius: 3px;
+        }
+
+        .agent-card {
+            background: linear-gradient(135deg, #2d3561, #3d4571);
+            border: 2px solid #3d4571;
+            border-radius: 8px;
+            padding: 10px 15px;
+            min-width: 160px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .agent-card.active {
+            border-color: #00ff88;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+        }
+
+        .agent-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .agent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .agent-name {
+            font-weight: bold;
+            font-size: 12px;
+            color: #00ff88;
+        }
+
+        .agent-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00ff88;
+        }
+
+        .agent-status.idle {
+            background: #666;
+        }
+
+        .agent-status.working {
+            background: #ffa500;
+            animation: pulse 1s infinite;
+        }
+
+        .agent-task {
+            font-size: 10px;
+            color: #888;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .add-agent-btn {
+            background: transparent;
+            border: 2px dashed #3d4571;
+            border-radius: 8px;
+            padding: 10px 20px;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 13px;
+            min-width: 120px;
+            text-align: center;
+        }
+
+        .add-agent-btn:hover {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 25px;
+            scroll-behavior: smooth;
+        }
+
+        .messages-container::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .messages-container::-webkit-scrollbar-track {
+            background: #1a1f3a;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #00ff88, #00dd77);
+            border-radius: 5px;
+        }
+
+        .message {
+            margin-bottom: 25px;
+            animation: slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .user-avatar {
+            background: linear-gradient(135deg, #4a90e2, #357abd);
+            color: white;
+        }
+
+        .bot-avatar {
+            background: linear-gradient(135deg, #00ff88, #00dd77);
+            color: #0a0e27;
+            animation: robotPulse 3s infinite;
+        }
+
+        @keyframes robotPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .message-sender {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #666;
+            margin-left: auto;
+        }
+
+        .message-bubble {
+            padding: 16px 20px;
+            border-radius: 12px;
+            max-width: 90%;
+            word-wrap: break-word;
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .message-bubble:hover {
+            transform: translateX(5px);
+        }
+
+        .user-message .message-bubble {
+            background: linear-gradient(135deg, #2d3561, #3d4571);
+            border-left: 4px solid #4a90e2;
+            margin-left: 52px;
+            box-shadow: 0 4px 15px rgba(74, 144, 226, 0.2);
+        }
+
+        .bot-message .message-bubble {
+            background: linear-gradient(135deg, #1a2f1a, #2a4f2a);
+            border-left: 4px solid #00ff88;
+            margin-left: 52px;
+            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.2);
+        }
+
+        .error-bubble {
+            background: linear-gradient(135deg, #3a1e1e, #4a2e2e) !important;
+            border-left: 4px solid #ff4444 !important;
+            cursor: pointer;
+        }
+
+        .error-bubble:hover {
+            border-left-color: #ff6666 !important;
+        }
+
+        .error-explain-btn {
+            margin-top: 10px;
+            background: rgba(255, 68, 68, 0.2);
+            border: 1px solid #ff4444;
+            color: #ff6666;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s;
+        }
+
+        .error-explain-btn:hover {
+            background: rgba(255, 68, 68, 0.3);
+        }
+
+        .message-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            margin-left: 52px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            background: rgba(45, 53, 97, 0.5);
+            border: 1px solid #2d3561;
+            color: #888;
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+
+        .action-btn:hover {
+            border-color: #00ff88;
+            color: #00ff88;
+            background: rgba(0, 255, 136, 0.1);
+            transform: translateY(-2px);
+        }
+
+        code {
+            background: rgba(0, 255, 136, 0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #00ff88;
+            font-size: 13px;
+            font-family: 'Consolas', monospace;
+        }
+
+        pre {
+            background: #0a0e27;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid #2d3561;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .command-block {
+            background: #0a0e27;
+            border: 1px solid #2d3561;
+            border-left: 4px solid #00ff88;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-family: 'Consolas', monospace;
+            position: relative;
+        }
+
+        .command-block:hover .quick-run {
+            opacity: 1;
+        }
+
+        .quick-run {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #00ff88;
+            color: #0a0e27;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            opacity: 0;
+            transition: all 0.3s;
+        }
+
+        .quick-run:hover {
+            background: #00dd77;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            margin: 15px 0;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            height: 25px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff88, #00dd77, #00ff88);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #0a0e27;
+            font-weight: bold;
+            font-size: 11px;
+            transition: width 0.5s;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .workflow-card {
+            background: linear-gradient(135deg, #1a1f3a, #2d3561);
+            border: 2px solid #3d4571;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .workflow-card:hover {
+            border-color: #00ff88;
+            transform: translateX(5px);
+        }
+
+        .workflow-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .workflow-name {
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .workflow-steps {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .agent-benefit-card {
+            background: linear-gradient(135deg, #1a1f3a, #2d3561);
+            border-left: 4px solid #00ff88;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+
+        .benefit-title {
+            color: #00ff88;
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 5px;
+        }
+
+        .benefit-desc {
+            color: #888;
+            font-size: 12px;
+        }
+
+        /* History/Log Pane */
+        .history-pane {
+            flex: 1.5;
+            background: #0a0e27;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .history-header {
+            padding: 18px 20px;
+            background: #1a1f3a;
+            border-bottom: 2px solid #2d3561;
+            font-weight: bold;
+            font-size: 14px;
+            color: #00ff88;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .clear-history {
+            background: transparent;
+            border: 1px solid #2d3561;
+            color: #888;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s;
+        }
+
+        .clear-history:hover {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+
+        .history-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .history-item {
+            padding: 12px;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #1a1f3a, #1e2740);
+            border-radius: 8px;
+            border-left: 4px solid #666;
+            font-size: 12px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .history-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .history-item.success {
+            border-left-color: #00ff88;
+            background: linear-gradient(135deg, #1a2f1a, #1e3a1e);
+        }
+
+        .history-item.error {
+            border-left-color: #ff4444;
+            background: linear-gradient(135deg, #2f1a1a, #3a1e1e);
+        }
+
+        .history-item.pending {
+            border-left-color: #ffa500;
+            background: linear-gradient(135deg, #2f2a1a, #3a341e);
+            animation: pendingPulse 2s infinite;
+        }
+
+        @keyframes pendingPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .history-command {
+            color: #00ff88;
+            margin-bottom: 6px;
+            font-family: 'Consolas', monospace;
+        }
+
+        .history-status {
+            color: #888;
+            font-size: 11px;
+        }
+
+        .history-time {
+            color: #666;
+            font-size: 10px;
+            float: right;
+        }
+
+        /* Quick Actions Sidebar */
+        .actions-sidebar {
+            width: 90px;
+            background: linear-gradient(180deg, #1a1f3a, #0a0e27);
+            border-left: 1px solid #2d3561;
+            padding: 20px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .quick-action {
+            background: linear-gradient(135deg, #2d3561, #3d4571);
+            border: 2px solid #3d4571;
+            color: #e0e0e0;
+            padding: 15px;
+            border-radius: 12px;
+            cursor: pointer;
+            text-align: center;
+            font-size: 11px;
+            transition: all 0.3s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .quick-action::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.3), transparent);
+            transition: left 0.5s;
+        }
+
+        .quick-action:hover::before {
+            left: 100%;
+        }
+
+        .quick-action:hover {
+            background: linear-gradient(135deg, #3d4571, #4d5581);
+            border-color: #00ff88;
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 8px 20px rgba(0, 255, 136, 0.3);
+        }
+
+        .quick-action-icon {
+            font-size: 24px;
+            filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.3));
+        }
+
+        /* Enhanced Input Area */
+        .input-area {
+            background: linear-gradient(135deg, #1a1f3a, #2d3561);
+            border-top: 2px solid #00ff88;
+            padding: 20px 25px;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .input-suggestions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .suggestion-chip {
+            background: linear-gradient(135deg, #2d3561, #3d4571);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid transparent;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .suggestion-chip:hover {
+            background: linear-gradient(135deg, #3d4571, #4d5581);
+            border-color: #00ff88;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            position: relative;
+        }
+
+        .input-field {
+            flex: 1;
+            background: #0f1429;
+            border: 2px solid #2d3561;
+            color: #e0e0e0;
+            padding: 14px 18px;
+            border-radius: 10px;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #00ff88;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+        }
+
+        .input-field::placeholder {
+            color: #666;
+        }
+
+        /* Command Autocomplete */
+        .autocomplete-panel {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #1a1f3a, #2d3561);
+            border: 2px solid #00ff88;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            max-height: 250px;
+            overflow-y: auto;
+            box-shadow: 0 -4px 20px rgba(0, 255, 136, 0.3);
+            display: none;
+        }
+
+        .autocomplete-panel.active {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 12px 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .autocomplete-item:hover {
+            background: rgba(0, 255, 136, 0.1);
+        }
+
+        .autocomplete-command {
+            color: #00ff88;
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .autocomplete-desc {
+            color: #888;
+            font-size: 11px;
+        }
+
+        .send-btn, .attach-btn {
+            background: linear-gradient(135deg, #00ff88, #00dd77);
+            color: #0a0e27;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.4);
+        }
+
+        .send-btn:hover {
+            background: linear-gradient(135deg, #00dd77, #00cc66);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 255, 136, 0.5);
+        }
+
+        .attach-btn {
+            background: linear-gradient(135deg, #2d3561, #3d4571);
+            color: #e0e0e0;
+            padding: 14px 18px;
+        }
+
+        .attach-btn:hover {
+            background: linear-gradient(135deg, #3d4571, #4d5581);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1a1f3a, #2d3561);
+            padding: 35px;
+            border-radius: 15px;
+            max-width: 550px;
+            border: 3px solid #00ff88;
+            animation: modalSlide 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 40px rgba(0, 255, 136, 0.3);
+        }
+
+        @keyframes modalSlide {
+            from {
+                opacity: 0;
+                transform: scale(0.8) translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .modal-header {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #00ff88;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-body {
+            margin-bottom: 25px;
+            line-height: 1.8;
+            font-size: 14px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .modal-btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .modal-btn.confirm {
+            background: linear-gradient(135deg, #00ff88, #00dd77);
+            color: #0a0e27;
+            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.4);
+        }
+
+        .modal-btn.cancel {
+            background: #2d3561;
+            color: #e0e0e0;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 16px 20px;
+            margin-left: 52px;
+            margin-bottom: 25px;
+        }
+
+        .typing-indicator.active {
+            display: block;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .typing-dot {
+            width: 10px;
+            height: 10px;
+            background: #00ff88;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+            30% {
+                opacity: 1;
+                transform: scale(1.2);
+            }
+        }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: linear-gradient(135deg, #1a2f1a, #2a4f2a);
+            border-left: 4px solid #00ff88;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 255, 136, 0.3);
+            animation: slideInRight 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 999;
+            min-width: 300px;
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .notification-title {
+            font-weight: bold;
+            color: #00ff88;
+            margin-bottom: 5px;
+        }
+
+        .context-badge {
+            background: rgba(0, 255, 136, 0.2);
+            border: 1px solid #00ff88;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #00ff88;
+            margin-right: 8px;
+            display: inline-block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-left">
+                <div class="status-item">
+                    <div class="status-indicator"></div>
+                    <span>Status: <span class="status-value">Connected</span></span>
+                </div>
+                <div class="status-item">
+                    <span>👤 User: <span class="status-value">admin</span></span>
+                </div>
+                <div class="status-item">
+                    <span>🌍 Env: <span class="status-value">Production</span></span>
+                </div>
+                <div class="status-item model-selector">
+                    <span>🤖 Model:</span>
+                    <select class="model-dropdown" id="modelSelect" onchange="changeModel()">
+                        <option value="claude-sonnet">Claude Sonnet 4.5</option>
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="claude-haiku">Claude Haiku</option>
+                    </select>
+                </div>
+            </div>
+            <div class="status-right">
+                <div class="status-item">
+                    <span>☁️ AWS: <span class="status-value">Connected</span></span>
+                </div>
+                <div class="status-item">
+                    <span>🚀 App: <span class="status-value">SpringBoot v3.2</span></span>
+                </div>
+                <div class="status-item">
+                    <span>⏱️ Uptime: <span class="status-value" id="uptime">0h 0m</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metrics Bar -->
+        <div class="metrics-bar">
+            <div class="metric">
+                <div class="metric-label">CPU Usage</div>
+                <div class="metric-value" id="cpuValue">23%</div>
+                <div class="metric-chart">
+                    <div class="metric-fill" id="cpuBar" style="width: 23%"></div>
+                </div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Memory</div>
+                <div class="metric-value" id="memValue">4.2 GB</div>
+                <div class="metric-chart">
+                    <div class="metric-fill" id="memBar" style="width: 52%"></div>
+                </div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Active Agents</div>
+                <div class="metric-value" id="agentsValue">6</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Requests/min</div>
+                <div class="metric-value" id="reqValue">1,247</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Chat Window -->
+            <div class="chat-window">
+                <!-- Agent Manager Panel -->
+                <div class="agent-panel" id="agentPanel">
+                    <div class="agent-card active" data-agent="orchestrator" onclick="selectAgent(this)">
+                        <div class="agent-header">
+                            <div class="agent-name">🎯 Orchestrator</div>
+                            <div class="agent-status"></div>
+                        </div>
+                        <div class="agent-task">Coordinating tasks</div>
+                    </div>
+                    <div class="agent-card" data-agent="deploy" onclick="selectAgent(this)">
+                        <div class="agent-header">
+                            <div class="agent-name">🚀 Deploy</div>
+                            <div class="agent-status working"></div>
+                        </div>
+                        <div class="agent-task">Building containers</div>
+                    </div>
+                    <div class="agent-card" data-agent="security" onclick="selectAgent(this)">
+                        <div class="agent-header">
+                            <div class="agent-name">🔒 Security</div>
+                            <div class="agent-status"></div>
+                        </div>
+                        <div class="agent-task">Scanning code</div>
+                    </div>
+                    <div class="agent-card" data-agent="testing" onclick="selectAgent(this)">
+                        <div class="agent-header">
+                            <div class="agent-name">🧪 Testing</div>
+                            <div class="agent-status"></div>
+                        </div>
+                        <div class="agent-task">Running tests</div>
+                    </div>
+                    <div class="agent-card" data-agent="database" onclick="selectAgent(this)">
+                        <div class="agent-header">
+                            <div class="agent-name">💾 Database</div>
+                            <div class="agent-status idle"></div>
+                        </div>
+                        <div class="agent-task">Idle</div>
+                    </div>
+                    <div class="agent-card" data-agent="monitoring" onclick="selectAgent(this)">
+                        <div class="agent-header">
+                            <div class="agent-name">📊 Monitor</div>
+                            <div class="agent-status"></div>
+                        </div>
+                        <div class="agent-task">Tracking metrics</div>
+                    </div>
+                    <div class="add-agent-btn" onclick="showAgentOptions()">+ Add Agent</div>
+                </div>
+
+                <div class="messages-container" id="messages">
+                    <div class="message bot-message">
+                        <div class="message-header">
+                            <div class="message-avatar bot-avatar">🤖</div>
+                            <span class="message-sender">AI Enterprise Assistant</span>
+                            <span class="message-time">10:30 AM</span>
+                        </div>
+                        <div class="message-bubble">
+                            Welcome to the <strong>AI Enterprise Command Center</strong>! 🚀<br><br>
+                            <span class="context-badge">Multi-Agent System</span>
+                            <span class="context-badge">6 Active Agents</span><br><br>
+                            <strong>🎯 Intelligent Agent Orchestration</strong><br>
+                            I coordinate multiple specialized AI agents working in parallel:<br><br>
+                            • <strong>🎯 Orchestrator</strong> - Manages all other agents<br>
+                            • <strong>🚀 Deploy Agent</strong> - Handles deployments & CI/CD<br>
+                            • <strong>🔒 Security Agent</strong> - Security scans & compliance<br>
+                            • <strong>🧪 Testing Agent</strong> - Automated testing & QA<br>
+                            • <strong>💾 Database Agent</strong> - DB operations & migrations<br>
+                            • <strong>📊 Monitor Agent</strong> - Performance tracking<br><br>
+                            Type <code>#</code> for AI commands or ask about agent benefits!
+                        </div>
+                        <div class="message-actions">
+                            <button class="action-btn" onclick="copyMessage(this)">📋 Copy</button>
+                            <button class="action-btn" onclick="showAgentBenefits()">💡 Show Benefits</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="typing-indicator" id="typingIndicator">
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="input-area">
+                    <div class="input-suggestions">
+                        <div class="suggestion-chip" onclick="useSuggestion('#deploy with all agents')">🚀 Multi-agent deploy</div>
+                        <div class="suggestion-chip" onclick="useSuggestion('#run parallel tests')">🧪 Parallel testing</div>
+                        <div class="suggestion-chip" onclick="useSuggestion('Show agent benefits')">💡 Agent benefits</div>
+                        <div class="suggestion-chip" onclick="useSuggestion('#security scan')">🔒 Security scan</div>
+                    </div>
+                    <div class="input-wrapper">
+                        <!-- Autocomplete Panel -->
+                        <div class="autocomplete-panel" id="autocomplete"></div>
+
+                        <button class="attach-btn" onclick="document.getElementById('fileInput').click()" title="Upload files">📎</button>
+                        <input type="file" id="fileInput" style="display: none;" onchange="handleFileUpload(event)">
+                        <input
+                            type="text"
+                            class="input-field"
+                            id="userInput"
+                            placeholder="Type # for AI commands or ask about agents... (Ctrl+K to focus)"
+                            onkeypress="handleKeyPress(event)"
+                            oninput="handleInput(event)"
+                        >
+                        <button class="send-btn" onclick="sendMessage()">Send ▶</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History/Log Pane -->
+            <div class="history-pane">
+                <div class="history-header">
+                    📋 Multi-Agent Activity Log
+                    <button class="clear-history" onclick="clearHistory()">Clear</button>
+                </div>
+                <div class="history-content" id="history">
+                    <div class="history-item success">
+                        <div class="history-time">10:25 AM</div>
+                        <div class="history-command">[Deploy] $ mvn clean install</div>
+                        <div class="history-status">✓ Build completed (2.4s)</div>
+                    </div>
+                    <div class="history-item success">
+                        <div class="history-time">10:26 AM</div>
+                        <div class="history-command">[Security] $ security-scan --full</div>
+                        <div class="history-status">✓ No vulnerabilities found</div>
+                    </div>
+                    <div class="history-item success">
+                        <div class="history-time">10:28 AM</div>
+                        <div class="history-command">[Testing] $ npm test --coverage</div>
+                        <div class="history-status">✓ 170 tests passed (89% coverage)</div>
+                    </div>
+                    <div class="history-item success">
+                        <div class="history-time">10:29 AM</div>
+                        <div class="history-command">[Deploy] $ docker build -t app:latest</div>
+                        <div class="history-status">✓ Image created (18s)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Sidebar -->
+            <div class="actions-sidebar">
+                <div class="quick-action" onclick="quickAction('deploy')" title="Multi-Agent Deploy">
+                    <div class="quick-action-icon">🚀</div>
+                    <div>Deploy</div>
+                </div>
+                <div class="quick-action" onclick="quickAction('test')" title="Parallel Testing">
+                    <div class="quick-action-icon">🧪</div>
+                    <div>Test</div>
+                </div>
+                <div class="quick-action" onclick="quickAction('validate')" title="Validate Config">
+                    <div class="quick-action-icon">✅</div>
+                    <div>Validate</div>
+                </div>
+                <div class="quick-action" onclick="quickAction('performance')" title="Performance Metrics">
+                    <div class="quick-action-icon">📊</div>
+                    <div>Metrics</div>
+                </div>
+                <div class="quick-action" onclick="quickAction('agents')" title="Agent Management">
+                    <div class="quick-action-icon">🤖</div>
+                    <div>Agents</div>
+                </div>
+                <div class="quick-action" onclick="quickAction('security')" title="Security Scan">
+                    <div class="quick-action-icon">🔒</div>
+                    <div>Security</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <div class="modal-header">⚠️ Confirm Action</div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeModal()">Cancel</button>
+                <button class="modal-btn confirm" onclick="confirmAction()">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let pendingAction = null;
+        let startTime = Date.now();
+        let currentModel = 'claude-sonnet';
+        let selectedAgent = 'orchestrator';
+
+        const agents = [
+            { id: 'orchestrator', name: '🎯 Orchestrator', status: 'active', task: 'Coordinating tasks', specialty: 'Task coordination & delegation' },
+            { id: 'deploy', name: '🚀 Deploy', status: 'working', task: 'Building containers', specialty: 'CI/CD & Deployments' },
+            { id: 'security', name: '🔒 Security', status: 'active', task: 'Scanning code', specialty: 'Security & Compliance' },
+            { id: 'testing', name: '🧪 Testing', status: 'active', task: 'Running tests', specialty: 'Testing & QA' },
+            { id: 'database', name: '💾 Database', status: 'idle', task: 'Idle', specialty: 'DB Operations' },
+            { id: 'monitoring', name: '📊 Monitor', status: 'active', task: 'Tracking metrics', specialty: 'Performance Monitoring' }
+        ];
+
+        const commandSuggestions = [
+            { cmd: 'kubectl get pods', desc: 'List all running pods' },
+            { cmd: 'mvn clean install', desc: 'Build Maven project' },
+            { cmd: 'docker ps', desc: 'List running containers' },
+            { cmd: 'aws ec2 describe-instances', desc: 'List EC2 instances' },
+            { cmd: 'git status', desc: 'Check git repository status' },
+            { cmd: 'npm test', desc: 'Run npm tests' },
+            { cmd: 'security-scan --full', desc: 'Full security scan' }
+        ];
+
+        // Update uptime
+        setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const hours = Math.floor(elapsed / 3600000);
+            const minutes = Math.floor((elapsed % 3600000) / 60000);
+            document.getElementById('uptime').textContent = `${hours}h ${minutes}m`;
+        }, 60000);
+
+        // Animate metrics
+        setInterval(() => {
+            const cpu = Math.floor(Math.random() * 30) + 20;
+            const mem = Math.floor(Math.random() * 20) + 45;
+            const req = Math.floor(Math.random() * 500) + 1000;
+            const activeAgents = agents.filter(a => a.status !== 'idle').length;
+
+            document.getElementById('cpuValue').textContent = cpu + '%';
+            document.getElementById('cpuBar').style.width = cpu + '%';
+            document.getElementById('memValue').textContent = (mem / 10).toFixed(1) + ' GB';
+            document.getElementById('memBar').style.width = mem + '%';
+            document.getElementById('agentsValue').textContent = activeAgents;
+            document.getElementById('reqValue').textContent = req.toLocaleString();
+        }, 3000);
+
+        function getCurrentTime() {
+            const now = new Date();
+            return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function changeModel() {
+            currentModel = document.getElementById('modelSelect').value;
+            const modelNames = {
+                'claude-sonnet': 'Claude Sonnet 4.5',
+                'gpt-4o': 'GPT-4o',
+                'claude-haiku': 'Claude Haiku'
+            };
+            showNotification('🤖 Model Changed', `Now using ${modelNames[currentModel]}`);
+        }
+
+        function selectAgent(element) {
+            document.querySelectorAll('.agent-card').forEach(card => card.classList.remove('active'));
+            element.classList.add('active');
+            selectedAgent = element.dataset.agent;
+            const agent = agents.find(a => a.id === selectedAgent);
+            showNotification(`🤖 Agent Selected`, `${agent.name} Agent - ${agent.specialty}`);
+        }
+
+        function showAgentOptions() {
+            const agentTypes = [
+                { icon: '📧', name: 'Email Agent', desc: 'Email & notification management' },
+                { icon: '🔄', name: 'CI/CD Agent', desc: 'Pipeline automation' },
+                { icon: '📝', name: 'Documentation', desc: 'Auto-generate docs' },
+                { icon: '🌐', name: 'API Agent', desc: 'API testing & integration' }
+            ];
+
+            let optionsHTML = '<strong>🤖 Available Agent Types</strong><br><br>';
+            agentTypes.forEach(type => {
+                optionsHTML += `
+                    <div class="workflow-card" onclick="addNewAgent('${type.name}', '${type.icon}')">
+                        <div class="workflow-header">
+                            <div class="workflow-name">${type.icon} ${type.name}</div>
+                        </div>
+                        <div class="workflow-steps">${type.desc}</div>
+                    </div>
+                `;
+            });
+
+            addMessage('AI', optionsHTML, true);
+        }
+
+        function addNewAgent(name, icon) {
+            showNotification('✨ Agent Added', `${icon} ${name} has been added to your workspace`);
+            addMessage('You', `Add ${name} agent`, false);
+            setTimeout(() => {
+                showTypingIndicator();
+                setTimeout(() => {
+                    hideTypingIndicator();
+                    addMessage('AI', `✅ <strong>${icon} ${name}</strong> has been initialized and is ready to assist!<br><br>This agent can now work in parallel with your existing agents to improve productivity.`, true);
+                }, 1500);
+            }, 500);
+        }
+
+        function showAgentBenefits() {
+            const benefits = `
+                <strong>💡 Multi-Agent System Benefits</strong><br><br>
+
+                <div class="agent-benefit-card">
+                    <div class="benefit-title">⚡ 5x Faster Execution</div>
+                    <div class="benefit-desc">Agents work in parallel - Deploy while Testing runs simultaneously</div>
+                </div>
+
+                <div class="agent-benefit-card">
+                    <div class="benefit-title">🎯 Specialized Expertise</div>
+                    <div class="benefit-desc">Each agent is optimized for specific tasks with deep domain knowledge</div>
+                </div>
+
+                <div class="agent-benefit-card">
+                    <div class="benefit-title">🔄 Continuous Operation</div>
+                    <div class="benefit-desc">Agents monitor and act 24/7 without manual intervention</div>
+                </div>
+
+                <div class="agent-benefit-card">
+                    <div class="benefit-title">🛡️ Error Prevention</div>
+                    <div class="benefit-desc">Security agent catches vulnerabilities before deploy agent pushes</div>
+                </div>
+
+                <div class="agent-benefit-card">
+                    <div class="benefit-title">📊 Real-time Coordination</div>
+                    <div class="benefit-desc">Orchestrator ensures agents work together seamlessly</div>
+                </div>
+
+                <div class="agent-benefit-card">
+                    <div class="benefit-title">💰 Cost Efficiency</div>
+                    <div class="benefit-desc">Reduce manual DevOps work by 80% with automated agents</div>
+                </div>
+
+                <br><strong>Example:</strong> A typical deployment now takes <strong>2 minutes</strong> instead of 20 minutes!
+            `;
+
+            addMessage('AI', benefits, true);
+        }
+
+        function handleInput(event) {
+            const value = event.target.value;
+            const autocompletePanel = document.getElementById('autocomplete');
+
+            if (value.startsWith('#')) {
+                const query = value.substring(1).toLowerCase();
+                const filtered = commandSuggestions.filter(s =>
+                    s.cmd.toLowerCase().includes(query) || s.desc.toLowerCase().includes(query)
+                );
+
+                if (filtered.length > 0 && query.length > 0) {
+                    autocompletePanel.innerHTML = filtered.map(s => `
+                        <div class="autocomplete-item" onclick="selectAutocomplete('${s.cmd}')">
+                            <div class="autocomplete-command">${s.cmd}</div>
+                            <div class="autocomplete-desc">${s.desc}</div>
+                        </div>
+                    `).join('');
+                    autocompletePanel.classList.add('active');
+                } else {
+                    autocompletePanel.classList.remove('active');
+                }
+            } else {
+                autocompletePanel.classList.remove('active');
+            }
+        }
+
+        function selectAutocomplete(cmd) {
+            document.getElementById('userInput').value = cmd;
+            document.getElementById('autocomplete').classList.remove('active');
+            document.getElementById('userInput').focus();
+        }
+
+        function showNotification(title, message) {
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.innerHTML = `
+                <div class="notification-title">${title}</div>
+                <div class="notification-message" style="font-size: 13px; color: #e0e0e0;">${message}</div>
+            `;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.animation = 'slideInRight 0.4s reverse';
+                setTimeout(() => notification.remove(), 400);
+            }, 3500);
+        }
+
+        function addMessage(sender, text, isBot = false, isError = false) {
+            const messagesContainer = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isBot ? 'bot-message' : 'user-message'}`;
+
+            const avatar = isBot ? '🤖' : '👤';
+            const avatarClass = isBot ? 'bot-avatar' : 'user-avatar';
+            const senderName = isBot ? 'AI Enterprise Assistant' : 'You';
+            const bubbleClass = isError ? 'error-bubble' : '';
+
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar ${avatarClass}">${avatar}</div>
+                    <span class="message-sender">${senderName}</span>
+                    <span class="message-time">${getCurrentTime()}</span>
+                </div>
+                <div class="message-bubble ${bubbleClass}" ${isError ? 'onclick="explainError(this)"' : ''}>
+                    ${text}
+                    ${isError ? '<button class="error-explain-btn">🔍 Ask AI to Explain</button>' : ''}
+                </div>
+                <div class="message-actions">
+                    <button class="action-btn" onclick="copyMessage(this)">📋 Copy</button>
+                    ${isBot ? '<button class="action-btn" onclick="shareMessage(this)">🔗 Share</button>' : ''}
+                    <button class="action-btn" onclick="regenerateResponse(this)">🔄 ${isBot ? 'Regenerate' : 'Edit'}</button>
+                </div>
+            `;
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function explainError(element) {
+            showTypingIndicator();
+            setTimeout(() => {
+                hideTypingIndicator();
+                addMessage('AI', `🔍 <strong>Multi-Agent Error Analysis</strong><br><br>
+                    <span class="context-badge">Security Agent</span>
+                    <span class="context-badge">Deploy Agent</span><br><br>
+                    <strong>Root Cause Identified:</strong><br>
+                    • Port 8080 already in use by another process<br>
+                    • Security agent detected potential conflict<br><br>
+                    <strong>Recommended Actions:</strong><br>
+                    <div class="command-block">
+                        sudo lsof -i :8080
+                        <button class="quick-run" onclick="runCommand('sudo lsof -i :8080')">▶ Run</button>
+                    </div>
+                    The Deploy Agent suggests terminating the conflicting process or using a different port.`, true);
+            }, 1500);
+        }
+
+        function runCommand(cmd) {
+            addMessage('You', cmd, false);
+            addHistoryItem(cmd, 'Executing...', 'pending', 'Orchestrator');
+            setTimeout(() => {
+                const items = document.querySelectorAll('.history-item.pending');
+                if (items.length > 0) {
+                    items[items.length - 1].className = 'history-item success';
+                    items[items.length - 1].querySelector('.history-status').innerHTML = '✓ Command executed';
+                }
+                showTypingIndicator();
+                setTimeout(() => {
+                    hideTypingIndicator();
+                    addMessage('AI', 'Command executed successfully! ✓<br><br>All agents coordinated to complete the task.', true);
+                }, 1000);
+            }, 800);
+        }
+
+        function addHistoryItem(command, status, type = 'success', agentName = 'System') {
+            const historyContainer = document.getElementById('history');
+            const historyItem = document.createElement('div');
+            historyItem.className = `history-item ${type}`;
+
+            const statusIcon = type === 'success' ? '✓' : type === 'error' ? '✗' : '⏳';
+
+            historyItem.innerHTML = `
+                <div class="history-time">${getCurrentTime()}</div>
+                <div class="history-command">[${agentName}] $ ${command}</div>
+                <div class="history-status">${statusIcon} ${status}</div>
+            `;
+
+            historyContainer.appendChild(historyItem);
+            historyContainer.scrollTop = historyContainer.scrollHeight;
+        }
+
+        function clearHistory() {
+            document.getElementById('history').innerHTML = '';
+            showNotification('🗑️ History Cleared', 'All agent activity logs cleared');
+        }
+
+        function showTypingIndicator() {
+            document.getElementById('typingIndicator').classList.add('active');
+        }
+
+        function hideTypingIndicator() {
+            document.getElementById('typingIndicator').classList.remove('active');
+        }
+
+        function simulateMultiAgentWork(task) {
+            const agents = ['Deploy', 'Security', 'Testing', 'Monitor'];
+            let completed = 0;
+
+            agents.forEach((agent, index) => {
+                setTimeout(() => {
+                    addHistoryItem(`${task.toLowerCase()} --${agent.toLowerCase()}`, `${agent} working...`, 'pending', agent);
+
+                    setTimeout(() => {
+                        const items = document.querySelectorAll('.history-item.pending');
+                        if (items.length > 0) {
+                            const item = items[0];
+                            item.className = 'history-item success';
+                            item.querySelector('.history-status').innerHTML = `✓ ${agent} completed`;
+                        }
+                        completed++;
+
+                        if (completed === agents.length) {
+                            showNotification('✅ Task Complete', `All ${agents.length} agents completed ${task}`);
+                        }
+                    }, 1500);
+                }, index * 500);
+            });
+        }
+
+        function simulateAIResponse(userMessage) {
+            showTypingIndicator();
+
+            setTimeout(() => {
+                hideTypingIndicator();
+
+                const lowerMessage = userMessage.toLowerCase();
+
+                if (lowerMessage.includes('benefit') || lowerMessage.includes('advantage')) {
+                    showAgentBenefits();
+                    return;
+                }
+
+                if (lowerMessage.includes('agent')) {
+                    showAgentOptions();
+                    return;
+                }
+
+                if (userMessage.startsWith('#')) {
+                    const naturalQuery = userMessage.substring(1).trim();
+
+                    if (naturalQuery.includes('deploy') || naturalQuery.includes('parallel')) {
+                        addMessage('AI', `🚀 <strong>Multi-Agent Deployment Initiated</strong><br><br>
+                            <span class="context-badge">6 Agents Active</span><br><br>
+                            Coordinating agents for parallel execution:<br>
+                            • Deploy Agent: Building & pushing containers<br>
+                            • Security Agent: Running security scans<br>
+                            • Testing Agent: Executing test suite<br>
+                            • Monitor Agent: Setting up observability<br><br>
+                            All agents working simultaneously for 5x speed boost!`, true);
+                        simulateMultiAgentWork('Deployment');
+                        return;
+                    }
+                }
+
+                if (lowerMessage.includes('deploy')) {
+                    const progressMsg = addProgressMessage('🚀 <strong>Multi-Agent Deployment</strong><br><br>Coordinating 4 agents...', 0);
+
+                    let progress = 0;
+                    const interval = setInterval(() => {
+                        progress += 10;
+                        const progressBar = document.getElementById('deployProgress');
+                        if (progressBar) {
+                            progressBar.style.width = progress + '%';
+                            progressBar.textContent = progress + '%';
+                        }
+
+                        if (progress >= 100) {
+                            clearInterval(interval);
+                            setTimeout(() => {
+                                progressMsg.remove();
+                                addMessage('AI', `✅ <strong>Multi-Agent Deployment Complete!</strong><br><br>
+                                    All 6 agents coordinated successfully:<br>
+                                    • 🚀 Deploy: Image pushed & deployed<br>
+                                    • 🔒 Security: 0 vulnerabilities<br>
+                                    • 🧪 Testing: 170 tests passed<br>
+                                    • 💾 Database: Migrations applied<br>
+                                    • 📊 Monitor: Dashboards updated<br>
+                                    • 🎯 Orchestrator: Task completed<br><br>
+                                    <strong>Time saved: 18 minutes!</strong>`, true);
+                                showNotification('✅ Success', 'Multi-agent deployment completed 5x faster!');
+                            }, 500);
+                        }
+                    }, 200);
+
+                    simulateMultiAgentWork('Deploy');
+                    return;
+
+                } else if (lowerMessage.includes('test')) {
+                    addMessage('AI', `🧪 <strong>Parallel Testing Execution</strong><br><br>
+                        <span class="context-badge">Testing Agent</span>
+                        <span class="context-badge">Security Agent</span><br><br>
+                        Running tests in parallel across agents:<br>
+                        • Unit Tests: 127 passed (2.1s)<br>
+                        • Integration Tests: 43 passed (4.3s)<br>
+                        • Security Tests: All passed (1.8s)<br>
+                        • Coverage: 89% (↑ 3%)<br><br>
+                        🎯 Total time: <strong>4.5s</strong> (Sequential would take 15s)`, true);
+                    addHistoryItem('parallel-test --all-agents', '170 tests passed in 4.5s', 'success', 'Testing');
+                } else {
+                    addMessage('AI', `I understand: <strong>"${userMessage}"</strong><br><br>
+                        <span class="context-badge">6 Active Agents</span><br><br>
+                        Try these multi-agent commands:<br>
+                        • <code>#deploy with all agents</code> - Coordinated deployment<br>
+                        • <code>#run parallel tests</code> - Simultaneous testing<br>
+                        • <code>Show agent benefits</code> - See productivity gains<br>
+                        • <code>#security scan</code> - Deep security analysis`, true);
+                }
+            }, 1500);
+        }
+
+        function addProgressMessage(title, progress) {
+            const messagesContainer = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot-message';
+            messageDiv.id = 'progressMessage';
+
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar bot-avatar">🤖</div>
+                    <span class="message-sender">AI Enterprise Assistant</span>
+                    <span class="message-time">${getCurrentTime()}</span>
+                </div>
+                <div class="message-bubble">
+                    ${title}
+                    <div class="progress-container">
+                        <div class="progress-bar" id="deployProgress" style="width: ${progress}%">${progress}%</div>
+                    </div>
+                </div>
+            `;
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            return messageDiv;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+
+            if (message) {
+                document.getElementById('autocomplete').classList.remove('active');
+                addMessage('You', message, false);
+                input.value = '';
+                simulateAIResponse(message);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            } else if (event.key === 'Escape') {
+                document.getElementById('autocomplete').classList.remove('active');
+            }
+        }
+
+        function useSuggestion(text) {
+            document.getElementById('userInput').value = text;
+            sendMessage();
+        }
+
+        function quickAction(action) {
+            if (action === 'agents') {
+                showAgentBenefits();
+                return;
+            }
+
+            const actions = {
+                deploy: '#deploy with all agents',
+                test: '#run parallel tests',
+                validate: '#validate all configuration files',
+                performance: 'show performance',
+                security: '#security scan with all agents'
+            };
+
+            if (action === 'deploy') {
+                showModal('⚠️ Multi-Agent Deploy to <strong>PRODUCTION</strong>?<br><br>This will coordinate 6 agents for deployment.', action);
+            } else {
+                useSuggestion(actions[action]);
+            }
+        }
+
+        function showModal(message, action) {
+            document.getElementById('modalBody').innerHTML = message;
+            document.getElementById('confirmModal').classList.add('active');
+            pendingAction = action;
+        }
+
+        function closeModal() {
+            document.getElementById('confirmModal').classList.remove('active');
+            pendingAction = null;
+        }
+
+        function confirmAction() {
+            if (pendingAction === 'deploy') {
+                closeModal();
+                useSuggestion('#deploy with all agents');
+            }
+        }
+
+        function copyMessage(button) {
+            const bubble = button.closest('.message').querySelector('.message-bubble');
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = bubble.innerHTML;
+            const text = tempDiv.innerText;
+
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.innerHTML;
+                button.innerHTML = '✅ Copied!';
+                button.style.color = '#00ff88';
+                showNotification('📋 Copied', 'Message copied to clipboard');
+                setTimeout(() => {
+                    button.innerHTML = originalText;
+                    button.style.color = '';
+                }, 2000);
+            });
+        }
+
+        function shareMessage(button) {
+            showNotification('🔗 Share Link', 'Share link generated successfully');
+        }
+
+        function regenerateResponse(button) {
+            showNotification('🔄 Regenerating', 'Response regenerated with agent coordination');
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                addMessage('You', `📎 <strong>File:</strong> <code>${file.name}</code> (${(file.size / 1024).toFixed(2)} KB)`, false);
+                setTimeout(() => {
+                    showTypingIndicator();
+                    setTimeout(() => {
+                        hideTypingIndicator();
+                        addMessage('AI', `✅ <strong>Multi-Agent File Analysis</strong><br><br>
+                            <span class="context-badge">Security Agent</span>
+                            <span class="context-badge">Deploy Agent</span><br><br>
+                            File <code>${file.name}</code> analyzed by multiple agents:<br>
+                            • Security: No threats detected ✓<br>
+                            • Deploy: Ready for deployment ✓<br><br>
+                            Would you like to proceed with deployment?`, true);
+                    }, 1500);
+                }, 500);
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                document.getElementById('userInput').focus();
+            }
+            if (e.key === 'Escape') {
+                closeModal();
+                document.getElementById('autocomplete').classList.remove('active');
+            }
+        });
+
+        setTimeout(() => {
+            showNotification('🚀 Multi-Agent System Ready', '6 specialized agents initialized and ready');
+        }, 1000);
+    </script>
+</body>
+</html>
