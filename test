@@ -1,713 +1,89 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Command Center - Architecture Overview</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        /* Premium Color Palette - Tech Innovation Theme */
-        :root {
-            --primary-navy: #0F172A;           /* Deep Navy - Authority & Trust */
-            --primary-blue: #1E40AF;           /* Corporate Blue - Reliability */
-            --accent-cyan: #06B6D4;            /* Cyan - Innovation & Tech */
-            --accent-purple: #7C3AED;          /* Purple - Creativity & AI */
-            --success-green: #059669;          /* Emerald - Success & Growth */
-            --warning-amber: #D97706;          /* Amber - Attention & Energy */
-            --neutral-slate: #475569;          /* Slate - Professional Text */
-            --light-gray: #F8FAFC;            /* Almost White - Clean Backgrounds */
-            --warm-gray: #F1F5F9;             /* Warm Gray - Card Backgrounds */
-            --gradient-primary: linear-gradient(135deg, #1E40AF 0%, #7C3AED 50%, #06B6D4 100%);
-            --gradient-secondary: linear-gradient(135deg, #059669 0%, #06B6D4 100%);
-            --gradient-warm: linear-gradient(135deg, #D97706 0%, #DC2626 100%);
-            --gradient-surface: linear-gradient(145deg, #FFFFFF 0%, #F8FAFC 100%);
-        }
-
-        body {
-            font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-            line-height: 1.6;
-            color: var(--neutral-slate);
-            background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #334155 100%);
-            min-height: 100vh;
-            font-weight: 400;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-            background: var(--gradient-surface);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            backdrop-filter: blur(20px);
-            border-radius: 24px;
-            margin-top: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .header {
-            text-align: center;
-            padding: 50px 30px;
-            background: var(--gradient-primary);
-            color: white;
-            border-radius: 20px;
-            margin-bottom: 40px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(circle at 30% 70%, rgba(255,255,255,0.1) 0%, transparent 50%);
-            pointer-events: none;
-        }
-
-        .header h1 {
-            font-size: 3.5rem;
-            margin-bottom: 15px;
-            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            font-weight: 700;
-            letter-spacing: -0.02em;
-        }
-
-        .header p {
-            font-size: 1.3rem;
-            opacity: 0.95;
-            font-weight: 300;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .section {
-            margin: 50px 0;
-            padding: 40px;
-            background: var(--gradient-surface);
-            border-radius: 20px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-            border-left: 5px solid var(--accent-cyan);
-            border: 1px solid rgba(6, 182, 212, 0.1);
-        }
-
-        .section h2 {
-            color: var(--primary-navy);
-            font-size: 2.25rem;
-            margin-bottom: 25px;
-            display: flex;
-            align-items: center;
-            font-weight: 700;
-            letter-spacing: -0.01em;
-        }
-
-        .section h2::before {
-            content: "💎";
-            margin-right: 15px;
-            font-size: 1.8rem;
-        }
-
-        .comparison-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            margin: 30px 0;
-        }
-
-        .comparison-card {
-            padding: 30px;
-            border-radius: 16px;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .traditional {
-            background: linear-gradient(135deg, #DC2626 0%, #D97706 100%);
-            color: white;
-            box-shadow: 0 15px 35px rgba(220, 38, 38, 0.3);
-        }
-
-        .ai-command {
-            background: var(--gradient-secondary);
-            color: white;
-            box-shadow: 0 15px 35px rgba(5, 150, 105, 0.3);
-        }
-
-        .architecture-flow {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 25px;
-            margin: 40px 0;
-        }
-
-        .flow-step {
-            flex: 1;
-            min-width: 200px;
-            padding: 25px 20px;
-            text-align: center;
-            background: var(--gradient-primary);
-            color: white;
-            border-radius: 16px;
-            position: relative;
-            box-shadow: 0 10px 25px rgba(30, 64, 175, 0.3);
-            transition: transform 0.3s ease;
-        }
-
-        .flow-step:hover {
-            transform: translateY(-5px);
-        }
-
-        .flow-step::after {
-            content: "→";
-            position: absolute;
-            right: -30px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 2.5rem;
-            color: var(--accent-cyan);
-            font-weight: bold;
-            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
-        }
-
-        .flow-step:last-child::after { display: none; }
-
-        .components-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 25px;
-            margin: 30px 0;
-        }
-
-        .component-card {
-            padding: 30px;
-            border-radius: 16px;
-            background: linear-gradient(135deg, var(--accent-purple) 0%, var(--primary-blue) 100%);
-            color: white;
-            text-align: center;
-            box-shadow: 0 15px 35px rgba(124, 58, 237, 0.2);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .component-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 45px rgba(124, 58, 237, 0.3);
-        }
-
-        .benefits-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-
-        .benefit-item {
-            padding: 25px;
-            background: var(--warm-gray);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            border: 1px solid rgba(6, 182, 212, 0.1);
-            transition: all 0.3s ease;
-            color: var(--neutral-slate);
-        }
-
-        .benefit-item:hover {
-            background: white;
-            border-color: var(--accent-cyan);
-            box-shadow: 0 10px 25px rgba(6, 182, 212, 0.1);
-        }
-
-        .benefit-item::before {
-            content: "✨";
-            margin-right: 20px;
-            font-size: 1.8rem;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 25px;
-            margin: 30px 0;
-        }
-
-        .stat-card {
-            text-align: center;
-            padding: 35px 25px;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(6, 182, 212, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 35px rgba(6, 182, 212, 0.15);
-        }
-
-        .stat-number {
-            font-size: 3rem;
-            font-weight: 800;
-            color: var(--accent-cyan);
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .cta-section {
-            background: var(--gradient-primary);
-            color: white;
-            text-align: center;
-            padding: 60px 40px;
-            border-radius: 20px;
-            margin-top: 50px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .cta-section::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(circle at 70% 30%, rgba(255,255,255,0.1) 0%, transparent 60%);
-            pointer-events: none;
-        }
-
-        .cta-button {
-            display: inline-block;
-            padding: 18px 35px;
-            background: white;
-            color: var(--primary-navy);
-            text-decoration: none;
-            border-radius: 12px;
-            font-weight: 600;
-            margin: 12px;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
-            font-size: 1.05rem;
-        }
-
-        .cta-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.25);
-            background: var(--light-gray);
-        }
-
-        /* Use Cases Grid */
-        .use-cases-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-            margin: 30px 0;
-        }
-
-        .use-case-card {
-            padding: 25px;
-            background: var(--warm-gray);
-            border-radius: 12px;
-            border: 1px solid rgba(6, 182, 212, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        .use-case-card:hover {
-            background: white;
-            border-color: var(--accent-cyan);
-            box-shadow: 0 10px 25px rgba(6, 182, 212, 0.15);
-            transform: translateY(-2px);
-        }
-
-        .use-case-card h4 {
-            color: var(--primary-navy);
-            font-size: 1.3rem;
-            margin-bottom: 15px;
-            font-weight: 600;
-        }
-
-        .use-case-card ul {
-            margin: 0;
-            padding-left: 20px;
-            line-height: 1.8;
-        }
-
-        .use-case-card li {
-            color: var(--neutral-slate);
-            margin-bottom: 8px;
-        }
-
-        /* Advantages Grid */
-        .advantages-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 30px;
-            margin: 30px 0;
-        }
-
-        .advantage-card {
-            padding: 30px;
-            background: var(--gradient-surface);
-            border-radius: 16px;
-            border: 1px solid rgba(124, 58, 237, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        .advantage-card:hover {
-            border-color: var(--accent-purple);
-            box-shadow: 0 15px 35px rgba(124, 58, 237, 0.1);
-            transform: translateY(-3px);
-        }
-
-        .advantage-card h4 {
-            color: var(--accent-purple);
-            font-size: 1.4rem;
-            margin-bottom: 20px;
-            font-weight: 700;
-        }
-
-        .advantage-card ul {
-            margin: 0;
-            padding-left: 20px;
-            line-height: 2;
-        }
-
-        .advantage-card li {
-            color: var(--neutral-slate);
-            margin-bottom: 10px;
-        }
-
-        .advantage-card strong {
-            color: var(--primary-navy);
-        }
-
-        /* Technical Specifications Grid */
-        .tech-specs-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-
-        .tech-spec-card {
-            padding: 20px;
-            background: white;
-            border-radius: 12px;
-            border: 1px solid rgba(6, 182, 212, 0.1);
-            transition: all 0.3s ease;
-            text-align: center;
-        }
-
-        .tech-spec-card:hover {
-            border-color: var(--accent-cyan);
-            box-shadow: 0 8px 20px rgba(6, 182, 212, 0.15);
-            transform: translateY(-2px);
-        }
-
-        .tech-spec-card h5 {
-            color: var(--primary-navy);
-            font-size: 1.1rem;
-            margin-bottom: 10px;
-            font-weight: 600;
-        }
-
-        .tech-spec-card p {
-            color: var(--neutral-slate);
-            margin: 0;
-            font-weight: 500;
-        }
-
-        @media (max-width: 768px) {
-            .comparison-grid { grid-template-columns: 1fr; }
-            .architecture-flow { flex-direction: column; }
-            .flow-step::after { display: none; }
-            .header h1 { font-size: 2rem; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 AI Command Center</h1>
-            <p>Intelligent Task Execution & Real-Time Monitoring Platform</p>
-        </div>
-
-        <div class="section">
-            <h2>🎯 Executive Summary</h2>
-            <p style="font-size: 1.1rem; color: #555; margin-bottom: 20px;">
-                The AI Command Center revolutionizes organizational task management by combining <strong>Advanced Large Language Models</strong>
-                with intelligent automation, real-time monitoring, and human oversight. Unlike simple chatbots, this platform
-                transforms natural language requests into executable action plans with built-in safety controls.
-            </p>
-
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number">85%</div>
-                    <div>Task Automation Rate</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">3x</div>
-                    <div>Faster Execution</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">99.9%</div>
-                    <div>Reliability Score</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">24/7</div>
-                    <div>Operational Availability</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>🔄 Traditional vs AI Command Center</h2>
-            <div class="comparison-grid">
-                <div class="comparison-card traditional">
-                    <h3>❌ Traditional Chat Assistant</h3>
-                    <ul style="text-align: left; margin: 20px 0;">
-                        <li>• Only provides text responses</li>
-                        <li>• No action execution</li>
-                        <li>• Manual follow-up required</li>
-                        <li>• Limited context awareness</li>
-                        <li>• No safety controls</li>
-                        <li>• Single-turn interactions</li>
-                    </ul>
-                </div>
-                <div class="comparison-card ai-command">
-                    <h3>✅ AI Command Center</h3>
-                    <ul style="text-align: left; margin: 20px 0;">
-                        <li>• Intelligent plan generation</li>
-                        <li>• Automated task execution</li>
-                        <li>• Real-time monitoring</li>
-                        <li>• Context-aware decisions</li>
-                        <li>• Built-in safety controls</li>
-                        <li>• Multi-step workflows</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>🏗️ System Architecture Flow</h2>
-            <div class="architecture-flow">
-                <div class="flow-step">
-                    <h4>📝 Input</h4>
-                    <p>Natural Language Task Description</p>
-                </div>
-                <div class="flow-step">
-                    <h4>🤖 AI Planning</h4>
-                    <p>Advanced AI Generates Execution Plan</p>
-                </div>
-                <div class="flow-step">
-                    <h4>⚖️ Evaluation</h4>
-                    <p>Feasibility & Risk Assessment</p>
-                </div>
-                <div class="flow-step">
-                    <h4>👥 Approval</h4>
-                    <p>Human Oversight & Control</p>
-                </div>
-                <div class="flow-step">
-                    <h4>⚡ Execution</h4>
-                    <p>Real-Time Step Processing</p>
-                </div>
-                <div class="flow-step">
-                    <h4>📊 Monitoring</h4>
-                    <p>Live Progress & Results</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>🔧 Core Components</h2>
-            <div class="components-grid">
-                <div class="component-card">
-                    <h4>🧠 AI Planning Engine</h4>
-                    <p>Advanced LLM integration for intelligent task decomposition and strategy formulation</p>
-                </div>
-                <div class="component-card">
-                    <h4>📊 Real-Time Dashboard</h4>
-                    <p>Live monitoring with WebSocket updates and interactive progress tracking</p>
-                </div>
-                <div class="component-card">
-                    <h4>🔒 Safety Controls</h4>
-                    <p>Human-in-the-loop approval system with risk assessment and rollback capabilities</p>
-                </div>
-                <div class="component-card">
-                    <h4>🔗 Tool Integration</h4>
-                    <p>Extensible framework supporting multiple APIs, databases, and external services</p>
-                </div>
-                <div class="component-card">
-                    <h4>💾 Persistent Storage</h4>
-                    <p>Complete audit trail with task history, performance metrics, and learning data</p>
-                </div>
-                <div class="component-card">
-                    <h4>🌐 RESTful APIs</h4>
-                    <p>Comprehensive API layer for integration with existing organizational systems</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>💼 Organizational Benefits</h2>
-            <div class="benefits-list">
-                <div class="benefit-item">
-                    <div><strong>Productivity Boost:</strong> Automate routine tasks and complex workflows</div>
-                </div>
-                <div class="benefit-item">
-                    <div><strong>Cost Reduction:</strong> Minimize manual intervention and human errors</div>
-                </div>
-                <div class="benefit-item">
-                    <div><strong>24/7 Operations:</strong> Round-the-clock task processing and monitoring</div>
-                </div>
-                <div class="benefit-item">
-                    <div><strong>Scalability:</strong> Handle increasing workloads without proportional resource growth</div>
-                </div>
-                <div class="benefit-item">
-                    <div><strong>Compliance:</strong> Built-in audit trails and approval workflows</div>
-                </div>
-                <div class="benefit-item">
-                    <div><strong>Innovation:</strong> Enable focus on strategic work by automating operational tasks</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>🎯 Use Cases</h2>
-            <div class="use-cases-grid">
-                <div class="use-case-card">
-                    <h4>🏢 IT Operations</h4>
-                    <ul>
-                        <li>Server deployments and maintenance</li>
-                        <li>Database backups and monitoring</li>
-                        <li>Security patch management</li>
-                    </ul>
-                </div>
-                <div class="use-case-card">
-                    <h4>📈 Business Processes</h4>
-                    <ul>
-                        <li>Report generation and distribution</li>
-                        <li>Data analysis and insights</li>
-                        <li>Workflow orchestration</li>
-                    </ul>
-                </div>
-                <div class="use-case-card">
-                    <h4>🔄 DevOps</h4>
-                    <ul>
-                        <li>CI/CD pipeline management</li>
-                        <li>Infrastructure provisioning</li>
-                        <li>Monitoring and alerting</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>🚀 Competitive Advantages</h2>
-            <div class="advantages-grid">
-                <div class="advantage-card">
-                    <h4>🎯 Strategic Differentiators</h4>
-                    <ul>
-                        <li><strong>AI-First Architecture:</strong> Built around advanced language model capabilities</li>
-                        <li><strong>Human-AI Collaboration:</strong> Perfect balance of automation and control</li>
-                        <li><strong>Enterprise-Grade Security:</strong> Role-based access and audit compliance</li>
-                        <li><strong>Extensible Platform:</strong> Easy integration with existing systems</li>
-                    </ul>
-                </div>
-                <div class="advantage-card">
-                    <h4>⚡ Technical Excellence</h4>
-                    <ul>
-                        <li><strong>Real-Time Processing:</strong> WebSocket-based live updates</li>
-                        <li><strong>Microservices Design:</strong> Scalable and maintainable architecture</li>
-                        <li><strong>Cloud-Native:</strong> Docker containers and Kubernetes ready</li>
-                        <li><strong>API-First:</strong> Headless architecture for maximum flexibility</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>📊 Technical Specifications</h2>
-            <div class="tech-specs-grid">
-                <div class="tech-spec-card">
-                    <h5>Backend Technology</h5>
-                    <p>Java 17, Spring Boot 3.2</p>
-                </div>
-                <div class="tech-spec-card">
-                    <h5>AI Integration</h5>
-                    <p>Enterprise LLM API</p>
-                </div>
-                <div class="tech-spec-card">
-                    <h5>Real-Time Communication</h5>
-                    <p>WebSocket, REST API</p>
-                </div>
-                <div class="tech-spec-card">
-                    <h5>Database</h5>
-                    <p>JPA/Hibernate, H2/PostgreSQL</p>
-                </div>
-                <div class="tech-spec-card">
-                    <h5>Security</h5>
-                    <p>Spring Security, JWT</p>
-                </div>
-                <div class="tech-spec-card">
-                    <h5>Deployment</h5>
-                    <p>Docker, Kubernetes</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="cta-section">
-            <h2 style="margin-bottom: 20px;">🚀 Ready to Transform Your Organization?</h2>
-            <p style="font-size: 1.2rem; margin-bottom: 30px; opacity: 0.9;">
-                Experience the future of task automation with our AI Command Center
-            </p>
-            <div>
-                <a href="/" class="cta-button">🎮 Live Demo</a>
-                <a href="/debug.html" class="cta-button">🔧 Technical Demo</a>
-                <a href="#" class="cta-button">📞 Schedule Meeting</a>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Add some interactive animations
-        document.addEventListener('DOMContentLoaded', function() {
-            // Animate stats on scroll
-            const observer = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.style.transform = 'translateY(0)';
-                        entry.target.style.opacity = '1';
-                    }
-                });
-            });
-
-            document.querySelectorAll('.section').forEach(el => {
-                el.style.transform = 'translateY(20px)';
-                el.style.opacity = '0.8';
-                el.style.transition = 'all 0.6s ease';
-                observer.observe(el);
-            });
-
-            // Add click tracking for demo buttons
-            document.querySelectorAll('.cta-button').forEach(button => {
-                button.addEventListener('click', function(e) {
-                    console.log('Demo button clicked:', this.textContent);
-                });
-            });
-        });
-    </script>
-</body>
-</html>
-
-
-dd
+Analyze entire Java application and generate comprehensive HTML production support dashboard.
+
+[PASTE EVERYTHING - All .java files, config files (application.properties, web.xml, log4j.xml), build files (pom.xml/build.gradle)]
+
+Generate single interactive HTML with tabs:
+
+TAB 1: Architecture Map
+- All components with connections
+- Entry points (Servlets/REST endpoints/Main class)
+- Business logic components
+- Data access components  
+- External integrations
+- Click component → show what to check when it fails
+
+TAB 2: Issue Diagnosis Wizard
+- Dropdown: Select symptom
+  * Application slow
+  * Getting errors
+  * Data not saving
+  * External service failing
+  * Memory issues
+  * CPU high
+- Shows:
+  * Which component to check first
+  * What logs to search
+  * What metrics to verify
+  * Common causes
+  * Quick fixes
+
+TAB 3: Component Health Check
+- Checklist for each component:
+  * [ ] Component X - Check logs: [grep command]
+  * [ ] Component Y - Verify connection: [test command]
+  * [ ] Component Z - Check response time: [metric]
+- Status indicators (healthy/degraded/failed)
+
+TAB 4: Log Analysis Guide
+- Log file locations
+- Key log patterns to search:
+  * "ERROR" → Critical failures
+  * "Exception" → Code errors  
+  * "timeout" → Performance issues
+  * "connection" → Network/DB issues
+- Grep commands for common problems
+- Log level meanings (INFO/WARN/ERROR)
+
+TAB 5: Data Flow Debugger
+- Trace data through system
+- Show transformations at each step
+- Identify where data gets corrupted/lost
+- Validation checkpoints
+
+TAB 6: Configuration Reference
+- All config parameters
+- What each config controls
+- Default vs current values
+- Which component uses which config
+- What happens if misconfigured
+
+TAB 7: Quick Fixes & Runbooks
+For each common issue:
+- Symptom
+- Root cause
+- Step-by-step fix
+- Prevention tips
+- Restart procedures
+- Rollback steps
+
+TAB 8: Performance Baselines
+- Expected response times per operation
+- Normal CPU/Memory usage
+- Database query counts
+- Thread pool sizes
+- Connection pool settings
+
+TAB 9: Dependency Map
+- External services called
+- Database connections
+- File system dependencies
+- Network endpoints
+- Third-party libraries used
+
+TAB 10: Emergency Procedures
+- Application won't start → Check [A, B, C]
+- Out of memory → Check [X, Y, Z]
+- Database down → Check [P, Q, R]
+- All requests failing → Check [L, M, N]
+
+Features: Global search, filter by component, printable, works offline, no external dependencies, copy commands with one click
