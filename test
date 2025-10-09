@@ -91,6 +91,44 @@
             display: none;
         }
 
+        .view-toggle {
+            padding: 20px 40px;
+            background: #f8f9fa;
+            display: none;
+            justify-content: center;
+            gap: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .view-toggle.active {
+            display: flex;
+        }
+
+        .view-btn {
+            padding: 12px 30px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .view-btn:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .view-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
         .controls {
             padding: 30px 40px;
             background: #f8f9fa;
@@ -220,6 +258,110 @@
 
         .logs-container.active {
             display: block;
+        }
+
+        .structured-view {
+            display: none;
+        }
+
+        .structured-view.active {
+            display: block;
+        }
+
+        .category-section {
+            margin-bottom: 40px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .category-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 25px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .category-header:hover {
+            background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
+        }
+
+        .category-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        .category-content {
+            padding: 25px;
+            background: #f9fafb;
+            display: none;
+        }
+
+        .category-content.active {
+            display: block;
+        }
+
+        .category-item {
+            background: white;
+            padding: 15px 20px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            transition: all 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .category-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .category-item.error {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+
+        .category-item.warn {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+
+        .category-item.success {
+            border-left-color: #10b981;
+            background: #f0fdf4;
+        }
+
+        .item-time {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        .item-message {
+            display: inline;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+
+        .item-details {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 0.9em;
+            color: #6b7280;
+            font-family: 'Courier New', monospace;
         }
 
         .log-entry {
@@ -441,6 +583,11 @@
             <p>Analyzing your logs with AI-powered parser...</p>
         </div>
 
+        <div class="view-toggle" id="viewToggle">
+            <button class="view-btn active" data-view="raw">📄 Raw Logs</button>
+            <button class="view-btn" data-view="structured">📊 Structured View</button>
+        </div>
+
         <div class="controls" id="controls">
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="Search logs by keyword, error code, or pattern...">
@@ -474,11 +621,15 @@
         <div class="stats" id="stats"></div>
 
         <div class="logs-container" id="logsContainer">
-            <div class="no-logs">
-                <div class="no-logs-icon">📋</div>
-                <h3>No logs loaded yet</h3>
-                <p>Upload a log file to get started</p>
+            <div id="rawView" class="raw-view active">
+                <div class="no-logs">
+                    <div class="no-logs-icon">📋</div>
+                    <h3>No logs loaded yet</h3>
+                    <p>Upload a log file to get started</p>
+                </div>
             </div>
+
+            <div id="structuredView" class="structured-view"></div>
         </div>
     </div>
 
@@ -487,15 +638,20 @@
         let filteredLogs = [];
         let currentFilter = 'all';
         let searchTerm = '';
+        let currentView = 'raw';
 
         const fileInput = document.getElementById('fileInput');
         const uploadBox = document.getElementById('uploadBox');
         const uploadSection = document.getElementById('uploadSection');
+        const viewToggle = document.getElementById('viewToggle');
         const controls = document.getElementById('controls');
         const stats = document.getElementById('stats');
         const logsContainer = document.getElementById('logsContainer');
+        const rawView = document.getElementById('rawView');
+        const structuredView = document.getElementById('structuredView');
         const searchInput = document.getElementById('searchInput');
         const filterBtns = document.querySelectorAll('.filter-btn');
+        const viewBtns = document.querySelectorAll('.view-btn');
         const clearBtn = document.getElementById('clearBtn');
         const exportBtn = document.getElementById('exportBtn');
         const loading = document.getElementById('loading');
@@ -526,25 +682,44 @@
             if (file) handleFile(file);
         });
 
+        // View toggle
+        viewBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                viewBtns.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentView = this.dataset.view;
+
+                if (currentView === 'raw') {
+                    rawView.classList.add('active');
+                    structuredView.classList.remove('active');
+                } else {
+                    rawView.classList.remove('active');
+                    structuredView.classList.add('active');
+                }
+            });
+        });
+
         // Handle file
         async function handleFile(file) {
             loading.classList.add('active');
             uploadSection.style.display = 'none';
-            
+
             const text = await file.text();
-            
+
             setTimeout(() => {
                 parseLogFile(text);
                 loading.classList.remove('active');
+                viewToggle.classList.add('active');
                 controls.classList.add('active');
                 stats.classList.add('active');
                 logsContainer.classList.add('active');
                 renderLogs();
+                renderStructuredView();
                 updateStats();
             }, 1000);
         }
 
-        // Parse log file with intelligent detection
+        // Parse log file
         function parseLogFile(text) {
             allLogs = [];
             const lines = text.split('\n');
@@ -557,7 +732,8 @@
                     timestamp: null,
                     level: 'info',
                     message: line,
-                    raw: line
+                    raw: line,
+                    category: null
                 };
 
                 // Try JSON format first
@@ -568,12 +744,10 @@
                         log.level = (json.level || json.severity || json.priority || 'info').toLowerCase();
                         log.message = json.message || json.msg || json.text || JSON.stringify(json);
                         log.raw = JSON.stringify(json, null, 2);
-                    } catch (e) {
-                        // Not valid JSON, continue with regex
-                    }
+                    } catch (e) {}
                 }
 
-                // Standard log format with timestamp
+                // Standard log format
                 const standardMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*[\[\(]?(\w+)[\]\)]?\s*[:\-]?\s*(.+)/i);
                 if (standardMatch) {
                     log.timestamp = standardMatch[1];
@@ -596,7 +770,7 @@
                     log.message = syslogMatch[4];
                 }
 
-                // Detect log level from message if not already set
+                // Detect log level
                 if (log.level === 'info') {
                     if (/error|exception|fatal|critical|fail/i.test(line)) {
                         log.level = 'error';
@@ -604,12 +778,12 @@
                         log.level = 'warn';
                     } else if (/debug|trace/i.test(line)) {
                         log.level = 'debug';
-                    } else if (/success|ok|complete/i.test(line)) {
+                    } else if (/success|ok|complete|successful/i.test(line)) {
                         log.level = 'success';
                     }
                 }
 
-                // Extract timestamp if not found
+                // Extract timestamp
                 if (!log.timestamp) {
                     const timestampMatch = line.match(/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
                     if (timestampMatch) {
@@ -617,19 +791,114 @@
                     }
                 }
 
+                // Categorize log
+                log.category = categorizeLog(log);
+
                 allLogs.push(log);
             });
 
             filteredLogs = [...allLogs];
         }
 
-        // Render logs
+        // Categorize logs
+        function categorizeLog(log) {
+            const msg = log.message.toLowerCase();
+
+            if (/starting|initialized|connected|loading|listening|started/.test(msg)) {
+                return 'startup';
+            }
+            if (/request|get|post|put|delete|status|query executed/.test(msg) && log.level === 'info') {
+                return 'operations';
+            }
+            if (/session|authentication|login|user/.test(msg) && log.level !== 'error') {
+                return 'operations';
+            }
+            if (log.level === 'warn') {
+                return 'warnings';
+            }
+            if (log.level === 'error') {
+                return 'errors';
+            }
+            if (/success|completed|processed|restored|recovered|backup/.test(msg) && log.level === 'success') {
+                return 'recoveries';
+            }
+            if (/websocket|connection pool|health|gateway/.test(msg)) {
+                return 'infrastructure';
+            }
+            if (/deprecated|legacy/.test(msg)) {
+                return 'deprecated';
+            }
+
+            return 'operations';
+        }
+
+        // Render structured view
+        function renderStructuredView() {
+            const categories = {
+                'startup': { title: '🚀 Startup and Initialization', logs: [] },
+                'operations': { title: '⚙️ Normal Operations and Requests', logs: [] },
+                'warnings': { title: '⚠️ Warnings & Performance Issues', logs: [] },
+                'errors': { title: '❌ Errors & Failures', logs: [] },
+                'recoveries': { title: '✅ Recoveries & Successes', logs: [] },
+                'infrastructure': { title: '🏗️ System/Infrastructure Events', logs: [] },
+                'deprecated': { title: '⏰ Special Events & Deprecated APIs', logs: [] }
+            };
+
+            filteredLogs.forEach(log => {
+                if (categories[log.category]) {
+                    categories[log.category].logs.push(log);
+                }
+            });
+
+            let html = '';
+            Object.keys(categories).forEach(key => {
+                const cat = categories[key];
+                if (cat.logs.length > 0) {
+                    html += `
+                        <div class="category-section">
+                            <div class="category-header" onclick="toggleCategory(this)">
+                                <span>${cat.title}</span>
+                                <span class="category-badge">${cat.logs.length} logs</span>
+                            </div>
+                            <div class="category-content active">
+                    `;
+
+                    cat.logs.forEach(log => {
+                        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false }) : 'N/A';
+                        const cleanMsg = log.message.replace(/<[^>]*>/g, '');
+                        const hasDetails = log.raw !== log.message;
+
+                        html += `
+                            <div class="category-item ${log.level}">
+                                <span class="item-time">${time}</span>
+                                <span class="item-message">${cleanMsg}</span>
+                                ${hasDetails ? `<div class="item-details">${log.raw}</div>` : ''}
+                            </div>
+                        `;
+                    });
+
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            structuredView.innerHTML = html || '<div class="no-logs"><h3>No logs in structured view</h3></div>';
+        }
+
+        // Toggle category
+        function toggleCategory(header) {
+            const content = header.nextElementSibling;
+            content.classList.toggle('active');
+        }
+
+        // Render raw logs
         function renderLogs() {
-            const container = logsContainer;
-            container.innerHTML = '';
+            rawView.innerHTML = '';
 
             if (filteredLogs.length === 0) {
-                container.innerHTML = `
+                rawView.innerHTML = `
                     <div class="no-logs">
                         <div class="no-logs-icon">🔍</div>
                         <h3>No logs match your filters</h3>
@@ -642,9 +911,9 @@
             filteredLogs.forEach(log => {
                 const logEntry = document.createElement('div');
                 logEntry.className = `log-entry ${log.level}`;
-                
+
                 const message = highlightSearch(log.message, searchTerm);
-                
+
                 logEntry.innerHTML = `
                     <div class="log-header">
                         <span class="log-level level-${log.level}">${log.level}</span>
@@ -661,23 +930,22 @@
                     details.classList.toggle('active');
                 });
 
-                container.appendChild(logEntry);
+                rawView.appendChild(logEntry);
             });
         }
 
-        // Highlight search terms
+        // Highlight search
         function highlightSearch(text, term) {
             if (!term) return text;
             const regex = new RegExp(`(${term})`, 'gi');
             return text.replace(regex, '<span class="highlight">$1</span>');
         }
 
-        // Update statistics
+        // Update stats
         function updateStats() {
             const errorCount = allLogs.filter(l => l.level === 'error').length;
             const warnCount = allLogs.filter(l => l.level === 'warn').length;
             const infoCount = allLogs.filter(l => l.level === 'info').length;
-            const debugCount = allLogs.filter(l => l.level === 'debug').length;
 
             stats.innerHTML = `
                 <div class="stat-card">
@@ -699,7 +967,7 @@
             `;
         }
 
-        // Search functionality
+        // Search
         searchInput.addEventListener('input', (e) => {
             searchTerm = e.target.value.toLowerCase();
             applyFilters();
@@ -719,19 +987,21 @@
         function applyFilters() {
             filteredLogs = allLogs.filter(log => {
                 const matchesLevel = currentFilter === 'all' || log.level === currentFilter;
-                const matchesSearch = !searchTerm || 
+                const matchesSearch = !searchTerm ||
                     log.message.toLowerCase().includes(searchTerm) ||
                     log.raw.toLowerCase().includes(searchTerm);
                 return matchesLevel && matchesSearch;
             });
             renderLogs();
+            renderStructuredView();
         }
 
-        // Clear button
+        // Clear
         clearBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear all logs?')) {
                 allLogs = [];
                 filteredLogs = [];
+                viewToggle.classList.remove('active');
                 controls.classList.remove('active');
                 stats.classList.remove('active');
                 logsContainer.classList.remove('active');
@@ -741,10 +1011,13 @@
                 currentFilter = 'all';
                 filterBtns.forEach(b => b.classList.remove('active'));
                 filterBtns[0].classList.add('active');
+                viewBtns.forEach(b => b.classList.remove('active'));
+                viewBtns[0].classList.add('active');
+                currentView = 'raw';
             }
         });
 
-        // Export button
+        // Export
         exportBtn.addEventListener('click', () => {
             const dataStr = JSON.stringify(filteredLogs, null, 2);
             const dataBlob = new Blob([dataStr], {type: 'application/json'});
