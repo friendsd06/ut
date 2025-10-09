@@ -91,17 +91,144 @@
             display: none;
         }
 
+        .main-content {
+            display: none;
+        }
+
+        .main-content.active {
+            display: flex;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: #f8f9fa;
+            border-right: 2px solid #e0e0e0;
+            padding: 30px 20px;
+            overflow-y: auto;
+            max-height: calc(100vh - 300px);
+        }
+
+        .sidebar h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .category-filter {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 2px solid #e5e7eb;
+            transition: all 0.3s;
+        }
+
+        .category-filter:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+        }
+
+        .category-filter label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .category-filter input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #667eea;
+        }
+
+        .category-info {
+            flex: 1;
+        }
+
+        .category-name {
+            font-size: 0.95em;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .category-count {
+            font-size: 0.85em;
+            color: #6b7280;
+        }
+
+        .category-count .num {
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            margin-left: 5px;
+        }
+
+        .category-count.error .num {
+            background: #ef4444;
+        }
+
+        .category-count.warn .num {
+            background: #f59e0b;
+        }
+
+        .category-count.success .num {
+            background: #10b981;
+        }
+
+        .select-all-btn {
+            width: 100%;
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .select-all-btn:hover {
+            background: #5568d3;
+        }
+
+        .deselect-all-btn {
+            width: 100%;
+            padding: 10px;
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+
+        .deselect-all-btn:hover {
+            background: #f8f9ff;
+        }
+
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
         .view-toggle {
             padding: 20px 40px;
             background: #f8f9fa;
-            display: none;
+            display: flex;
             justify-content: center;
             gap: 10px;
             border-bottom: 2px solid #e0e0e0;
-        }
-
-        .view-toggle.active {
-            display: flex;
         }
 
         .view-btn {
@@ -132,15 +259,11 @@
         .controls {
             padding: 30px 40px;
             background: #f8f9fa;
-            display: none;
+            display: flex;
             gap: 15px;
             flex-wrap: wrap;
             align-items: center;
             border-bottom: 2px solid #e0e0e0;
-        }
-
-        .controls.active {
-            display: flex;
         }
 
         .search-box {
@@ -218,13 +341,9 @@
         .stats {
             padding: 20px 40px;
             background: white;
-            display: none;
+            display: grid;
             gap: 20px;
             border-bottom: 2px solid #f0f0f0;
-        }
-
-        .stats.active {
-            display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         }
 
@@ -253,11 +372,6 @@
             padding: 40px;
             max-height: 600px;
             overflow-y: auto;
-            display: none;
-        }
-
-        .logs-container.active {
-            display: block;
         }
 
         .structured-view {
@@ -273,6 +387,10 @@
             border: 2px solid #e5e7eb;
             border-radius: 12px;
             overflow: hidden;
+        }
+
+        .category-section.hidden {
+            display: none;
         }
 
         .category-header {
@@ -372,6 +490,10 @@
             margin-bottom: 15px;
             transition: all 0.3s;
             cursor: pointer;
+        }
+
+        .log-entry.hidden {
+            display: none;
         }
 
         .log-entry:hover {
@@ -538,6 +660,28 @@
             100% { transform: rotate(360deg); }
         }
 
+        .visible-count {
+            background: #10b981;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 2px solid #e0e0e0;
+                max-height: 400px;
+            }
+        }
+
         @media (max-width: 768px) {
             .header h1 {
                 font-size: 1.8em;
@@ -583,53 +727,65 @@
             <p>Analyzing your logs with AI-powered parser...</p>
         </div>
 
-        <div class="view-toggle" id="viewToggle">
-            <button class="view-btn active" data-view="raw">📄 Raw Logs</button>
-            <button class="view-btn" data-view="structured">📊 Structured View</button>
-        </div>
-
-        <div class="controls" id="controls">
-            <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Search logs by keyword, error code, or pattern...">
-                <span class="search-icon">🔍</span>
+        <div class="main-content" id="mainContent">
+            <div class="sidebar" id="sidebar">
+                <h3>🎯 Filter Categories</h3>
+                <button class="select-all-btn" id="selectAllBtn">✓ Select All</button>
+                <button class="deselect-all-btn" id="deselectAllBtn">✗ Deselect All</button>
+                <div id="categoryFilters"></div>
             </div>
-            <div class="filter-group">
-                <button class="filter-btn active" data-level="all">
-                    <span>All Logs</span>
-                </button>
-                <button class="filter-btn" data-level="error">
-                    <span class="level-badge badge-error"></span>
-                    <span>Errors</span>
-                </button>
-                <button class="filter-btn" data-level="warn">
-                    <span class="level-badge badge-warn"></span>
-                    <span>Warnings</span>
-                </button>
-                <button class="filter-btn" data-level="info">
-                    <span class="level-badge badge-info"></span>
-                    <span>Info</span>
-                </button>
-                <button class="filter-btn" data-level="debug">
-                    <span class="level-badge badge-debug"></span>
-                    <span>Debug</span>
-                </button>
-            </div>
-            <button class="export-btn" id="exportBtn">💾 Export</button>
-            <button class="clear-btn" id="clearBtn">🗑️ Clear</button>
-        </div>
 
-        <div class="stats" id="stats"></div>
+            <div class="content-area">
+                <div class="view-toggle">
+                    <button class="view-btn active" data-view="raw">📄 Raw Logs</button>
+                    <button class="view-btn" data-view="structured">📊 Structured View</button>
+                </div>
 
-        <div class="logs-container" id="logsContainer">
-            <div id="rawView" class="raw-view active">
-                <div class="no-logs">
-                    <div class="no-logs-icon">📋</div>
-                    <h3>No logs loaded yet</h3>
-                    <p>Upload a log file to get started</p>
+                <div class="controls">
+                    <div class="search-box">
+                        <input type="text" id="searchInput" placeholder="Search logs by keyword, error code, or pattern...">
+                        <span class="search-icon">🔍</span>
+                    </div>
+                    <div class="filter-group">
+                        <button class="filter-btn active" data-level="all">
+                            <span>All Logs</span>
+                        </button>
+                        <button class="filter-btn" data-level="error">
+                            <span class="level-badge badge-error"></span>
+                            <span>Errors</span>
+                        </button>
+                        <button class="filter-btn" data-level="warn">
+                            <span class="level-badge badge-warn"></span>
+                            <span>Warnings</span>
+                        </button>
+                        <button class="filter-btn" data-level="info">
+                            <span class="level-badge badge-info"></span>
+                            <span>Info</span>
+                        </button>
+                        <button class="filter-btn" data-level="debug">
+                            <span class="level-badge badge-debug"></span>
+                            <span>Debug</span>
+                        </button>
+                    </div>
+                    <span class="visible-count" id="visibleCount">0 visible</span>
+                    <button class="export-btn" id="exportBtn">💾 Export</button>
+                    <button class="clear-btn" id="clearBtn">🗑️ Clear</button>
+                </div>
+
+                <div class="stats" id="stats"></div>
+
+                <div class="logs-container" id="logsContainer">
+                    <div id="rawView" class="raw-view active">
+                        <div class="no-logs">
+                            <div class="no-logs-icon">📋</div>
+                            <h3>No logs loaded yet</h3>
+                            <p>Upload a log file to get started</p>
+                        </div>
+                    </div>
+
+                    <div id="structuredView" class="structured-view"></div>
                 </div>
             </div>
-
-            <div id="structuredView" class="structured-view"></div>
         </div>
     </div>
 
@@ -639,27 +795,37 @@
         let currentFilter = 'all';
         let searchTerm = '';
         let currentView = 'raw';
+        let categoryFilters = {
+            'startup': true,
+            'operations': true,
+            'warnings': true,
+            'errors': true,
+            'recoveries': true,
+            'infrastructure': true,
+            'deprecated': true
+        };
 
         const fileInput = document.getElementById('fileInput');
         const uploadBox = document.getElementById('uploadBox');
         const uploadSection = document.getElementById('uploadSection');
-        const viewToggle = document.getElementById('viewToggle');
-        const controls = document.getElementById('controls');
-        const stats = document.getElementById('stats');
-        const logsContainer = document.getElementById('logsContainer');
+        const mainContent = document.getElementById('mainContent');
+        const sidebar = document.getElementById('sidebar');
+        const categoryFiltersEl = document.getElementById('categoryFilters');
         const rawView = document.getElementById('rawView');
         const structuredView = document.getElementById('structuredView');
         const searchInput = document.getElementById('searchInput');
         const filterBtns = document.querySelectorAll('.filter-btn');
         const viewBtns = document.querySelectorAll('.view-btn');
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        const deselectAllBtn = document.getElementById('deselectAllBtn');
         const clearBtn = document.getElementById('clearBtn');
         const exportBtn = document.getElementById('exportBtn');
         const loading = document.getElementById('loading');
+        const stats = document.getElementById('stats');
+        const visibleCount = document.getElementById('visibleCount');
 
-        // Upload box click
         uploadBox.addEventListener('click', () => fileInput.click());
 
-        // Drag and drop
         uploadBox.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadBox.classList.add('dragover');
@@ -676,13 +842,11 @@
             if (file) handleFile(file);
         });
 
-        // File input change
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) handleFile(file);
         });
 
-        // View toggle
         viewBtns.forEach(btn => {
             btn.addEventListener('click', function() {
                 viewBtns.forEach(b => b.classList.remove('active'));
@@ -699,7 +863,6 @@
             });
         });
 
-        // Handle file
         async function handleFile(file) {
             loading.classList.add('active');
             uploadSection.style.display = 'none';
@@ -709,17 +872,15 @@
             setTimeout(() => {
                 parseLogFile(text);
                 loading.classList.remove('active');
-                viewToggle.classList.add('active');
-                controls.classList.add('active');
-                stats.classList.add('active');
-                logsContainer.classList.add('active');
+                mainContent.classList.add('active');
+                renderCategoryFilters();
                 renderLogs();
                 renderStructuredView();
                 updateStats();
+                updateVisibleCount();
             }, 1000);
         }
 
-        // Parse log file
         function parseLogFile(text) {
             allLogs = [];
             const lines = text.split('\n');
@@ -736,7 +897,6 @@
                     category: null
                 };
 
-                // Try JSON format first
                 if (line.trim().startsWith('{')) {
                     try {
                         const json = JSON.parse(line);
@@ -747,7 +907,6 @@
                     } catch (e) {}
                 }
 
-                // Standard log format
                 const standardMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*[\[\(]?(\w+)[\]\)]?\s*[:\-]?\s*(.+)/i);
                 if (standardMatch) {
                     log.timestamp = standardMatch[1];
@@ -755,7 +914,6 @@
                     log.message = standardMatch[3];
                 }
 
-                // Apache/Nginx format
                 const apacheMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s.*?\[([^\]]+)\]\s"([^"]+)"\s(\d{3})/);
                 if (apacheMatch) {
                     log.timestamp = apacheMatch[2];
@@ -763,14 +921,12 @@
                     log.level = parseInt(apacheMatch[4]) >= 400 ? 'error' : parseInt(apacheMatch[4]) >= 300 ? 'warn' : 'info';
                 }
 
-                // Syslog format
                 const syslogMatch = line.match(/^(\w+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+):\s*(.+)/);
                 if (syslogMatch) {
                     log.timestamp = syslogMatch[1];
                     log.message = syslogMatch[4];
                 }
 
-                // Detect log level
                 if (log.level === 'info') {
                     if (/error|exception|fatal|critical|fail/i.test(line)) {
                         log.level = 'error';
@@ -783,7 +939,6 @@
                     }
                 }
 
-                // Extract timestamp
                 if (!log.timestamp) {
                     const timestampMatch = line.match(/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
                     if (timestampMatch) {
@@ -791,16 +946,13 @@
                     }
                 }
 
-                // Categorize log
                 log.category = categorizeLog(log);
-
                 allLogs.push(log);
             });
 
             filteredLogs = [...allLogs];
         }
 
-        // Categorize logs
         function categorizeLog(log) {
             const msg = log.message.toLowerCase();
 
@@ -832,7 +984,74 @@
             return 'operations';
         }
 
-        // Render structured view
+        function renderCategoryFilters() {
+            const categories = {
+                'startup': { title: '🚀 Startup & Initialization', logs: [] },
+                'operations': { title: '⚙️ Normal Operations', logs: [] },
+                'warnings': { title: '⚠️ Warnings & Performance', logs: [] },
+                'errors': { title: '❌ Errors & Failures', logs: [] },
+                'recoveries': { title: '✅ Recoveries & Successes', logs: [] },
+                'infrastructure': { title: '🏗️ Infrastructure Events', logs: [] },
+                'deprecated': { title: '⏰ Deprecated APIs', logs: [] }
+            };
+
+            allLogs.forEach(log => {
+                if (categories[log.category]) {
+                    categories[log.category].logs.push(log);
+                }
+            });
+
+            let html = '';
+            Object.keys(categories).forEach(key => {
+                const cat = categories[key];
+                const count = cat.logs.length;
+                if (count > 0) {
+                    const errorCount = cat.logs.filter(l => l.level === 'error').length;
+                    const warnCount = cat.logs.filter(l => l.level === 'warn').length;
+                    const countClass = errorCount > 0 ? 'error' : warnCount > 0 ? 'warn' : 'success';
+
+                    html += `
+                        <div class="category-filter">
+                            <label>
+                                <input type="checkbox" data-category="${key}" ${categoryFilters[key] ? 'checked' : ''}>
+                                <div class="category-info">
+                                    <div class="category-name">${cat.title}</div>
+                                    <div class="category-count ${countClass}">
+                                        <span class="num">${count}</span> logs
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    `;
+                }
+            });
+
+            categoryFiltersEl.innerHTML = html;
+
+            document.querySelectorAll('.category-filter input').forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    categoryFilters[this.dataset.category] = this.checked;
+                    applyFilters();
+                });
+            });
+        }
+
+        selectAllBtn.addEventListener('click', () => {
+            Object.keys(categoryFilters).forEach(key => {
+                categoryFilters[key] = true;
+            });
+            document.querySelectorAll('.category-filter input').forEach(cb => cb.checked = true);
+            applyFilters();
+        });
+
+        deselectAllBtn.addEventListener('click', () => {
+            Object.keys(categoryFilters).forEach(key => {
+                categoryFilters[key] = false;
+            });
+            document.querySelectorAll('.category-filter input').forEach(cb => cb.checked = false);
+            applyFilters();
+        });
+
         function renderStructuredView() {
             const categories = {
                 'startup': { title: '🚀 Startup and Initialization', logs: [] },
@@ -853,9 +1072,10 @@
             let html = '';
             Object.keys(categories).forEach(key => {
                 const cat = categories[key];
+                const isVisible = categoryFilters[key];
                 if (cat.logs.length > 0) {
                     html += `
-                        <div class="category-section">
+                        <div class="category-section ${isVisible ? '' : 'hidden'}">
                             <div class="category-header" onclick="toggleCategory(this)">
                                 <span>${cat.title}</span>
                                 <span class="category-badge">${cat.logs.length} logs</span>
@@ -887,13 +1107,11 @@
             structuredView.innerHTML = html || '<div class="no-logs"><h3>No logs in structured view</h3></div>';
         }
 
-        // Toggle category
         function toggleCategory(header) {
             const content = header.nextElementSibling;
             content.classList.toggle('active');
         }
 
-        // Render raw logs
         function renderLogs() {
             rawView.innerHTML = '';
 
@@ -909,8 +1127,9 @@
             }
 
             filteredLogs.forEach(log => {
+                const isVisible = categoryFilters[log.category];
                 const logEntry = document.createElement('div');
-                logEntry.className = `log-entry ${log.level}`;
+                logEntry.className = `log-entry ${log.level} ${isVisible ? '' : 'hidden'}`;
 
                 const message = highlightSearch(log.message, searchTerm);
 
@@ -934,23 +1153,22 @@
             });
         }
 
-        // Highlight search
         function highlightSearch(text, term) {
             if (!term) return text;
             const regex = new RegExp(`(${term})`, 'gi');
             return text.replace(regex, '<span class="highlight">$1</span>');
         }
 
-        // Update stats
         function updateStats() {
-            const errorCount = allLogs.filter(l => l.level === 'error').length;
-            const warnCount = allLogs.filter(l => l.level === 'warn').length;
-            const infoCount = allLogs.filter(l => l.level === 'info').length;
+            const visibleLogs = filteredLogs.filter(l => categoryFilters[l.category]);
+            const errorCount = visibleLogs.filter(l => l.level === 'error').length;
+            const warnCount = visibleLogs.filter(l => l.level === 'warn').length;
+            const infoCount = visibleLogs.filter(l => l.level === 'info').length;
 
             stats.innerHTML = `
                 <div class="stat-card">
-                    <h4>Total Logs</h4>
-                    <div class="value">${allLogs.length}</div>
+                    <h4>Visible Logs</h4>
+                    <div class="value">${visibleLogs.length}</div>
                 </div>
                 <div class="stat-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
                     <h4>Errors</h4>
@@ -967,13 +1185,16 @@
             `;
         }
 
-        // Search
+        function updateVisibleCount() {
+            const visibleLogs = filteredLogs.filter(l => categoryFilters[l.category]);
+            visibleCount.textContent = `${visibleLogs.length} visible`;
+        }
+
         searchInput.addEventListener('input', (e) => {
             searchTerm = e.target.value.toLowerCase();
             applyFilters();
         });
 
-        // Filter buttons
         filterBtns.forEach(btn => {
             btn.addEventListener('click', function() {
                 filterBtns.forEach(b => b.classList.remove('active'));
@@ -983,7 +1204,6 @@
             });
         });
 
-        // Apply filters
         function applyFilters() {
             filteredLogs = allLogs.filter(log => {
                 const matchesLevel = currentFilter === 'all' || log.level === currentFilter;
@@ -994,21 +1214,20 @@
             });
             renderLogs();
             renderStructuredView();
+            updateStats();
+            updateVisibleCount();
         }
 
-        // Clear
         clearBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear all logs?')) {
                 allLogs = [];
                 filteredLogs = [];
-                viewToggle.classList.remove('active');
-                controls.classList.remove('active');
-                stats.classList.remove('active');
-                logsContainer.classList.remove('active');
+                mainContent.classList.remove('active');
                 uploadSection.style.display = 'block';
                 searchInput.value = '';
                 searchTerm = '';
                 currentFilter = 'all';
+                Object.keys(categoryFilters).forEach(key => categoryFilters[key] = true);
                 filterBtns.forEach(b => b.classList.remove('active'));
                 filterBtns[0].classList.add('active');
                 viewBtns.forEach(b => b.classList.remove('active'));
@@ -1017,9 +1236,9 @@
             }
         });
 
-        // Export
         exportBtn.addEventListener('click', () => {
-            const dataStr = JSON.stringify(filteredLogs, null, 2);
+            const visibleLogs = filteredLogs.filter(l => categoryFilters[l.category]);
+            const dataStr = JSON.stringify(visibleLogs, null, 2);
             const dataBlob = new Blob([dataStr], {type: 'application/json'});
             const url = URL.createObjectURL(dataBlob);
             const link = document.createElement('a');
