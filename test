@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Professional Log Analyzer</title>
+    <title>Advanced Log Analyzer Pro</title>
     <style>
         * {
             margin: 0;
@@ -19,7 +19,7 @@
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1800px;
             margin: 0 auto;
             background: white;
             border-radius: 16px;
@@ -30,7 +30,7 @@
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 30px;
+            padding: 30px 40px;
             text-align: center;
         }
 
@@ -66,25 +66,9 @@
             transform: translateY(-2px);
         }
 
-        .upload-box.dragover {
-            background: #e8ebff;
-            border-color: #764ba2;
-        }
-
         .upload-icon {
             font-size: 4em;
             margin-bottom: 20px;
-        }
-
-        .upload-box h3 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 1.5em;
-        }
-
-        .upload-box p {
-            color: #666;
-            font-size: 1em;
         }
 
         input[type="file"] {
@@ -93,6 +77,7 @@
 
         .main-content {
             display: none;
+            height: calc(100vh - 220px);
         }
 
         .main-content.active {
@@ -103,151 +88,179 @@
             width: 320px;
             background: #f8f9fa;
             border-right: 2px solid #e0e0e0;
-            padding: 30px 20px;
+            padding: 20px;
             overflow-y: auto;
-            max-height: calc(100vh - 300px);
+            flex-shrink: 0;
         }
 
         .sidebar h3 {
             color: #333;
-            margin-bottom: 20px;
-            font-size: 1.2em;
+            margin-bottom: 15px;
+            font-size: 1em;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .category-filter {
+        .quick-jump {
             background: white;
             border-radius: 10px;
             padding: 15px;
             margin-bottom: 15px;
+            border: 2px solid #667eea;
+        }
+
+        .quick-jump-btn {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 8px;
+            transition: all 0.3s;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .quick-jump-btn:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        .quick-jump-btn.warn {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .quick-jump-btn.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .custom-filter-section {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 2px solid #e5e7eb;
+        }
+
+        .custom-filter-input {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .custom-filter-input input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+
+        .add-filter-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .custom-filter-item {
+            background: #f8f9ff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .category-filter {
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
             border: 2px solid #e5e7eb;
             transition: all 0.3s;
         }
 
         .category-filter:hover {
             border-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
         }
 
         .category-filter label {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             cursor: pointer;
-            font-weight: 500;
+            font-size: 0.9em;
         }
 
         .category-filter input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             cursor: pointer;
             accent-color: #667eea;
         }
 
-        .category-info {
-            flex: 1;
-        }
-
-        .category-name {
-            font-size: 0.95em;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .category-count {
-            font-size: 0.85em;
-            color: #6b7280;
-        }
-
-        .category-count .num {
-            background: #667eea;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 10px;
+        .select-all-btn, .deselect-all-btn {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
             font-weight: 600;
-            margin-left: 5px;
-        }
-
-        .category-count.error .num {
-            background: #ef4444;
-        }
-
-        .category-count.warn .num {
-            background: #f59e0b;
-        }
-
-        .category-count.success .num {
-            background: #10b981;
+            margin-bottom: 8px;
+            font-size: 0.85em;
         }
 
         .select-all-btn {
-            width: 100%;
-            padding: 10px;
             background: #667eea;
             color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            margin-bottom: 15px;
-            transition: all 0.3s;
-        }
-
-        .select-all-btn:hover {
-            background: #5568d3;
         }
 
         .deselect-all-btn {
-            width: 100%;
-            padding: 10px;
             background: white;
             color: #667eea;
             border: 2px solid #667eea;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            margin-bottom: 20px;
-            transition: all 0.3s;
-        }
-
-        .deselect-all-btn:hover {
-            background: #f8f9ff;
         }
 
         .content-area {
             flex: 1;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
 
         .view-toggle {
-            padding: 20px 40px;
+            padding: 15px 30px;
             background: #f8f9fa;
             display: flex;
             justify-content: center;
-            gap: 10px;
+            gap: 8px;
             border-bottom: 2px solid #e0e0e0;
+            flex-shrink: 0;
         }
 
         .view-btn {
-            padding: 12px 30px;
+            padding: 10px 24px;
             border: 2px solid #ddd;
             background: white;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 1em;
+            font-size: 0.95em;
             font-weight: 600;
             transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .view-btn:hover {
-            border-color: #667eea;
-            background: #f8f9ff;
         }
 
         .view-btn.active {
@@ -257,66 +270,44 @@
         }
 
         .controls {
-            padding: 30px 40px;
+            padding: 15px 30px;
             background: #f8f9fa;
             display: flex;
-            gap: 15px;
+            gap: 10px;
             flex-wrap: wrap;
             align-items: center;
             border-bottom: 2px solid #e0e0e0;
+            flex-shrink: 0;
         }
 
         .search-box {
             flex: 1;
-            min-width: 300px;
+            min-width: 250px;
             position: relative;
         }
 
         .search-box input {
             width: 100%;
-            padding: 12px 40px 12px 15px;
+            padding: 10px 15px;
             border: 2px solid #ddd;
             border-radius: 8px;
-            font-size: 1em;
-            transition: border-color 0.3s;
-        }
-
-        .search-box input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .search-icon {
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #999;
+            font-size: 0.95em;
         }
 
         .filter-group {
             display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
+            gap: 8px;
         }
 
         .filter-btn {
-            padding: 10px 20px;
+            padding: 8px 16px;
             border: 2px solid #ddd;
             background: white;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 0.95em;
+            font-size: 0.85em;
             font-weight: 600;
             transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .filter-btn:hover {
-            border-color: #667eea;
-            background: #f8f9ff;
         }
 
         .filter-btn.active {
@@ -325,53 +316,204 @@
             border-color: #667eea;
         }
 
-        .level-badge {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .badge-error { background: #ef4444; }
-        .badge-warn { background: #f59e0b; }
-        .badge-info { background: #3b82f6; }
-        .badge-debug { background: #6b7280; }
-        .badge-success { background: #10b981; }
-
         .stats {
-            padding: 20px 40px;
+            padding: 15px 30px;
             background: white;
             display: grid;
-            gap: 20px;
+            gap: 15px;
             border-bottom: 2px solid #f0f0f0;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            flex-shrink: 0;
         }
 
         .stat-card {
-            padding: 20px;
+            padding: 12px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 12px;
+            border-radius: 8px;
             color: white;
             text-align: center;
         }
 
         .stat-card h4 {
-            font-size: 0.9em;
+            font-size: 0.75em;
             opacity: 0.9;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
             text-transform: uppercase;
-            letter-spacing: 1px;
         }
 
         .stat-card .value {
-            font-size: 2.5em;
+            font-size: 1.8em;
             font-weight: 700;
         }
 
+        .charts-section {
+            padding: 20px 30px;
+            background: white;
+            border-bottom: 2px solid #f0f0f0;
+            flex-shrink: 0;
+            overflow-x: auto;
+        }
+
+        .chart-container {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+
+        .chart-title {
+            color: #333;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        .timeline-chart {
+            display: flex;
+            gap: 4px;
+            height: 100px;
+            align-items: flex-end;
+            margin-bottom: 10px;
+        }
+
+        .timeline-bar {
+            flex: 1;
+            background: #e5e7eb;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .timeline-bar:hover {
+            opacity: 0.8;
+        }
+
+        .timeline-bar.error {
+            background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .timeline-bar.warn {
+            background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .timeline-bar.info {
+            background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+        }
+
+        .pattern-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin: 5px;
+        }
+
+        .pattern-badge.critical {
+            background: #ef4444;
+        }
+
         .logs-container {
-            padding: 40px;
-            max-height: 600px;
+            flex: 1;
             overflow-y: auto;
+            padding: 20px 30px;
+        }
+
+        .log-entry {
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .log-entry:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transform: translateX(3px);
+        }
+
+        .log-entry.error {
+            border-left: 5px solid #ef4444;
+            background: #fef2f2;
+        }
+
+        .log-entry.warn {
+            border-left: 5px solid #f59e0b;
+            background: #fffbeb;
+        }
+
+        .log-entry.info {
+            border-left: 5px solid #3b82f6;
+            background: #eff6ff;
+        }
+
+        .log-entry.success {
+            border-left: 5px solid #10b981;
+            background: #f0fdf4;
+        }
+
+        .log-entry.hidden {
+            display: none;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .log-level {
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-weight: 700;
+            font-size: 0.75em;
+            text-transform: uppercase;
+        }
+
+        .level-error { background: #ef4444; color: white; }
+        .level-warn { background: #f59e0b; color: white; }
+        .level-info { background: #3b82f6; color: white; }
+        .level-success { background: #10b981; color: white; }
+
+        .log-timestamp {
+            color: #6b7280;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .log-message {
+            color: #1f2937;
+            line-height: 1.6;
+            font-size: 0.9em;
+            word-break: break-word;
+        }
+
+        .log-details {
+            display: none;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .log-details.active {
+            display: block;
+        }
+
+        .log-details pre {
+            background: #f3f4f6;
+            padding: 10px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.85em;
+            line-height: 1.4;
         }
 
         .structured-view {
@@ -383,9 +525,9 @@
         }
 
         .category-section {
-            margin-bottom: 40px;
+            margin-bottom: 20px;
             border: 2px solid #e5e7eb;
-            border-radius: 12px;
+            border-radius: 10px;
             overflow: hidden;
         }
 
@@ -396,28 +538,16 @@
         .category-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 20px 25px;
+            padding: 15px 20px;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
             font-weight: 600;
-            font-size: 1.1em;
-        }
-
-        .category-header:hover {
-            background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
-        }
-
-        .category-badge {
-            background: rgba(255,255,255,0.2);
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9em;
         }
 
         .category-content {
-            padding: 25px;
+            padding: 15px;
             background: #f9fafb;
             display: none;
         }
@@ -428,17 +558,11 @@
 
         .category-item {
             background: white;
-            padding: 15px 20px;
-            margin-bottom: 12px;
-            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border-radius: 6px;
             border-left: 4px solid #667eea;
-            transition: all 0.3s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-
-        .category-item:hover {
-            transform: translateX(5px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            font-size: 0.9em;
         }
 
         .category-item.error {
@@ -460,140 +584,11 @@
             display: inline-block;
             background: #667eea;
             color: white;
-            padding: 4px 10px;
-            border-radius: 5px;
+            padding: 2px 8px;
+            border-radius: 4px;
             font-size: 0.85em;
             font-weight: 600;
-            margin-right: 10px;
-        }
-
-        .item-message {
-            display: inline;
-            color: #1f2937;
-            line-height: 1.6;
-        }
-
-        .item-details {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid #e5e7eb;
-            font-size: 0.9em;
-            color: #6b7280;
-            font-family: 'Courier New', monospace;
-        }
-
-        .log-entry {
-            background: white;
-            border: 2px solid #e5e7eb;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 15px;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
-
-        .log-entry.hidden {
-            display: none;
-        }
-
-        .log-entry:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            transform: translateX(5px);
-        }
-
-        .log-entry.error {
-            border-left: 6px solid #ef4444;
-            background: #fef2f2;
-        }
-
-        .log-entry.warn {
-            border-left: 6px solid #f59e0b;
-            background: #fffbeb;
-        }
-
-        .log-entry.info {
-            border-left: 6px solid #3b82f6;
-            background: #eff6ff;
-        }
-
-        .log-entry.debug {
-            border-left: 6px solid #6b7280;
-            background: #f9fafb;
-        }
-
-        .log-entry.success {
-            border-left: 6px solid #10b981;
-            background: #f0fdf4;
-        }
-
-        .log-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .log-level {
-            padding: 6px 14px;
-            border-radius: 6px;
-            font-weight: 700;
-            font-size: 0.85em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .level-error { background: #ef4444; color: white; }
-        .level-warn { background: #f59e0b; color: white; }
-        .level-info { background: #3b82f6; color: white; }
-        .level-debug { background: #6b7280; color: white; }
-        .level-success { background: #10b981; color: white; }
-
-        .log-timestamp {
-            color: #6b7280;
-            font-size: 0.9em;
-            font-weight: 600;
-        }
-
-        .log-message {
-            color: #1f2937;
-            line-height: 1.6;
-            font-size: 1em;
-            margin-bottom: 10px;
-            word-break: break-word;
-        }
-
-        .log-details {
-            display: none;
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #e5e7eb;
-        }
-
-        .log-details.active {
-            display: block;
-        }
-
-        .log-details pre {
-            background: #f3f4f6;
-            padding: 15px;
-            border-radius: 8px;
-            overflow-x: auto;
-            font-size: 0.9em;
-            line-height: 1.5;
-        }
-
-        .no-logs {
-            text-align: center;
-            padding: 60px;
-            color: #6b7280;
-        }
-
-        .no-logs-icon {
-            font-size: 4em;
-            margin-bottom: 20px;
-            opacity: 0.5;
+            margin-right: 8px;
         }
 
         .highlight {
@@ -603,36 +598,32 @@
             font-weight: 600;
         }
 
-        .clear-btn {
-            padding: 10px 24px;
-            background: #ef4444;
-            color: white;
+        .export-btn, .clear-btn {
+            padding: 8px 16px;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
-            transition: all 0.3s;
-        }
-
-        .clear-btn:hover {
-            background: #dc2626;
-            transform: translateY(-2px);
+            font-size: 0.85em;
         }
 
         .export-btn {
-            padding: 10px 24px;
             background: #10b981;
             color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s;
         }
 
-        .export-btn:hover {
-            background: #059669;
-            transform: translateY(-2px);
+        .clear-btn {
+            background: #ef4444;
+            color: white;
+        }
+
+        .visible-count {
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85em;
         }
 
         .loading {
@@ -660,48 +651,15 @@
             100% { transform: rotate(360deg); }
         }
 
-        .visible-count {
-            background: #10b981;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.9em;
-        }
-
         @media (max-width: 1024px) {
             .main-content {
                 flex-direction: column;
+                height: auto;
             }
 
             .sidebar {
                 width: 100%;
-                border-right: none;
-                border-bottom: 2px solid #e0e0e0;
                 max-height: 400px;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 1.8em;
-            }
-
-            .controls {
-                padding: 20px;
-            }
-
-            .logs-container {
-                padding: 20px;
-            }
-
-            .filter-group {
-                width: 100%;
-            }
-
-            .filter-btn {
-                flex: 1;
-                justify-content: center;
             }
         }
     </style>
@@ -709,80 +667,85 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔍 Professional Log Analyzer</h1>
-            <p>Advanced log parsing & analysis tool • Supports all major formats • Zero installation required</p>
+            <h1>🔍 Advanced Log Analyzer Pro</h1>
+            <p>Smart Filtering • Visual Analytics • Quick Navigation • Pattern Detection</p>
         </div>
 
         <div class="upload-section" id="uploadSection">
-            <div class="upload-box" id="uploadBox">
+            <div class="upload-box" onclick="document.getElementById('fileInput').click()">
                 <div class="upload-icon">📁</div>
-                <h3>Drop your log file here or click to browse</h3>
-                <p>Supports: .log, .txt, .json, Apache, Nginx, Syslog, and more</p>
+                <h3>Upload Your Log File</h3>
+                <p>Supports all formats • Instant analysis • Visual charts included</p>
                 <input type="file" id="fileInput" accept=".log,.txt,.json,.csv">
             </div>
         </div>
 
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Analyzing your logs with AI-powered parser...</p>
+            <p>Analyzing logs and generating insights...</p>
         </div>
 
         <div class="main-content" id="mainContent">
-            <div class="sidebar" id="sidebar">
-                <h3>🎯 Filter Categories</h3>
-                <button class="select-all-btn" id="selectAllBtn">✓ Select All</button>
-                <button class="deselect-all-btn" id="deselectAllBtn">✗ Deselect All</button>
+            <div class="sidebar">
+                <h3>⚡ Quick Jump</h3>
+                <div class="quick-jump" id="quickJump"></div>
+
+                <h3>🔑 Keywords</h3>
+                <div class="custom-filter-section">
+                    <div class="custom-filter-input">
+                        <input type="text" id="customKeywordInput" placeholder="e.g., timeout, error">
+                        <button class="add-filter-btn" id="addCustomFilterBtn">+</button>
+                    </div>
+                    <div id="customFiltersList"></div>
+                </div>
+
+                <h3>📂 Categories</h3>
+                <button class="select-all-btn" id="selectAllBtn">Select All</button>
+                <button class="deselect-all-btn" id="deselectAllBtn">Deselect All</button>
                 <div id="categoryFilters"></div>
             </div>
 
             <div class="content-area">
                 <div class="view-toggle">
                     <button class="view-btn active" data-view="raw">📄 Raw Logs</button>
-                    <button class="view-btn" data-view="structured">📊 Structured View</button>
+                    <button class="view-btn" data-view="structured">📊 Structured</button>
+                    <button class="view-btn" data-view="charts">📈 Charts</button>
                 </div>
 
                 <div class="controls">
                     <div class="search-box">
-                        <input type="text" id="searchInput" placeholder="Search logs by keyword, error code, or pattern...">
-                        <span class="search-icon">🔍</span>
+                        <input type="text" id="searchInput" placeholder="Search logs...">
                     </div>
                     <div class="filter-group">
-                        <button class="filter-btn active" data-level="all">
-                            <span>All Logs</span>
-                        </button>
-                        <button class="filter-btn" data-level="error">
-                            <span class="level-badge badge-error"></span>
-                            <span>Errors</span>
-                        </button>
-                        <button class="filter-btn" data-level="warn">
-                            <span class="level-badge badge-warn"></span>
-                            <span>Warnings</span>
-                        </button>
-                        <button class="filter-btn" data-level="info">
-                            <span class="level-badge badge-info"></span>
-                            <span>Info</span>
-                        </button>
-                        <button class="filter-btn" data-level="debug">
-                            <span class="level-badge badge-debug"></span>
-                            <span>Debug</span>
-                        </button>
+                        <button class="filter-btn active" data-level="all">All</button>
+                        <button class="filter-btn" data-level="error">❌ Errors</button>
+                        <button class="filter-btn" data-level="warn">⚠️ Warnings</button>
+                        <button class="filter-btn" data-level="info">ℹ️ Info</button>
                     </div>
-                    <span class="visible-count" id="visibleCount">0 visible</span>
+                    <span class="visible-count" id="visibleCount">0 logs</span>
                     <button class="export-btn" id="exportBtn">💾 Export</button>
                     <button class="clear-btn" id="clearBtn">🗑️ Clear</button>
                 </div>
 
                 <div class="stats" id="stats"></div>
 
-                <div class="logs-container" id="logsContainer">
-                    <div id="rawView" class="raw-view active">
-                        <div class="no-logs">
-                            <div class="no-logs-icon">📋</div>
-                            <h3>No logs loaded yet</h3>
-                            <p>Upload a log file to get started</p>
+                <div class="charts-section" id="chartsSection" style="display: none;">
+                    <div class="chart-container">
+                        <div class="chart-title">📊 Log Distribution Over Time</div>
+                        <div class="timeline-chart" id="timelineChart"></div>
+                        <div style="color: #6b7280; font-size: 0.85em; text-align: center; margin-top: 10px;">
+                            Hover over bars to see details
                         </div>
                     </div>
 
+                    <div class="chart-container">
+                        <div class="chart-title">🔍 Detected Patterns</div>
+                        <div id="patterns"></div>
+                    </div>
+                </div>
+
+                <div class="logs-container">
+                    <div id="rawView" class="raw-view active"></div>
                     <div id="structuredView" class="structured-view"></div>
                 </div>
             </div>
@@ -804,47 +767,45 @@
             'infrastructure': true,
             'deprecated': true
         };
+        let customKeywords = [];
 
         const fileInput = document.getElementById('fileInput');
-        const uploadBox = document.getElementById('uploadBox');
         const uploadSection = document.getElementById('uploadSection');
         const mainContent = document.getElementById('mainContent');
-        const sidebar = document.getElementById('sidebar');
+        const loading = document.getElementById('loading');
+        const customKeywordInput = document.getElementById('customKeywordInput');
+        const addCustomFilterBtn = document.getElementById('addCustomFilterBtn');
+        const customFiltersList = document.getElementById('customFiltersList');
         const categoryFiltersEl = document.getElementById('categoryFilters');
+        const quickJump = document.getElementById('quickJump');
         const rawView = document.getElementById('rawView');
         const structuredView = document.getElementById('structuredView');
+        const chartsSection = document.getElementById('chartsSection');
         const searchInput = document.getElementById('searchInput');
         const filterBtns = document.querySelectorAll('.filter-btn');
         const viewBtns = document.querySelectorAll('.view-btn');
         const selectAllBtn = document.getElementById('selectAllBtn');
         const deselectAllBtn = document.getElementById('deselectAllBtn');
-        const clearBtn = document.getElementById('clearBtn');
-        const exportBtn = document.getElementById('exportBtn');
-        const loading = document.getElementById('loading');
         const stats = document.getElementById('stats');
         const visibleCount = document.getElementById('visibleCount');
+        const exportBtn = document.getElementById('exportBtn');
+        const clearBtn = document.getElementById('clearBtn');
 
-        uploadBox.addEventListener('click', () => fileInput.click());
-
-        uploadBox.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadBox.classList.add('dragover');
-        });
-
-        uploadBox.addEventListener('dragleave', () => {
-            uploadBox.classList.remove('dragover');
-        });
-
-        uploadBox.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadBox.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file) handleFile(file);
-        });
-
-        fileInput.addEventListener('change', (e) => {
+        fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
-            if (file) handleFile(file);
+            if (file) {
+                uploadSection.style.display = 'none';
+                loading.classList.add('active');
+
+                const text = await file.text();
+
+                setTimeout(() => {
+                    parseLogFile(text);
+                    loading.classList.remove('active');
+                    mainContent.classList.add('active');
+                    renderAll();
+                }, 1000);
+            }
         });
 
         viewBtns.forEach(btn => {
@@ -856,53 +817,79 @@
                 if (currentView === 'raw') {
                     rawView.classList.add('active');
                     structuredView.classList.remove('active');
-                } else {
+                    chartsSection.style.display = 'none';
+                } else if (currentView === 'structured') {
                     rawView.classList.remove('active');
                     structuredView.classList.add('active');
+                    chartsSection.style.display = 'none';
+                } else {
+                    rawView.classList.remove('active');
+                    structuredView.classList.remove('active');
+                    chartsSection.style.display = 'block';
                 }
             });
         });
 
-        async function handleFile(file) {
-            loading.classList.add('active');
-            uploadSection.style.display = 'none';
+        addCustomFilterBtn.addEventListener('click', addCustomKeyword);
+        customKeywordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addCustomKeyword();
+        });
 
-            const text = await file.text();
-
-            setTimeout(() => {
-                parseLogFile(text);
-                loading.classList.remove('active');
-                mainContent.classList.add('active');
-                renderCategoryFilters();
-                renderLogs();
-                renderStructuredView();
-                updateStats();
-                updateVisibleCount();
-            }, 1000);
+        function addCustomKeyword() {
+            const keyword = customKeywordInput.value.trim().toLowerCase();
+            if (keyword && !customKeywords.some(k => k.keyword === keyword)) {
+                customKeywords.push({ keyword, enabled: true });
+                customKeywordInput.value = '';
+                renderCustomFilters();
+                applyFilters();
+            }
         }
 
+        function renderCustomFilters() {
+            customFiltersList.innerHTML = customKeywords.map((item, index) => `
+                <div class="custom-filter-item">
+                    <label style="display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer;">
+                        <input type="checkbox" ${item.enabled ? 'checked' : ''} onchange="toggleCustomKeyword(${index})" style="width: 16px; height: 16px; accent-color: #667eea;">
+                        <span style="font-size: 0.85em;">${item.keyword}</span>
+                    </label>
+                    <button onclick="removeCustomKeyword(${index})" style="background: #ef4444; color: white; border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75em;">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function toggleCustomKeyword(index) {
+            customKeywords[index].enabled = !customKeywords[index].enabled;
+            applyFilters();
+        }
+
+        function removeCustomKeyword(index) {
+            customKeywords.splice(index, 1);
+            renderCustomFilters();
+            applyFilters();
+        }
+
+        window.toggleCustomKeyword = toggleCustomKeyword;
+        window.removeCustomKeyword = removeCustomKeyword;
+
         function parseLogFile(text) {
-            allLogs = [];
-            const lines = text.split('\n');
-
-            lines.forEach((line, index) => {
-                if (!line.trim()) return;
-
+            const lines = text.split('\n').filter(l => l.trim());
+            allLogs = lines.map((line, index) => {
                 let log = {
                     index: index + 1,
                     timestamp: null,
                     level: 'info',
                     message: line,
                     raw: line,
-                    category: null
+                    category: null,
+                    time: null
                 };
 
                 if (line.trim().startsWith('{')) {
                     try {
                         const json = JSON.parse(line);
-                        log.timestamp = json.timestamp || json.time || json.date || json['@timestamp'];
-                        log.level = (json.level || json.severity || json.priority || 'info').toLowerCase();
-                        log.message = json.message || json.msg || json.text || JSON.stringify(json);
+                        log.timestamp = json.timestamp || json.time || json.date;
+                        log.level = (json.level || 'info').toLowerCase();
+                        log.message = json.message || json.msg || line;
                         log.raw = JSON.stringify(json, null, 2);
                     } catch (e) {}
                 }
@@ -914,40 +901,25 @@
                     log.message = standardMatch[3];
                 }
 
-                const apacheMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s.*?\[([^\]]+)\]\s"([^"]+)"\s(\d{3})/);
-                if (apacheMatch) {
-                    log.timestamp = apacheMatch[2];
-                    log.message = `${apacheMatch[3]} - Status: ${apacheMatch[4]}`;
-                    log.level = parseInt(apacheMatch[4]) >= 400 ? 'error' : parseInt(apacheMatch[4]) >= 300 ? 'warn' : 'info';
-                }
-
-                const syslogMatch = line.match(/^(\w+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+):\s*(.+)/);
-                if (syslogMatch) {
-                    log.timestamp = syslogMatch[1];
-                    log.message = syslogMatch[4];
-                }
-
                 if (log.level === 'info') {
                     if (/error|exception|fatal|critical|fail/i.test(line)) {
                         log.level = 'error';
                     } else if (/warn|warning|deprecated/i.test(line)) {
                         log.level = 'warn';
-                    } else if (/debug|trace/i.test(line)) {
-                        log.level = 'debug';
                     } else if (/success|ok|complete|successful/i.test(line)) {
                         log.level = 'success';
                     }
                 }
 
                 if (!log.timestamp) {
-                    const timestampMatch = line.match(/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
-                    if (timestampMatch) {
-                        log.timestamp = timestampMatch[0];
+                    const timeMatch = line.match(/(\d{2}:\d{2}:\d{2})/);
+                    if (timeMatch) {
+                        log.time = timeMatch[1];
                     }
                 }
 
                 log.category = categorizeLog(log);
-                allLogs.push(log);
+                return log;
             });
 
             filteredLogs = [...allLogs];
@@ -955,44 +927,67 @@
 
         function categorizeLog(log) {
             const msg = log.message.toLowerCase();
-
-            if (/starting|initialized|connected|loading|listening|started/.test(msg)) {
-                return 'startup';
-            }
-            if (/request|get|post|put|delete|status|query executed/.test(msg) && log.level === 'info') {
-                return 'operations';
-            }
-            if (/session|authentication|login|user/.test(msg) && log.level !== 'error') {
-                return 'operations';
-            }
-            if (log.level === 'warn') {
-                return 'warnings';
-            }
-            if (log.level === 'error') {
-                return 'errors';
-            }
-            if (/success|completed|processed|restored|recovered|backup/.test(msg) && log.level === 'success') {
-                return 'recoveries';
-            }
-            if (/websocket|connection pool|health|gateway/.test(msg)) {
-                return 'infrastructure';
-            }
-            if (/deprecated|legacy/.test(msg)) {
-                return 'deprecated';
-            }
-
+            if (/starting|initialized|connected|loading|listening|started/.test(msg)) return 'startup';
+            if (/request|get|post|query executed/.test(msg) && log.level === 'info') return 'operations';
+            if (log.level === 'warn') return 'warnings';
+            if (log.level === 'error') return 'errors';
+            if (/success|completed|processed|restored/.test(msg)) return 'recoveries';
+            if (/websocket|connection pool|health/.test(msg)) return 'infrastructure';
+            if (/deprecated|legacy/.test(msg)) return 'deprecated';
             return 'operations';
         }
 
+        function renderAll() {
+            renderCategoryFilters();
+            renderQuickJump();
+            renderStats();
+            renderCharts();
+            renderLogs();
+            renderStructuredView();
+            updateVisibleCount();
+        }
+
+        function renderQuickJump() {
+            const errors = filteredLogs.filter(l => l.level === 'error');
+            const warnings = filteredLogs.filter(l => l.level === 'warn');
+            const successes = filteredLogs.filter(l => l.level === 'success');
+
+            let html = '';
+            if (errors.length > 0) {
+                html += `<button class="quick-jump-btn" onclick="jumpToLog(${errors[0].index})">First Error <span>${errors[0].index}</span></button>`;
+            }
+            if (warnings.length > 0) {
+                html += `<button class="quick-jump-btn warn" onclick="jumpToLog(${warnings[0].index})">First Warning <span>${warnings[0].index}</span></button>`;
+            }
+            if (successes.length > 0) {
+                html += `<button class="quick-jump-btn success" onclick="jumpToLog(${successes[0].index})">First Success <span>${successes[0].index}</span></button>`;
+            }
+
+            quickJump.innerHTML = html || '<p style="color: #6b7280; font-size: 0.85em;">No quick jumps available</p>';
+        }
+
+        function jumpToLog(index) {
+            const logEl = document.querySelector(`[data-log-index="${index}"]`);
+            if (logEl) {
+                logEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                logEl.style.animation = 'none';
+                setTimeout(() => {
+                    logEl.style.animation = 'pulse 1s ease-in-out 2';
+                }, 10);
+            }
+        }
+
+        window.jumpToLog = jumpToLog;
+
         function renderCategoryFilters() {
             const categories = {
-                'startup': { title: '🚀 Startup & Initialization', logs: [] },
-                'operations': { title: '⚙️ Normal Operations', logs: [] },
-                'warnings': { title: '⚠️ Warnings & Performance', logs: [] },
-                'errors': { title: '❌ Errors & Failures', logs: [] },
-                'recoveries': { title: '✅ Recoveries & Successes', logs: [] },
-                'infrastructure': { title: '🏗️ Infrastructure Events', logs: [] },
-                'deprecated': { title: '⏰ Deprecated APIs', logs: [] }
+                'startup': { title: '🚀 Startup', logs: [] },
+                'operations': { title: '⚙️ Operations', logs: [] },
+                'warnings': { title: '⚠️ Warnings', logs: [] },
+                'errors': { title: '❌ Errors', logs: [] },
+                'recoveries': { title: '✅ Successes', logs: [] },
+                'infrastructure': { title: '🏗️ Infrastructure', logs: [] },
+                'deprecated': { title: '⏰ Deprecated', logs: [] }
             };
 
             allLogs.forEach(log => {
@@ -1001,35 +996,21 @@
                 }
             });
 
-            let html = '';
-            Object.keys(categories).forEach(key => {
+            categoryFiltersEl.innerHTML = Object.keys(categories).map(key => {
                 const cat = categories[key];
-                const count = cat.logs.length;
-                if (count > 0) {
-                    const errorCount = cat.logs.filter(l => l.level === 'error').length;
-                    const warnCount = cat.logs.filter(l => l.level === 'warn').length;
-                    const countClass = errorCount > 0 ? 'error' : warnCount > 0 ? 'warn' : 'success';
+                if (cat.logs.length === 0) return '';
+                return `
+                    <div class="category-filter">
+                        <label>
+                            <input type="checkbox" data-category="${key}" ${categoryFilters[key] ? 'checked' : ''}>
+                            <span>${cat.title} (${cat.logs.length})</span>
+                        </label>
+                    </div>
+                `;
+            }).join('');
 
-                    html += `
-                        <div class="category-filter">
-                            <label>
-                                <input type="checkbox" data-category="${key}" ${categoryFilters[key] ? 'checked' : ''}>
-                                <div class="category-info">
-                                    <div class="category-name">${cat.title}</div>
-                                    <div class="category-count ${countClass}">
-                                        <span class="num">${count}</span> logs
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    `;
-                }
-            });
-
-            categoryFiltersEl.innerHTML = html;
-
-            document.querySelectorAll('.category-filter input').forEach(checkbox => {
-                checkbox.addEventListener('change', function() {
+            document.querySelectorAll('.category-filter input').forEach(cb => {
+                cb.addEventListener('change', function() {
                     categoryFilters[this.dataset.category] = this.checked;
                     applyFilters();
                 });
@@ -1037,74 +1018,185 @@
         }
 
         selectAllBtn.addEventListener('click', () => {
-            Object.keys(categoryFilters).forEach(key => {
-                categoryFilters[key] = true;
-            });
+            Object.keys(categoryFilters).forEach(key => categoryFilters[key] = true);
             document.querySelectorAll('.category-filter input').forEach(cb => cb.checked = true);
             applyFilters();
         });
 
         deselectAllBtn.addEventListener('click', () => {
-            Object.keys(categoryFilters).forEach(key => {
-                categoryFilters[key] = false;
-            });
+            Object.keys(categoryFilters).forEach(key => categoryFilters[key] = false);
             document.querySelectorAll('.category-filter input').forEach(cb => cb.checked = false);
             applyFilters();
         });
 
+        function renderStats() {
+            const visible = getVisibleLogs();
+            const errors = visible.filter(l => l.level === 'error').length;
+            const warnings = visible.filter(l => l.level === 'warn').length;
+            const infos = visible.filter(l => l.level === 'info').length;
+
+            stats.innerHTML = `
+                <div class="stat-card">
+                    <h4>Visible</h4>
+                    <div class="value">${visible.length}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                    <h4>Errors</h4>
+                    <div class="value">${errors}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                    <h4>Warnings</h4>
+                    <div class="value">${warnings}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                    <h4>Info</h4>
+                    <div class="value">${infos}</div>
+                </div>
+            `;
+        }
+
+        function renderCharts() {
+            const buckets = 20;
+            const logsPerBucket = Math.ceil(allLogs.length / buckets);
+            const data = [];
+
+            for (let i = 0; i < buckets; i++) {
+                const start = i * logsPerBucket;
+                const end = start + logsPerBucket;
+                const slice = allLogs.slice(start, end);
+
+                const errors = slice.filter(l => l.level === 'error').length;
+                const warnings = slice.filter(l => l.level === 'warn').length;
+                const infos = slice.length - errors - warnings;
+
+                const maxCount = Math.max(errors, warnings, infos);
+                const type = maxCount === errors ? 'error' : maxCount === warnings ? 'warn' : 'info';
+                const height = slice.length > 0 ? (slice.length / logsPerBucket * 100) : 0;
+
+                data.push({ type, height, errors, warnings, infos, count: slice.length });
+            }
+
+            document.getElementById('timelineChart').innerHTML = data.map((d, i) => `
+                <div class="timeline-bar ${d.type}"
+                     style="height: ${d.height}%"
+                     title="Segment ${i + 1}&#10;Total: ${d.count}&#10;Errors: ${d.errors}&#10;Warnings: ${d.warnings}&#10;Info: ${d.infos}">
+                </div>
+            `).join('');
+
+            const patterns = detectPatterns();
+            document.getElementById('patterns').innerHTML = patterns.map(p =>
+                `<span class="pattern-badge ${p.critical ? 'critical' : ''}">${p.text}</span>`
+            ).join('');
+        }
+
+        function detectPatterns() {
+            const errors = allLogs.filter(l => l.level === 'error');
+            const patterns = [];
+
+            if (errors.length > 10) {
+                patterns.push({ text: `${errors.length} errors detected`, critical: true });
+            }
+
+            const dbErrors = errors.filter(l => /database|db|query|connection/i.test(l.message));
+            if (dbErrors.length > 5) {
+                patterns.push({ text: `${dbErrors.length} database issues`, critical: true });
+            }
+
+            const timeouts = allLogs.filter(l => /timeout|timed out/i.test(l.message));
+            if (timeouts.length > 3) {
+                patterns.push({ text: `${timeouts.length} timeout events`, critical: false });
+            }
+
+            const memory = allLogs.filter(l => /memory|heap|oom/i.test(l.message));
+            if (memory.length > 0) {
+                patterns.push({ text: `${memory.length} memory warnings`, critical: false });
+            }
+
+            return patterns.length > 0 ? patterns : [{ text: 'No critical patterns detected', critical: false }];
+        }
+
+        function matchesCustomKeywords(log) {
+            if (customKeywords.length === 0) return true;
+            const enabled = customKeywords.filter(k => k.enabled);
+            if (enabled.length === 0) return true;
+            const text = (log.message + ' ' + log.raw).toLowerCase();
+            return enabled.some(k => text.includes(k.keyword));
+        }
+
+        function getVisibleLogs() {
+            return filteredLogs.filter(l => categoryFilters[l.category] && matchesCustomKeywords(l));
+        }
+
+        function renderLogs() {
+            const visible = getVisibleLogs();
+
+            if (visible.length === 0) {
+                rawView.innerHTML = '<div style="text-align: center; padding: 60px; color: #6b7280;"><h3>No logs match filters</h3></div>';
+                return;
+            }
+
+            rawView.innerHTML = visible.map(log => {
+                const message = highlightSearch(log.message, searchTerm);
+                return `
+                    <div class="log-entry ${log.level}" data-log-index="${log.index}" onclick="toggleDetails(this)">
+                        <div class="log-header">
+                            <span class="log-level level-${log.level}">${log.level}</span>
+                            ${log.timestamp ? `<span class="log-timestamp">${log.timestamp}</span>` : log.time ? `<span class="log-timestamp">${log.time}</span>` : ''}
+                        </div>
+                        <div class="log-message">${message}</div>
+                        <div class="log-details">
+                            <pre>${log.raw}</pre>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleDetails(el) {
+            const details = el.querySelector('.log-details');
+            details.classList.toggle('active');
+        }
+
+        window.toggleDetails = toggleDetails;
+
         function renderStructuredView() {
             const categories = {
                 'startup': { title: '🚀 Startup and Initialization', logs: [] },
-                'operations': { title: '⚙️ Normal Operations and Requests', logs: [] },
-                'warnings': { title: '⚠️ Warnings & Performance Issues', logs: [] },
+                'operations': { title: '⚙️ Normal Operations', logs: [] },
+                'warnings': { title: '⚠️ Warnings & Performance', logs: [] },
                 'errors': { title: '❌ Errors & Failures', logs: [] },
                 'recoveries': { title: '✅ Recoveries & Successes', logs: [] },
-                'infrastructure': { title: '🏗️ System/Infrastructure Events', logs: [] },
-                'deprecated': { title: '⏰ Special Events & Deprecated APIs', logs: [] }
+                'infrastructure': { title: '🏗️ Infrastructure', logs: [] },
+                'deprecated': { title: '⏰ Deprecated APIs', logs: [] }
             };
 
-            filteredLogs.forEach(log => {
+            getVisibleLogs().forEach(log => {
                 if (categories[log.category]) {
                     categories[log.category].logs.push(log);
                 }
             });
 
-            let html = '';
-            Object.keys(categories).forEach(key => {
+            structuredView.innerHTML = Object.keys(categories).map(key => {
                 const cat = categories[key];
-                const isVisible = categoryFilters[key];
-                if (cat.logs.length > 0) {
-                    html += `
-                        <div class="category-section ${isVisible ? '' : 'hidden'}">
-                            <div class="category-header" onclick="toggleCategory(this)">
-                                <span>${cat.title}</span>
-                                <span class="category-badge">${cat.logs.length} logs</span>
-                            </div>
-                            <div class="category-content active">
-                    `;
+                if (cat.logs.length === 0) return '';
 
-                    cat.logs.forEach(log => {
-                        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false }) : 'N/A';
-                        const cleanMsg = log.message.replace(/<[^>]*>/g, '');
-                        const hasDetails = log.raw !== log.message;
-
-                        html += `
-                            <div class="category-item ${log.level}">
-                                <span class="item-time">${time}</span>
-                                <span class="item-message">${cleanMsg}</span>
-                                ${hasDetails ? `<div class="item-details">${log.raw}</div>` : ''}
-                            </div>
-                        `;
-                    });
-
-                    html += `
-                            </div>
+                return `
+                    <div class="category-section">
+                        <div class="category-header" onclick="toggleCategory(this)">
+                            <span>${cat.title}</span>
+                            <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 15px; font-size: 0.9em;">${cat.logs.length}</span>
                         </div>
-                    `;
-                }
-            });
-
-            structuredView.innerHTML = html || '<div class="no-logs"><h3>No logs in structured view</h3></div>';
+                        <div class="category-content active">
+                            ${cat.logs.map(log => `
+                                <div class="category-item ${log.level}">
+                                    <span class="item-time">${log.time || log.timestamp || 'N/A'}</span>
+                                    <span>${log.message}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
         function toggleCategory(header) {
@@ -1112,46 +1204,7 @@
             content.classList.toggle('active');
         }
 
-        function renderLogs() {
-            rawView.innerHTML = '';
-
-            if (filteredLogs.length === 0) {
-                rawView.innerHTML = `
-                    <div class="no-logs">
-                        <div class="no-logs-icon">🔍</div>
-                        <h3>No logs match your filters</h3>
-                        <p>Try adjusting your search or filter criteria</p>
-                    </div>
-                `;
-                return;
-            }
-
-            filteredLogs.forEach(log => {
-                const isVisible = categoryFilters[log.category];
-                const logEntry = document.createElement('div');
-                logEntry.className = `log-entry ${log.level} ${isVisible ? '' : 'hidden'}`;
-
-                const message = highlightSearch(log.message, searchTerm);
-
-                logEntry.innerHTML = `
-                    <div class="log-header">
-                        <span class="log-level level-${log.level}">${log.level}</span>
-                        ${log.timestamp ? `<span class="log-timestamp">⏰ ${log.timestamp}</span>` : ''}
-                    </div>
-                    <div class="log-message">${message}</div>
-                    <div class="log-details">
-                        <pre>${log.raw}</pre>
-                    </div>
-                `;
-
-                logEntry.addEventListener('click', function() {
-                    const details = this.querySelector('.log-details');
-                    details.classList.toggle('active');
-                });
-
-                rawView.appendChild(logEntry);
-            });
-        }
+        window.toggleCategory = toggleCategory;
 
         function highlightSearch(text, term) {
             if (!term) return text;
@@ -1159,35 +1212,8 @@
             return text.replace(regex, '<span class="highlight">$1</span>');
         }
 
-        function updateStats() {
-            const visibleLogs = filteredLogs.filter(l => categoryFilters[l.category]);
-            const errorCount = visibleLogs.filter(l => l.level === 'error').length;
-            const warnCount = visibleLogs.filter(l => l.level === 'warn').length;
-            const infoCount = visibleLogs.filter(l => l.level === 'info').length;
-
-            stats.innerHTML = `
-                <div class="stat-card">
-                    <h4>Visible Logs</h4>
-                    <div class="value">${visibleLogs.length}</div>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
-                    <h4>Errors</h4>
-                    <div class="value">${errorCount}</div>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-                    <h4>Warnings</h4>
-                    <div class="value">${warnCount}</div>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
-                    <h4>Info</h4>
-                    <div class="value">${infoCount}</div>
-                </div>
-            `;
-        }
-
         function updateVisibleCount() {
-            const visibleLogs = filteredLogs.filter(l => categoryFilters[l.category]);
-            visibleCount.textContent = `${visibleLogs.length} visible`;
+            visibleCount.textContent = getVisibleLogs().length + ' logs';
         }
 
         searchInput.addEventListener('input', (e) => {
@@ -1212,40 +1238,36 @@
                     log.raw.toLowerCase().includes(searchTerm);
                 return matchesLevel && matchesSearch;
             });
+
+            renderQuickJump();
+            renderStats();
+            renderCharts();
             renderLogs();
             renderStructuredView();
-            updateStats();
             updateVisibleCount();
         }
 
-        clearBtn.addEventListener('click', () => {
-            if (confirm('Are you sure you want to clear all logs?')) {
-                allLogs = [];
-                filteredLogs = [];
-                mainContent.classList.remove('active');
-                uploadSection.style.display = 'block';
-                searchInput.value = '';
-                searchTerm = '';
-                currentFilter = 'all';
-                Object.keys(categoryFilters).forEach(key => categoryFilters[key] = true);
-                filterBtns.forEach(b => b.classList.remove('active'));
-                filterBtns[0].classList.add('active');
-                viewBtns.forEach(b => b.classList.remove('active'));
-                viewBtns[0].classList.add('active');
-                currentView = 'raw';
-            }
-        });
-
         exportBtn.addEventListener('click', () => {
-            const visibleLogs = filteredLogs.filter(l => categoryFilters[l.category]);
-            const dataStr = JSON.stringify(visibleLogs, null, 2);
-            const dataBlob = new Blob([dataStr], {type: 'application/json'});
-            const url = URL.createObjectURL(dataBlob);
+            const visible = getVisibleLogs();
+            const dataStr = JSON.stringify(visible, null, 2);
+            const blob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
             link.download = `logs-export-${Date.now()}.json`;
             link.click();
             URL.revokeObjectURL(url);
+        });
+
+        clearBtn.addEventListener('click', () => {
+            if (confirm('Clear all logs?')) {
+                allLogs = [];
+                filteredLogs = [];
+                customKeywords = [];
+                mainContent.classList.remove('active');
+                uploadSection.style.display = 'block';
+                Object.keys(categoryFilters).forEach(k => categoryFilters[k] = true);
+            }
         });
     </script>
 </body>
