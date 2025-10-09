@@ -1,89 +1,760 @@
-Analyze entire Java application and generate comprehensive HTML production support dashboard.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional Log Analyzer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-[PASTE EVERYTHING - All .java files, config files (application.properties, web.xml, log4j.xml), build files (pom.xml/build.gradle)]
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
 
-Generate single interactive HTML with tabs:
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
 
-TAB 1: Architecture Map
-- All components with connections
-- Entry points (Servlets/REST endpoints/Main class)
-- Business logic components
-- Data access components  
-- External integrations
-- Click component → show what to check when it fails
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
 
-TAB 2: Issue Diagnosis Wizard
-- Dropdown: Select symptom
-  * Application slow
-  * Getting errors
-  * Data not saving
-  * External service failing
-  * Memory issues
-  * CPU high
-- Shows:
-  * Which component to check first
-  * What logs to search
-  * What metrics to verify
-  * Common causes
-  * Quick fixes
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
 
-TAB 3: Component Health Check
-- Checklist for each component:
-  * [ ] Component X - Check logs: [grep command]
-  * [ ] Component Y - Verify connection: [test command]
-  * [ ] Component Z - Check response time: [metric]
-- Status indicators (healthy/degraded/failed)
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
 
-TAB 4: Log Analysis Guide
-- Log file locations
-- Key log patterns to search:
-  * "ERROR" → Critical failures
-  * "Exception" → Code errors  
-  * "timeout" → Performance issues
-  * "connection" → Network/DB issues
-- Grep commands for common problems
-- Log level meanings (INFO/WARN/ERROR)
+        .upload-section {
+            padding: 40px;
+            text-align: center;
+            border-bottom: 2px solid #f0f0f0;
+        }
 
-TAB 5: Data Flow Debugger
-- Trace data through system
-- Show transformations at each step
-- Identify where data gets corrupted/lost
-- Validation checkpoints
+        .upload-box {
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            padding: 60px 40px;
+            background: #f8f9ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
 
-TAB 6: Configuration Reference
-- All config parameters
-- What each config controls
-- Default vs current values
-- Which component uses which config
-- What happens if misconfigured
+        .upload-box:hover {
+            background: #f0f2ff;
+            border-color: #764ba2;
+            transform: translateY(-2px);
+        }
 
-TAB 7: Quick Fixes & Runbooks
-For each common issue:
-- Symptom
-- Root cause
-- Step-by-step fix
-- Prevention tips
-- Restart procedures
-- Rollback steps
+        .upload-box.dragover {
+            background: #e8ebff;
+            border-color: #764ba2;
+        }
 
-TAB 8: Performance Baselines
-- Expected response times per operation
-- Normal CPU/Memory usage
-- Database query counts
-- Thread pool sizes
-- Connection pool settings
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
 
-TAB 9: Dependency Map
-- External services called
-- Database connections
-- File system dependencies
-- Network endpoints
-- Third-party libraries used
+        .upload-box h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.5em;
+        }
 
-TAB 10: Emergency Procedures
-- Application won't start → Check [A, B, C]
-- Out of memory → Check [X, Y, Z]
-- Database down → Check [P, Q, R]
-- All requests failing → Check [L, M, N]
+        .upload-box p {
+            color: #666;
+            font-size: 1em;
+        }
 
-Features: Global search, filter by component, printable, works offline, no external dependencies, copy commands with one click
+        input[type="file"] {
+            display: none;
+        }
+
+        .controls {
+            padding: 30px 40px;
+            background: #f8f9fa;
+            display: none;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .controls.active {
+            display: flex;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 300px;
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px 40px 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 10px 20px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 600;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-btn:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .level-badge {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .badge-error { background: #ef4444; }
+        .badge-warn { background: #f59e0b; }
+        .badge-info { background: #3b82f6; }
+        .badge-debug { background: #6b7280; }
+        .badge-success { background: #10b981; }
+
+        .stats {
+            padding: 20px 40px;
+            background: white;
+            display: none;
+            gap: 20px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .stats.active {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+
+        .stat-card {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+            text-align: center;
+        }
+
+        .stat-card h4 {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-card .value {
+            font-size: 2.5em;
+            font-weight: 700;
+        }
+
+        .logs-container {
+            padding: 40px;
+            max-height: 600px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .logs-container.active {
+            display: block;
+        }
+
+        .log-entry {
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .log-entry:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transform: translateX(5px);
+        }
+
+        .log-entry.error {
+            border-left: 6px solid #ef4444;
+            background: #fef2f2;
+        }
+
+        .log-entry.warn {
+            border-left: 6px solid #f59e0b;
+            background: #fffbeb;
+        }
+
+        .log-entry.info {
+            border-left: 6px solid #3b82f6;
+            background: #eff6ff;
+        }
+
+        .log-entry.debug {
+            border-left: 6px solid #6b7280;
+            background: #f9fafb;
+        }
+
+        .log-entry.success {
+            border-left: 6px solid #10b981;
+            background: #f0fdf4;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .log-level {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .level-error { background: #ef4444; color: white; }
+        .level-warn { background: #f59e0b; color: white; }
+        .level-info { background: #3b82f6; color: white; }
+        .level-debug { background: #6b7280; color: white; }
+        .level-success { background: #10b981; color: white; }
+
+        .log-timestamp {
+            color: #6b7280;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .log-message {
+            color: #1f2937;
+            line-height: 1.6;
+            font-size: 1em;
+            margin-bottom: 10px;
+            word-break: break-word;
+        }
+
+        .log-details {
+            display: none;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .log-details.active {
+            display: block;
+        }
+
+        .log-details pre {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        .no-logs {
+            text-align: center;
+            padding: 60px;
+            color: #6b7280;
+        }
+
+        .no-logs-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .highlight {
+            background: #fef08a;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+
+        .clear-btn {
+            padding: 10px 24px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .clear-btn:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+        }
+
+        .export-btn {
+            padding: 10px 24px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .export-btn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            display: none;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .controls {
+                padding: 20px;
+            }
+
+            .logs-container {
+                padding: 20px;
+            }
+
+            .filter-group {
+                width: 100%;
+            }
+
+            .filter-btn {
+                flex: 1;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Professional Log Analyzer</h1>
+            <p>Advanced log parsing & analysis tool • Supports all major formats • Zero installation required</p>
+        </div>
+
+        <div class="upload-section" id="uploadSection">
+            <div class="upload-box" id="uploadBox">
+                <div class="upload-icon">📁</div>
+                <h3>Drop your log file here or click to browse</h3>
+                <p>Supports: .log, .txt, .json, Apache, Nginx, Syslog, and more</p>
+                <input type="file" id="fileInput" accept=".log,.txt,.json,.csv">
+            </div>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Analyzing your logs with AI-powered parser...</p>
+        </div>
+
+        <div class="controls" id="controls">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search logs by keyword, error code, or pattern...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="filter-group">
+                <button class="filter-btn active" data-level="all">
+                    <span>All Logs</span>
+                </button>
+                <button class="filter-btn" data-level="error">
+                    <span class="level-badge badge-error"></span>
+                    <span>Errors</span>
+                </button>
+                <button class="filter-btn" data-level="warn">
+                    <span class="level-badge badge-warn"></span>
+                    <span>Warnings</span>
+                </button>
+                <button class="filter-btn" data-level="info">
+                    <span class="level-badge badge-info"></span>
+                    <span>Info</span>
+                </button>
+                <button class="filter-btn" data-level="debug">
+                    <span class="level-badge badge-debug"></span>
+                    <span>Debug</span>
+                </button>
+            </div>
+            <button class="export-btn" id="exportBtn">💾 Export</button>
+            <button class="clear-btn" id="clearBtn">🗑️ Clear</button>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="logs-container" id="logsContainer">
+            <div class="no-logs">
+                <div class="no-logs-icon">📋</div>
+                <h3>No logs loaded yet</h3>
+                <p>Upload a log file to get started</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allLogs = [];
+        let filteredLogs = [];
+        let currentFilter = 'all';
+        let searchTerm = '';
+
+        const fileInput = document.getElementById('fileInput');
+        const uploadBox = document.getElementById('uploadBox');
+        const uploadSection = document.getElementById('uploadSection');
+        const controls = document.getElementById('controls');
+        const stats = document.getElementById('stats');
+        const logsContainer = document.getElementById('logsContainer');
+        const searchInput = document.getElementById('searchInput');
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const clearBtn = document.getElementById('clearBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const loading = document.getElementById('loading');
+
+        // Upload box click
+        uploadBox.addEventListener('click', () => fileInput.click());
+
+        // Drag and drop
+        uploadBox.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadBox.classList.add('dragover');
+        });
+
+        uploadBox.addEventListener('dragleave', () => {
+            uploadBox.classList.remove('dragover');
+        });
+
+        uploadBox.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadBox.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        // Handle file
+        async function handleFile(file) {
+            loading.classList.add('active');
+            uploadSection.style.display = 'none';
+            
+            const text = await file.text();
+            
+            setTimeout(() => {
+                parseLogFile(text);
+                loading.classList.remove('active');
+                controls.classList.add('active');
+                stats.classList.add('active');
+                logsContainer.classList.add('active');
+                renderLogs();
+                updateStats();
+            }, 1000);
+        }
+
+        // Parse log file with intelligent detection
+        function parseLogFile(text) {
+            allLogs = [];
+            const lines = text.split('\n');
+
+            lines.forEach((line, index) => {
+                if (!line.trim()) return;
+
+                let log = {
+                    index: index + 1,
+                    timestamp: null,
+                    level: 'info',
+                    message: line,
+                    raw: line
+                };
+
+                // Try JSON format first
+                if (line.trim().startsWith('{')) {
+                    try {
+                        const json = JSON.parse(line);
+                        log.timestamp = json.timestamp || json.time || json.date || json['@timestamp'];
+                        log.level = (json.level || json.severity || json.priority || 'info').toLowerCase();
+                        log.message = json.message || json.msg || json.text || JSON.stringify(json);
+                        log.raw = JSON.stringify(json, null, 2);
+                    } catch (e) {
+                        // Not valid JSON, continue with regex
+                    }
+                }
+
+                // Standard log format with timestamp
+                const standardMatch = line.match(/^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*[\[\(]?(\w+)[\]\)]?\s*[:\-]?\s*(.+)/i);
+                if (standardMatch) {
+                    log.timestamp = standardMatch[1];
+                    log.level = standardMatch[2].toLowerCase();
+                    log.message = standardMatch[3];
+                }
+
+                // Apache/Nginx format
+                const apacheMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s.*?\[([^\]]+)\]\s"([^"]+)"\s(\d{3})/);
+                if (apacheMatch) {
+                    log.timestamp = apacheMatch[2];
+                    log.message = `${apacheMatch[3]} - Status: ${apacheMatch[4]}`;
+                    log.level = parseInt(apacheMatch[4]) >= 400 ? 'error' : parseInt(apacheMatch[4]) >= 300 ? 'warn' : 'info';
+                }
+
+                // Syslog format
+                const syslogMatch = line.match(/^(\w+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+):\s*(.+)/);
+                if (syslogMatch) {
+                    log.timestamp = syslogMatch[1];
+                    log.message = syslogMatch[4];
+                }
+
+                // Detect log level from message if not already set
+                if (log.level === 'info') {
+                    if (/error|exception|fatal|critical|fail/i.test(line)) {
+                        log.level = 'error';
+                    } else if (/warn|warning|deprecated/i.test(line)) {
+                        log.level = 'warn';
+                    } else if (/debug|trace/i.test(line)) {
+                        log.level = 'debug';
+                    } else if (/success|ok|complete/i.test(line)) {
+                        log.level = 'success';
+                    }
+                }
+
+                // Extract timestamp if not found
+                if (!log.timestamp) {
+                    const timestampMatch = line.match(/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
+                    if (timestampMatch) {
+                        log.timestamp = timestampMatch[0];
+                    }
+                }
+
+                allLogs.push(log);
+            });
+
+            filteredLogs = [...allLogs];
+        }
+
+        // Render logs
+        function renderLogs() {
+            const container = logsContainer;
+            container.innerHTML = '';
+
+            if (filteredLogs.length === 0) {
+                container.innerHTML = `
+                    <div class="no-logs">
+                        <div class="no-logs-icon">🔍</div>
+                        <h3>No logs match your filters</h3>
+                        <p>Try adjusting your search or filter criteria</p>
+                    </div>
+                `;
+                return;
+            }
+
+            filteredLogs.forEach(log => {
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry ${log.level}`;
+                
+                const message = highlightSearch(log.message, searchTerm);
+                
+                logEntry.innerHTML = `
+                    <div class="log-header">
+                        <span class="log-level level-${log.level}">${log.level}</span>
+                        ${log.timestamp ? `<span class="log-timestamp">⏰ ${log.timestamp}</span>` : ''}
+                    </div>
+                    <div class="log-message">${message}</div>
+                    <div class="log-details">
+                        <pre>${log.raw}</pre>
+                    </div>
+                `;
+
+                logEntry.addEventListener('click', function() {
+                    const details = this.querySelector('.log-details');
+                    details.classList.toggle('active');
+                });
+
+                container.appendChild(logEntry);
+            });
+        }
+
+        // Highlight search terms
+        function highlightSearch(text, term) {
+            if (!term) return text;
+            const regex = new RegExp(`(${term})`, 'gi');
+            return text.replace(regex, '<span class="highlight">$1</span>');
+        }
+
+        // Update statistics
+        function updateStats() {
+            const errorCount = allLogs.filter(l => l.level === 'error').length;
+            const warnCount = allLogs.filter(l => l.level === 'warn').length;
+            const infoCount = allLogs.filter(l => l.level === 'info').length;
+            const debugCount = allLogs.filter(l => l.level === 'debug').length;
+
+            stats.innerHTML = `
+                <div class="stat-card">
+                    <h4>Total Logs</h4>
+                    <div class="value">${allLogs.length}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                    <h4>Errors</h4>
+                    <div class="value">${errorCount}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                    <h4>Warnings</h4>
+                    <div class="value">${warnCount}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                    <h4>Info</h4>
+                    <div class="value">${infoCount}</div>
+                </div>
+            `;
+        }
+
+        // Search functionality
+        searchInput.addEventListener('input', (e) => {
+            searchTerm = e.target.value.toLowerCase();
+            applyFilters();
+        });
+
+        // Filter buttons
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentFilter = this.dataset.level;
+                applyFilters();
+            });
+        });
+
+        // Apply filters
+        function applyFilters() {
+            filteredLogs = allLogs.filter(log => {
+                const matchesLevel = currentFilter === 'all' || log.level === currentFilter;
+                const matchesSearch = !searchTerm || 
+                    log.message.toLowerCase().includes(searchTerm) ||
+                    log.raw.toLowerCase().includes(searchTerm);
+                return matchesLevel && matchesSearch;
+            });
+            renderLogs();
+        }
+
+        // Clear button
+        clearBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear all logs?')) {
+                allLogs = [];
+                filteredLogs = [];
+                controls.classList.remove('active');
+                stats.classList.remove('active');
+                logsContainer.classList.remove('active');
+                uploadSection.style.display = 'block';
+                searchInput.value = '';
+                searchTerm = '';
+                currentFilter = 'all';
+                filterBtns.forEach(b => b.classList.remove('active'));
+                filterBtns[0].classList.add('active');
+            }
+        });
+
+        // Export button
+        exportBtn.addEventListener('click', () => {
+            const dataStr = JSON.stringify(filteredLogs, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `logs-export-${Date.now()}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>
