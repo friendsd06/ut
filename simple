@@ -1437,6 +1437,201 @@
             transform: translateY(0);
         }
 
+        .structured-container {
+            padding: 20px;
+            height: calc(100vh - 250px);
+            min-height: 750px;
+            overflow: auto;
+        }
+
+        .structured-controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .structured-table-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: auto;
+        }
+
+        .structured-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .structured-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .structured-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #5568d3;
+            white-space: nowrap;
+        }
+
+        .structured-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: top;
+        }
+
+        .structured-table tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .structured-table tbody tr.error {
+            background: #fff5f5;
+        }
+
+        .structured-table tbody tr.warn {
+            background: #fffef5;
+        }
+
+        .structured-table tbody tr.info {
+            background: #f0f9ff;
+        }
+
+        .structured-table tbody tr.debug {
+            background: #fafafa;
+        }
+
+        .log-level-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .log-level-badge.error {
+            background: #dc3545;
+            color: white;
+        }
+
+        .log-level-badge.warn {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .log-level-badge.info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .log-level-badge.debug {
+            background: #6c757d;
+            color: white;
+        }
+
+        .log-level-badge.trace {
+            background: #e9ecef;
+            color: #495057;
+        }
+
+        .logger-name {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .log-message {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            max-width: 600px;
+            word-wrap: break-word;
+        }
+
+        .object-attributes {
+            margin-top: 8px;
+            padding: 8px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .object-attribute {
+            padding: 3px 0;
+            border-left: 2px solid #667eea;
+            padding-left: 8px;
+            margin-bottom: 4px;
+        }
+
+        .attribute-key {
+            color: #9cdcfe;
+            font-weight: 600;
+        }
+
+        .attribute-value {
+            color: #ce9178;
+        }
+
+        .timestamp-cell {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
+        .line-number-cell {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+            color: #6c757d;
+            text-align: center;
+            background: #f8f9fa;
+        }
+
+        .file-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .file-badge.file1 {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .file-badge.file2 {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .expand-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s ease;
+        }
+
+        .expand-btn:hover {
+            background: #5568d3;
+        }
+
         /* Optimizations for large monitors */
         @media (min-width: 2000px) {
             .container {
@@ -1536,6 +1731,7 @@
             <button class="tab active" onclick="switchTab('standard')">📄 Standard View</button>
             <button class="tab" onclick="switchTab('flow')">🔄 Flow Analysis</button>
             <button class="tab" onclick="switchTab('trace')">🔗 Trace Diagram</button>
+            <button class="tab" onclick="switchTab('structured')">📋 Structured View</button>
             <button class="tab" onclick="switchTab('debug')">🤖 Debug Assistant</button>
         </div>
 
@@ -1594,6 +1790,35 @@
                         </svg>
                         <h3>No Trace Data Available</h3>
                         <p>Upload log files to see the trace diagram</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="structuredTab" class="tab-content">
+            <div class="structured-container">
+                <div class="structured-controls">
+                    <select class="filter-mode-select" id="structuredFileFilter" onchange="renderStructuredView()">
+                        <option value="all">Show Both Files</option>
+                        <option value="file1">File 1 Only</option>
+                        <option value="file2">File 2 Only</option>
+                    </select>
+                    <select class="filter-mode-select" id="structuredLevelFilter" onchange="renderStructuredView()">
+                        <option value="all">All Levels</option>
+                        <option value="ERROR">ERROR Only</option>
+                        <option value="WARN">WARN Only</option>
+                        <option value="INFO">INFO Only</option>
+                        <option value="DEBUG">DEBUG Only</option>
+                    </select>
+                    <button class="add-filter-btn" onclick="exportStructuredData()">📥 Export CSV</button>
+                </div>
+                <div class="structured-table-container" id="structuredTableContainer">
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <h3>No Structured Data</h3>
+                        <p>Upload log files to see parsed log entries in table format</p>
                     </div>
                 </div>
             </div>
@@ -1663,6 +1888,7 @@
         let filterMode = 'OR';
         let selectedText = '';
         let selectionTimeout = null;
+        let structuredData = [];
 
         const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
         const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
@@ -1705,11 +1931,16 @@
                     traceData: extractTraceData(lines)
                 };
 
+                // Extract structured data
+                extractStructuredData();
+
                 renderLogs();
                 if (currentTab === 'flow') {
                     renderFlowAnalysis();
                 } else if (currentTab === 'trace') {
                     renderTraceDiagram();
+                } else if (currentTab === 'structured') {
+                    renderStructuredView();
                 }
             };
 
@@ -2170,6 +2401,8 @@
                 renderFlowAnalysis();
             } else if (tabName === 'trace') {
                 renderTraceDiagram();
+            } else if (tabName === 'structured') {
+                renderStructuredView();
             } else if (tabName === 'debug') {
                 // Debug tab - analysis triggered manually
             }
@@ -2979,6 +3212,275 @@
             }).catch(err => {
                 alert('Failed to copy to clipboard');
             });
+        }
+
+        function extractStructuredData() {
+            structuredData = [];
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (!logData[fileKey].content) return;
+
+                logData[fileKey].lines.forEach((line, index) => {
+                    const entry = parseLogLine(line, index + 1, fileKey);
+                    if (entry) {
+                        structuredData.push(entry);
+                    }
+                });
+            });
+        }
+
+        function parseLogLine(line, lineNumber, fileKey) {
+            if (!line.trim()) return null;
+
+            const entry = {
+                lineNumber,
+                fileKey,
+                fileName: logData[fileKey].name,
+                timestamp: null,
+                level: null,
+                logger: null,
+                message: line,
+                objectAttributes: []
+            };
+
+            // Extract timestamp (various formats)
+            const timestampPatterns = [
+                /\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d{3})?/,
+                /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/,
+                /\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}/,
+                /\[\d{2}:\d{2}:\d{2}\]/
+            ];
+
+            for (const pattern of timestampPatterns) {
+                const match = line.match(pattern);
+                if (match) {
+                    entry.timestamp = match[0].replace(/[\[\]]/g, '');
+                    break;
+                }
+            }
+
+            // Extract log level
+            const levelMatch = line.match(/\b(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|SEVERE)\b/);
+            if (levelMatch) {
+                entry.level = levelMatch[1];
+            }
+
+            // Extract logger name (common patterns)
+            const loggerPatterns = [
+                /\[([a-zA-Z0-9\._]+)\]/,  // [com.example.Service]
+                /\s([a-z]+\.[a-z]+\.[A-Z][a-zA-Z0-9]*)/,  // package.Class
+                /-\s([A-Z][a-zA-Z0-9]*(?:Controller|Service|Repository|Handler))/,  // ServiceName
+            ];
+
+            for (const pattern of loggerPatterns) {
+                const match = line.match(pattern);
+                if (match && match[1] && match[1].length > 3) {
+                    entry.logger = match[1];
+                    break;
+                }
+            }
+
+            // Extract message (everything after level or timestamp)
+            let messageStart = 0;
+            if (entry.timestamp) {
+                messageStart = line.indexOf(entry.timestamp) + entry.timestamp.length;
+            }
+            if (entry.level) {
+                const levelPos = line.indexOf(entry.level);
+                if (levelPos > messageStart) {
+                    messageStart = levelPos + entry.level.length;
+                }
+            }
+            entry.message = line.substring(messageStart).trim();
+            if (entry.message.startsWith(':') || entry.message.startsWith('-')) {
+                entry.message = entry.message.substring(1).trim();
+            }
+
+            // Detect Java object attributes
+            entry.objectAttributes = extractObjectAttributes(entry.message);
+
+            return entry;
+        }
+
+        function extractObjectAttributes(message) {
+            const attributes = [];
+
+            // Pattern: key=value or key: value
+            const kvPattern = /([a-zA-Z_][a-zA-Z0-9_]*)\s*[=:]\s*([^,\s}\]]+)/g;
+            let match;
+
+            while ((match = kvPattern.exec(message)) !== null) {
+                attributes.push({
+                    key: match[1],
+                    value: match[2]
+                });
+            }
+
+            // Pattern: JSON-like {key: value, key2: value2}
+            const jsonMatch = message.match(/\{([^}]+)\}/);
+            if (jsonMatch) {
+                const content = jsonMatch[1];
+                const pairs = content.split(',');
+                pairs.forEach(pair => {
+                    const kv = pair.split(/[=:]/);
+                    if (kv.length === 2) {
+                        attributes.push({
+                            key: kv[0].trim(),
+                            value: kv[1].trim()
+                        });
+                    }
+                });
+            }
+
+            return attributes;
+        }
+
+        function renderStructuredView() {
+            const container = document.getElementById('structuredTableContainer');
+
+            if (structuredData.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <h3>No Structured Data</h3>
+                        <p>Upload log files to see parsed log entries in table format</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Apply filters
+            const fileFilter = document.getElementById('structuredFileFilter').value;
+            const levelFilter = document.getElementById('structuredLevelFilter').value;
+
+            const filteredData = structuredData.filter(entry => {
+                if (fileFilter !== 'all' && entry.fileKey !== fileFilter) return false;
+                if (levelFilter !== 'all' && entry.level !== levelFilter) return false;
+                return true;
+            });
+
+            let html = `
+                <table class="structured-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">#</th>
+                            <th style="width: 80px;">File</th>
+                            <th style="width: 150px;">Timestamp</th>
+                            <th style="width: 80px;">Level</th>
+                            <th style="width: 200px;">Logger</th>
+                            <th>Message</th>
+                            <th style="width: 80px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            filteredData.forEach((entry, index) => {
+                const rowClass = entry.level ? entry.level.toLowerCase() : '';
+                const fileLabel = entry.fileKey === 'file1' ? 'File 1' : 'File 2';
+
+                html += `
+                    <tr class="${rowClass}">
+                        <td class="line-number-cell">${entry.lineNumber}</td>
+                        <td><span class="file-badge ${entry.fileKey}">${fileLabel}</span></td>
+                        <td class="timestamp-cell">${entry.timestamp || '-'}</td>
+                        <td>
+                            ${entry.level ? `<span class="log-level-badge ${entry.level.toLowerCase()}">${entry.level}</span>` : '-'}
+                        </td>
+                        <td class="logger-name">${entry.logger || '-'}</td>
+                        <td>
+                            <div class="log-message">${entry.message}</div>
+                            ${entry.objectAttributes.length > 0 ? renderObjectAttributes(entry.objectAttributes, index) : ''}
+                        </td>
+                        <td>
+                            <button class="expand-btn" onclick="jumpToLine('${entry.fileKey}', ${entry.lineNumber})">🔍 View</button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        function renderObjectAttributes(attributes, index) {
+            if (attributes.length === 0) return '';
+
+            let html = '<div class="object-attributes">';
+            html += '<strong style="color: #4ade80;">📦 Object Attributes:</strong><br>';
+
+            attributes.forEach(attr => {
+                html += `
+                    <div class="object-attribute">
+                        <span class="attribute-key">${attr.key}</span>:
+                        <span class="attribute-value">${attr.value}</span>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            return html;
+        }
+
+        function jumpToLine(fileKey, lineNumber) {
+            currentTab = 'standard';
+            switchTab('standard');
+            setTimeout(() => scrollToLogLine(fileKey, lineNumber), 100);
+        }
+
+        function exportStructuredData() {
+            if (structuredData.length === 0) {
+                alert('No data to export');
+                return;
+            }
+
+            // Create CSV content
+            let csv = 'Line,File,Timestamp,Level,Logger,Message';
+
+            // Add attribute columns dynamically
+            const allAttributes = new Set();
+            structuredData.forEach(entry => {
+                entry.objectAttributes.forEach(attr => allAttributes.add(attr.key));
+            });
+            allAttributes.forEach(attr => {
+                csv += `,${attr}`;
+            });
+            csv += '\n';
+
+            // Add data rows
+            structuredData.forEach(entry => {
+                const row = [
+                    entry.lineNumber,
+                    entry.fileName,
+                    entry.timestamp || '',
+                    entry.level || '',
+                    entry.logger || '',
+                    `"${entry.message.replace(/"/g, '""')}"` // Escape quotes
+                ];
+
+                // Add attribute values
+                allAttributes.forEach(attrKey => {
+                    const attr = entry.objectAttributes.find(a => a.key === attrKey);
+                    row.push(attr ? attr.value : '');
+                });
+
+                csv += row.join(',') + '\n';
+            });
+
+            // Download CSV
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `log_export_${Date.now()}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
         }
 
         // Close flashbox with Escape key
