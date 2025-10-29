@@ -210,6 +210,94 @@
             font-weight: 600;
         }
 
+        .add-filter-btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .add-filter-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .filter-mode-select {
+            padding: 10px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+            min-width: 160px;
+        }
+
+        .filter-mode-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .filter-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-height: 36px;
+            align-items: center;
+        }
+
+        .filter-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            animation: slideIn 0.3s ease;
+        }
+
+        .filter-tag .remove-tag {
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            padding: 0 4px;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+        }
+
+        .filter-tag .remove-tag:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.2);
+        }
+
+        .filter-tags-empty {
+            color: #6c757d;
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
         .tabs {
             display: flex;
             background: #f8f9fa;
@@ -1241,7 +1329,17 @@
             </div>
 
             <div class="control-row">
-                <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search logs..." oninput="performSearch()">
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="text" class="search-box" id="searchBox" placeholder="🔍 Type and press Enter to add filter term..." style="flex: 1;" onkeypress="handleSearchKeyPress(event)">
+                        <button class="add-filter-btn" onclick="addFilterTerm()">➕ Add Filter</button>
+                        <select class="filter-mode-select" id="filterMode" onchange="applyMultiTermFilter()">
+                            <option value="OR">Match ANY (OR)</option>
+                            <option value="AND">Match ALL (AND)</option>
+                        </select>
+                    </div>
+                    <div class="filter-tags" id="filterTags"></div>
+                </div>
                 <div class="stats">
                     <div class="stat-item">
                         <span>Matches:</span>
@@ -1358,6 +1456,8 @@
         let currentTab = 'standard';
         let cleanModeEnabled = false;
         let stackTraceFormatEnabled = false;
+        let filterTerms = [];
+        let filterMode = 'OR';
 
         const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
         const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
@@ -1462,7 +1562,7 @@
             });
 
             applyCurrentFilter();
-            performSearch();
+            applyMultiTermFilter();
             if (cleanModeEnabled) {
                 applyCleanMode();
             }
@@ -1611,19 +1711,114 @@
             }
         }
 
-        function performSearch() {
-            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+        function handleSearchKeyPress(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addFilterTerm();
+            }
+        }
+
+        function addFilterTerm() {
+            const searchBox = document.getElementById('searchBox');
+            const term = searchBox.value.trim();
+
+            if (term && !filterTerms.includes(term.toLowerCase())) {
+                filterTerms.push(term.toLowerCase());
+                searchBox.value = '';
+                renderFilterTags();
+                applyMultiTermFilter();
+            }
+        }
+
+        function removeFilterTerm(term) {
+            filterTerms = filterTerms.filter(t => t !== term);
+            renderFilterTags();
+            applyMultiTermFilter();
+        }
+
+        function clearAllFilters() {
+            filterTerms = [];
+            renderFilterTags();
+            applyMultiTermFilter();
+        }
+
+        function renderFilterTags() {
+            const container = document.getElementById('filterTags');
+
+            if (filterTerms.length === 0) {
+                container.innerHTML = '<span class="filter-tags-empty">No filters applied - add terms above to filter logs</span>';
+                return;
+            }
+
+            let html = '';
+            filterTerms.forEach(term => {
+                html += `
+                    <div class="filter-tag">
+                        <span>🔍 ${term}</span>
+                        <span class="remove-tag" onclick="removeFilterTerm('${term}')">×</span>
+                    </div>
+                `;
+            });
+
+            html += `
+                <button class="filter-tag" style="background: #dc3545; cursor: pointer;" onclick="clearAllFilters()">
+                    <span>🗑️ Clear All</span>
+                </button>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        function applyMultiTermFilter() {
+            filterMode = document.getElementById('filterMode').value;
             let matchCount = 0;
 
             document.querySelectorAll('.log-line').forEach(lineDiv => {
-                const originalText = logData[lineDiv.getAttribute('data-file')].lines[lineDiv.getAttribute('data-line-index')];
+                const fileKey = lineDiv.getAttribute('data-file');
+                const lineIndex = lineDiv.getAttribute('data-line-index');
 
-                if (searchTerm && originalText.toLowerCase().includes(searchTerm)) {
-                    // Highlight matches
-                    const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
-                    lineDiv.innerHTML = originalText.replace(regex, '<mark>$1</mark>');
-                    matchCount++;
+                if (!fileKey || lineIndex === null) return;
+
+                const originalText = logData[fileKey].lines[lineIndex];
+                const lowerText = originalText.toLowerCase();
+
+                if (filterTerms.length === 0) {
+                    // No filters - show all, no highlighting
+                    lineDiv.textContent = originalText;
+                    lineDiv.classList.remove('hidden');
+                    return;
+                }
+
+                let shouldShow = false;
+                let matchingTerms = [];
+
+                // Check each filter term
+                filterTerms.forEach(term => {
+                    if (lowerText.includes(term)) {
+                        matchingTerms.push(term);
+                    }
+                });
+
+                // Apply AND/OR logic
+                if (filterMode === 'AND') {
+                    shouldShow = matchingTerms.length === filterTerms.length;
                 } else {
+                    shouldShow = matchingTerms.length > 0;
+                }
+
+                if (shouldShow) {
+                    lineDiv.classList.remove('hidden');
+                    matchCount++;
+
+                    // Highlight all matching terms
+                    let highlightedText = originalText;
+                    matchingTerms.forEach(term => {
+                        const regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
+                        highlightedText = highlightedText.replace(regex, '<mark>$1</mark>');
+                    });
+                    lineDiv.innerHTML = highlightedText;
+                } else {
+                    lineDiv.classList.add('hidden');
                     lineDiv.textContent = originalText;
                 }
             });
@@ -1631,12 +1826,17 @@
             document.getElementById('matchCount').textContent = matchCount;
         }
 
+        function performSearch() {
+            // Legacy function - now handled by multi-term filter
+            applyMultiTermFilter();
+        }
+
         function escapeRegex(string) {
             return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         }
 
         function toggleFilter(filterType) {
-            const buttons = document.querySelectorAll('.filter-btn');
+            const buttons = document.querySelectorAll('.filter-btn.issue, .filter-btn.success, .filter-btn.failure');
             const clickedButton = event.target;
 
             if (currentFilter === filterType) {
@@ -1651,33 +1851,11 @@
                 clickedButton.classList.add('active');
                 applyCurrentFilter();
             }
+
+            // Re-apply multi-term filter after quick filter
+            applyMultiTermFilter();
         }
 
-        function applyCurrentFilter() {
-            if (!currentFilter) {
-                showAllLines();
-                return;
-            }
-
-            document.querySelectorAll('.log-line').forEach(lineDiv => {
-                const text = lineDiv.textContent.toLowerCase();
-                let shouldShow = false;
-
-                if (currentFilter === 'issue') {
-                    shouldShow = issueKeywords.some(keyword => text.includes(keyword));
-                } else if (currentFilter === 'success') {
-                    shouldShow = successKeywords.some(keyword => text.includes(keyword));
-                } else if (currentFilter === 'failure') {
-                    shouldShow = failureKeywords.some(keyword => text.includes(keyword));
-                }
-
-                if (shouldShow) {
-                    lineDiv.classList.remove('hidden');
-                } else {
-                    lineDiv.classList.add('hidden');
-                }
-            });
-        }
 
         function showAllLines() {
             document.querySelectorAll('.log-line').forEach(lineDiv => {
@@ -2497,6 +2675,7 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Universal Log File Viewer loaded successfully');
+            renderFilterTags();
         });
     </script>
 </body>
