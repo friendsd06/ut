@@ -1,103 +1,2174 @@
-import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-import org.apache.spark.sql.SparkSession;
-import java.io.*;
-import java.nio.file.*;
-import java.util.Base64;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Log File Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-public class DatabricksJKSWithBroadcast {
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
 
-    private static Broadcast<String> truststoreBroadcast;
-    private static Broadcast<String> keystoreBroadcast;
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
 
-    /**
-     * Read JKS from resources and broadcast as Base64 string
-     */
-    private static void broadcastJKSFiles(SparkSession spark) throws IOException {
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
 
-        // Read truststore.jks from src/main/resources/ as Base64
-        InputStream is1 = DatabricksJKSWithBroadcast.class
-            .getClassLoader()
-            .getResourceAsStream("truststore.jks");
-        byte[] truststoreBytes = is1.readAllBytes();
-        String truststoreBase64 = Base64.getEncoder().encodeToString(truststoreBytes);
-        is1.close();
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
 
-        // Read keystore.jks from src/main/resources/ as Base64
-        InputStream is2 = DatabricksJKSWithBroadcast.class
-            .getClassLoader()
-            .getResourceAsStream("keystore.jks");
-        byte[] keystoreBytes = is2.readAllBytes();
-        String keystoreBase64 = Base64.getEncoder().encodeToString(keystoreBytes);
-        is2.close();
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
 
-        // Broadcast to all nodes
-        truststoreBroadcast = jsc.broadcast(truststoreBase64);
-        keystoreBroadcast = jsc.broadcast(keystoreBase64);
-    }
+        .controls {
+            padding: 25px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+        }
 
-    /**
-     * Get truststore path (converts broadcast Base64 to file)
-     */
-    private static String getTruststorePath() throws IOException {
-        String base64 = truststoreBroadcast.value();
-        byte[] bytes = Base64.getDecoder().decode(base64);
-        Path tempFile = Files.createTempFile("truststore", ".jks");
-        Files.write(tempFile, bytes);
-        return tempFile.toString();
-    }
+        .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
 
-    public static void main(String[] args) throws IOException {
+        .control-row:last-child {
+            margin-bottom: 0;
+        }
 
-        // Create Spark Session
-        SparkSession spark = SparkSession.builder()
-            .appName("DatabricksJKSWithBroadcast")
-            .master("local[*]")
-            .getOrCreate();
+        .file-upload-section {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
 
-        // Broadcast JKS files from resources
-        broadcastJKSFiles(spark);
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+        }
 
-        // Get truststore path (will work on both driver and executors)
-        String trustStorePath = getTruststorePath();
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
 
-        // Your Databricks parameters
-        String jdbcUrl = "jdbc:databricks://your-workspace.cloud.databricks.com:443/default";
-        String httpPath = "/sql/1.0/warehouses/your-warehouse-id";
-        String token = System.getenv("DATABRICKS_TOKEN");
-        String trustStorePassword = "changeit";
+        .file-input-label {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: none;
+        }
 
-        // Read from Databricks warehouse with SSL - YOUR EXACT CODE
-        Dataset<Row> df = spark.read()
-            .format("jdbc")
-            .option("driver", "com.databricks.client.jdbc.Driver")
-            .option("url", jdbcUrl)
-            .option("httpPath", httpPath)
-            .option("dbtable", "catalog.schema.table_name")
-            .option("AuthMech", "3")
-            .option("UID", "token")
-            .option("PWD", token)
-            .option("SSL", "1")
-            .option("SSLTrustStore", trustStorePath)
-            .option("SSLTrustStorePwd", trustStorePassword)
-            .option("SSLTrustStoreType", "JKS")
-            .option("numPartitions", "4")
-            .load();
+        .file-input-label:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
 
-        // Show results
-        df.show(10);
+        .file-name {
+            font-size: 13px;
+            color: #6c757d;
+            margin-left: 10px;
+            font-style: italic;
+        }
 
-        // Process on executors
-        df.foreachPartition(partition -> {
-            // Get truststore on executor from broadcast
-            String execTruststore = getTruststorePath();
-            // Processing logic here
+        .search-box {
+            flex: 1;
+            min-width: 250px;
+            padding: 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 10px 20px;
+            border: 2px solid #dee2e6;
+            background: white;
+            color: #495057;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .filter-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .filter-btn.issue {
+            border-color: #ffc107;
+            color: #e67e22;
+        }
+
+        .filter-btn.issue:hover,
+        .filter-btn.issue.active {
+            background: #ffc107;
+            color: white;
+            border-color: #ffc107;
+        }
+
+        .filter-btn.success {
+            border-color: #28a745;
+            color: #28a745;
+        }
+
+        .filter-btn.success:hover,
+        .filter-btn.success.active {
+            background: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+
+        .filter-btn.failure {
+            border-color: #dc3545;
+            color: #dc3545;
+        }
+
+        .filter-btn.failure:hover,
+        .filter-btn.failure.active {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 13px;
+            color: #6c757d;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .stat-badge {
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 15px 30px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6c757d;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab:hover {
+            color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: white;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 25px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .logs-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .logs-container.side-by-side {
+            flex-direction: row;
+        }
+
+        .logs-container.side-by-side .log-section {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .view-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .view-btn {
+            padding: 8px 16px;
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+
+        .view-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .view-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .flow-container {
+            display: flex;
+            gap: 20px;
+        }
+
+        .flow-panel {
+            flex: 1;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+        }
+
+        .flow-header {
+            background: #667eea;
+            color: white;
+            padding: 12px 16px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .flow-content {
+            max-height: 600px;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .flow-step {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+            background: #f8f9fa;
+            border-radius: 4px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .flow-step:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+
+        .flow-step.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .flow-step.failure {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .flow-step.warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+        }
+
+        .flow-step-number {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .flow-step.success .flow-step-number {
+            background: #28a745;
+        }
+
+        .flow-step.failure .flow-step-number {
+            background: #dc3545;
+        }
+
+        .flow-step.warning .flow-step-number {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .flow-step.hidden {
+            display: none;
+        }
+
+        .flow-step mark {
+            background-color: #ffd700;
+            color: #000;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .flow-step-content {
+            font-size: 13px;
+            color: #495057;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .flow-step-time {
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+
+        .loading-indicator {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 14px;
+        }
+
+        .line-count-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+
+        .log-section {
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+        }
+
+        .log-header {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            border-bottom: 2px solid #e9ecef;
+            font-weight: 600;
+            color: #495057;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .log-content {
+            max-height: 600px;
+            overflow-y: auto;
+            padding: 16px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            padding: 2px 0;
+            transition: background-color 0.2s ease;
+        }
+
+        .log-line.hidden {
+            display: none;
+        }
+
+        .log-line.success {
+            color: #4ade80;
+        }
+
+        .log-line.failure {
+            color: #f87171;
+        }
+
+        .log-line.warning {
+            color: #fb923c;
+        }
+
+        .log-line mark {
+            background-color: #ffd700;
+            color: #000;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        .clear-btn {
+            padding: 8px 16px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .clear-btn:hover {
+            background: #c82333;
+        }
+
+        .trace-container {
+            padding: 20px;
+            max-height: 700px;
+            overflow-y: auto;
+        }
+
+        .trace-search {
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .trace-search input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .trace-search input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .trace-legend {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            font-size: 12px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .legend-box {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 2px solid #000;
+        }
+
+        .legend-box.request {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+
+        .legend-box.class {
+            background: #f3e5f5;
+            border-color: #9c27b0;
+        }
+
+        .legend-box.method {
+            background: #fff3e0;
+            border-color: #ff9800;
+        }
+
+        .trace-diagram {
+            display: flex;
+            gap: 30px;
+            min-height: 400px;
+            position: relative;
+        }
+
+        .service-column {
+            flex: 1;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            background: white;
+            padding: 15px;
+        }
+
+        .service-header {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .trace-item {
+            margin-bottom: 12px;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+            font-size: 13px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .trace-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .trace-item.request-id {
+            background: #e3f2fd;
+            border-left-color: #2196f3;
+        }
+
+        .trace-item.class-name {
+            background: #f3e5f5;
+            border-left-color: #9c27b0;
+        }
+
+        .trace-item.method-name {
+            background: #fff3e0;
+            border-left-color: #ff9800;
+        }
+
+        .trace-item.hidden {
+            display: none;
+        }
+
+        .trace-item mark {
+            background-color: #ffd700;
+            color: #000;
+            padding: 2px 4px;
+            border-radius: 2px;
+            font-weight: 600;
+        }
+
+        .trace-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-right: 8px;
+            text-transform: uppercase;
+        }
+
+        .trace-type.request {
+            background: #2196f3;
+            color: white;
+        }
+
+        .trace-type.class {
+            background: #9c27b0;
+            color: white;
+        }
+
+        .trace-type.method {
+            background: #ff9800;
+            color: white;
+        }
+
+        .trace-line-ref {
+            display: block;
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+
+        .flow-search-box {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .flow-search-box:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .debug-assistant {
+            padding: 20px;
+            max-height: 700px;
+            overflow-y: auto;
+        }
+
+        .debug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+        }
+
+        .debug-header h2 {
+            font-size: 24px;
+            margin: 0;
+        }
+
+        .analyze-btn {
+            padding: 12px 24px;
+            background: white;
+            color: #667eea;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+
+        .analyze-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .analyze-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .debug-section {
+            margin-bottom: 25px;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .debug-section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #495057;
+        }
+
+        .debug-section-title .icon {
+            font-size: 24px;
+        }
+
+        .insight-card {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .insight-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .insight-card.critical {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+
+        .insight-card.warning {
+            border-left-color: #ffc107;
+            background: #fffef5;
+        }
+
+        .insight-card.success {
+            border-left-color: #28a745;
+            background: #f0fff4;
+        }
+
+        .insight-title {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .insight-severity {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .insight-severity.critical {
+            background: #dc3545;
+            color: white;
+        }
+
+        .insight-severity.high {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .insight-severity.medium {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .insight-severity.low {
+            background: #28a745;
+            color: white;
+        }
+
+        .insight-description {
+            color: #6c757d;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .insight-details {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .insight-metric {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 13px;
+            color: #495057;
+        }
+
+        .insight-metric strong {
+            color: #667eea;
+        }
+
+        .recommendation-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .recommendation-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .recommendation-item:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .recommendation-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .recommendation-content {
+            flex: 1;
+        }
+
+        .recommendation-title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+
+        .recommendation-text {
+            font-size: 13px;
+            color: #6c757d;
+            line-height: 1.5;
+        }
+
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            position: relative;
+        }
+
+        .timeline-marker {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 18px;
+            flex-shrink: 0;
+            z-index: 2;
+        }
+
+        .timeline-marker.error {
+            background: #dc3545;
+            color: white;
+        }
+
+        .timeline-marker.warning {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .timeline-marker.info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .timeline-content {
+            flex: 1;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .timeline-content:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+
+        .timeline-time {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+
+        .timeline-message {
+            font-size: 14px;
+            color: #495057;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .correlation-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .correlation-card {
+            background: linear-gradient(135deg, #667eea22 0%, #764ba222 100%);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #667eea;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .correlation-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .correlation-header {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .correlation-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .correlation-item {
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .correlation-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .correlation-badge.file1 {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .correlation-badge.file2 {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-value.error {
+            color: #dc3545;
+        }
+
+        .stat-value.warning {
+            color: #ffc107;
+        }
+
+        .stat-value.success {
+            color: #28a745;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .loading-spinner {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .control-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-box {
+                width: 100%;
+            }
+
+            .filter-buttons {
+                width: 100%;
+            }
+
+            .filter-btn {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧩 Universal Log File Viewer</h1>
+            <p>Upload, search, and analyze any log files directly in your browser</p>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="file-upload-section">
+                    <div class="file-input-wrapper">
+                        <input type="file" id="file1" accept="*" onchange="handleFileUpload(1)">
+                        <label for="file1" class="file-input-label">📁 Upload Log File 1</label>
+                        <span id="file1-name" class="file-name">No file selected</span>
+                    </div>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="file2" accept="*" onchange="handleFileUpload(2)">
+                        <label for="file2" class="file-input-label">📁 Upload Log File 2</label>
+                        <span id="file2-name" class="file-name">No file selected</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-row">
+                <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search logs..." oninput="performSearch()">
+                <div class="stats">
+                    <div class="stat-item">
+                        <span>Matches:</span>
+                        <span class="stat-badge" id="matchCount">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-row">
+                <div class="filter-buttons">
+                    <button class="filter-btn issue" onclick="toggleFilter('issue')">⚠️ Quick Issue</button>
+                    <button class="filter-btn success" onclick="toggleFilter('success')">✅ All Success Steps</button>
+                    <button class="filter-btn failure" onclick="toggleFilter('failure')">❌ All Failure Steps</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('standard')">📄 Standard View</button>
+            <button class="tab" onclick="switchTab('flow')">🔄 Flow Analysis</button>
+            <button class="tab" onclick="switchTab('trace')">🔗 Trace Diagram</button>
+            <button class="tab" onclick="switchTab('debug')">🤖 Debug Assistant</button>
+        </div>
+
+        <div id="standardTab" class="tab-content active">
+            <div class="view-toggle">
+                <button class="view-btn active" onclick="switchView('stacked')">📚 Stacked View</button>
+                <button class="view-btn" onclick="switchView('side-by-side')">⬌ Side-by-Side</button>
+            </div>
+            <div class="logs-container" id="logsContainer">
+            <div class="empty-state">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3>No Log Files Loaded</h3>
+                <p>Upload one or two log files to get started</p>
+            </div>
+        </div>
+        </div>
+
+        <div id="flowTab" class="tab-content">
+            <input type="text" class="flow-search-box" id="flowSearchBox" placeholder="🔍 Search in flow analysis..." oninput="performFlowSearch()">
+            <div class="flow-container" id="flowContainer">
+                <div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <h3>No Flow Data Available</h3>
+                    <p>Upload log files to see the flow analysis</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="traceTab" class="tab-content">
+            <div class="trace-container">
+                <div class="trace-search">
+                    <input type="text" id="traceSearchBox" placeholder="🔍 Search request IDs, classes, or methods..." oninput="performTraceSearch()">
+                    <div class="trace-legend">
+                        <div class="legend-item">
+                            <div class="legend-box request"></div>
+                            <span>Request ID</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-box class"></div>
+                            <span>Class</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-box method"></div>
+                            <span>Method</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="trace-diagram" id="traceDiagram">
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                        </svg>
+                        <h3>No Trace Data Available</h3>
+                        <p>Upload log files to see the trace diagram</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="debugTab" class="tab-content">
+            <div class="debug-assistant">
+                <div class="debug-header">
+                    <h2>🤖 AI-Powered Debug Assistant</h2>
+                    <button class="analyze-btn" onclick="runDebugAnalysis()" id="analyzeBtn">⚡ Analyze Logs</button>
+                </div>
+                <div id="debugContent">
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        <h3>Ready to Analyze</h3>
+                        <p>Upload log files and click "Analyze Logs" to get AI-powered debugging insights</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let logData = {
+            file1: { name: '', content: '', lines: [], flowSteps: [], traceData: [] },
+            file2: { name: '', content: '', lines: [], flowSteps: [], traceData: [] }
+        };
+
+        let currentFilter = null;
+        let currentView = 'stacked';
+        let currentTab = 'standard';
+
+        const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
+        const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
+        const failureKeywords = ['failed', 'exception', 'crash', 'not completed', 'aborted', 'rejected', 'denied'];
+
+        function handleFileUpload(fileNumber) {
+            const fileInput = document.getElementById(`file${fileNumber}`);
+            const fileName = document.getElementById(`file${fileNumber}-name`);
+            const file = fileInput.files[0];
+
+            if (!file) return;
+
+            fileName.textContent = file.name;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const lines = content.split('\n');
+
+                logData[`file${fileNumber}`] = {
+                    name: file.name,
+                    content: content,
+                    lines: lines,
+                    flowSteps: extractFlowSteps(lines),
+                    traceData: extractTraceData(lines)
+                };
+
+                renderLogs();
+                if (currentTab === 'flow') {
+                    renderFlowAnalysis();
+                } else if (currentTab === 'trace') {
+                    renderTraceDiagram();
+                }
+            };
+
+            reader.onerror = function() {
+                alert(`Error reading file: ${file.name}`);
+            };
+
+            reader.readAsText(file);
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('logsContainer');
+            container.innerHTML = '';
+
+            if (!logData.file1.content && !logData.file2.content) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <h3>No Log Files Loaded</h3>
+                        <p>Upload one or two log files to get started</p>
+                    </div>
+                `;
+                return;
+            }
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (logData[fileKey].content) {
+                    const section = document.createElement('div');
+                    section.className = 'log-section';
+                    section.id = `log-section-${fileKey}`;
+
+                    const header = document.createElement('div');
+                    header.className = 'log-header';
+                    header.innerHTML = `
+                        <span>📄 ${logData[fileKey].name} <span class="line-count-badge">${logData[fileKey].lines.length} lines</span></span>
+                        <button class="clear-btn" onclick="clearLog('${fileKey}')">Clear</button>
+                    `;
+
+                    const content = document.createElement('div');
+                    content.className = 'log-content';
+                    content.id = `log-content-${fileKey}`;
+
+                    logData[fileKey].lines.forEach((line, index) => {
+                        const lineDiv = document.createElement('div');
+                        lineDiv.className = 'log-line';
+                        lineDiv.setAttribute('data-line-index', index);
+                        lineDiv.setAttribute('data-file', fileKey);
+                        lineDiv.textContent = line;
+
+                        // Apply color coding
+                        const lowerLine = line.toLowerCase();
+                        if (successKeywords.some(keyword => lowerLine.includes(keyword))) {
+                            lineDiv.classList.add('success');
+                        } else if (failureKeywords.some(keyword => lowerLine.includes(keyword))) {
+                            lineDiv.classList.add('failure');
+                        } else if (issueKeywords.some(keyword => lowerLine.includes(keyword))) {
+                            lineDiv.classList.add('warning');
+                        }
+
+                        content.appendChild(lineDiv);
+                    });
+
+                    section.appendChild(header);
+                    section.appendChild(content);
+                    container.appendChild(section);
+                }
+            });
+
+            applyCurrentFilter();
+            performSearch();
+        }
+
+        function clearLog(fileKey) {
+            const fileNumber = fileKey === 'file1' ? 1 : 2;
+            logData[fileKey] = { name: '', content: '', lines: [], flowSteps: [], traceData: [] };
+            document.getElementById(`file${fileNumber}`).value = '';
+            document.getElementById(`file${fileNumber}-name`).textContent = 'No file selected';
+            renderLogs();
+            if (currentTab === 'flow') {
+                renderFlowAnalysis();
+            } else if (currentTab === 'trace') {
+                renderTraceDiagram();
+            }
+        }
+
+        function performSearch() {
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+            let matchCount = 0;
+
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                const originalText = logData[lineDiv.getAttribute('data-file')].lines[lineDiv.getAttribute('data-line-index')];
+
+                if (searchTerm && originalText.toLowerCase().includes(searchTerm)) {
+                    // Highlight matches
+                    const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
+                    lineDiv.innerHTML = originalText.replace(regex, '<mark>$1</mark>');
+                    matchCount++;
+                } else {
+                    lineDiv.textContent = originalText;
+                }
+            });
+
+            document.getElementById('matchCount').textContent = matchCount;
+        }
+
+        function escapeRegex(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function toggleFilter(filterType) {
+            const buttons = document.querySelectorAll('.filter-btn');
+            const clickedButton = event.target;
+
+            if (currentFilter === filterType) {
+                // Deactivate filter
+                currentFilter = null;
+                clickedButton.classList.remove('active');
+                showAllLines();
+            } else {
+                // Activate new filter
+                currentFilter = filterType;
+                buttons.forEach(btn => btn.classList.remove('active'));
+                clickedButton.classList.add('active');
+                applyCurrentFilter();
+            }
+        }
+
+        function applyCurrentFilter() {
+            if (!currentFilter) {
+                showAllLines();
+                return;
+            }
+
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                const text = lineDiv.textContent.toLowerCase();
+                let shouldShow = false;
+
+                if (currentFilter === 'issue') {
+                    shouldShow = issueKeywords.some(keyword => text.includes(keyword));
+                } else if (currentFilter === 'success') {
+                    shouldShow = successKeywords.some(keyword => text.includes(keyword));
+                } else if (currentFilter === 'failure') {
+                    shouldShow = failureKeywords.some(keyword => text.includes(keyword));
+                }
+
+                if (shouldShow) {
+                    lineDiv.classList.remove('hidden');
+                } else {
+                    lineDiv.classList.add('hidden');
+                }
+            });
+        }
+
+        function showAllLines() {
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                lineDiv.classList.remove('hidden');
+            });
+        }
+
+        function switchView(viewType) {
+            currentView = viewType;
+            const container = document.getElementById('logsContainer');
+            const buttons = document.querySelectorAll('.view-btn');
+            
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (viewType === 'side-by-side') {
+                container.classList.add('side-by-side');
+            } else {
+                container.classList.remove('side-by-side');
+            }
+        }
+
+        function switchTab(tabName) {
+            currentTab = tabName;
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            tabs.forEach(tab => tab.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(`${tabName}Tab`).classList.add('active');
+
+            if (tabName === 'flow') {
+                renderFlowAnalysis();
+            } else if (tabName === 'trace') {
+                renderTraceDiagram();
+            } else if (tabName === 'debug') {
+                // Debug tab - analysis triggered manually
+            }
+        }
+
+        function extractFlowSteps(lines) {
+            const steps = [];
+            const timestampRegex = /\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}|\d{13}|\[\d+\]/;
+            
+            lines.forEach((line, index) => {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) return;
+
+                const lowerLine = trimmedLine.toLowerCase();
+                let type = 'info';
+
+                if (successKeywords.some(keyword => lowerLine.includes(keyword))) {
+                    type = 'success';
+                } else if (failureKeywords.some(keyword => lowerLine.includes(keyword))) {
+                    type = 'failure';
+                } else if (issueKeywords.some(keyword => lowerLine.includes(keyword))) {
+                    type = 'warning';
+                }
+
+                // Extract timestamp if present
+                const timestampMatch = line.match(timestampRegex);
+                const timestamp = timestampMatch ? timestampMatch[0] : null;
+
+                steps.push({
+                    lineNumber: index + 1,
+                    content: trimmedLine.substring(0, 100), // Limit to 100 chars
+                    type: type,
+                    timestamp: timestamp
+                });
+            });
+
+            return steps;
+        }
+
+        function performFlowSearch() {
+            const searchTerm = document.getElementById('flowSearchBox').value.toLowerCase();
+            let matchCount = 0;
+
+            document.querySelectorAll('.flow-step').forEach(stepDiv => {
+                const contentSpan = stepDiv.querySelector('.flow-step-content');
+                if (!contentSpan) return;
+                
+                const fileKey = stepDiv.getAttribute('data-file');
+                const stepIndex = stepDiv.getAttribute('data-step-index');
+                if (!fileKey || !stepIndex) return;
+
+                const originalContent = logData[fileKey].flowSteps[stepIndex].content;
+
+                if (searchTerm && originalContent.toLowerCase().includes(searchTerm)) {
+                    stepDiv.classList.remove('hidden');
+                    const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
+                    contentSpan.innerHTML = originalContent.replace(regex, '<mark>$1</mark>');
+                    matchCount++;
+                } else if (searchTerm) {
+                    stepDiv.classList.add('hidden');
+                } else {
+                    stepDiv.classList.remove('hidden');
+                    contentSpan.textContent = originalContent;
+                }
+            });
+        }
+
+        function renderFlowAnalysis() {
+            const container = document.getElementById('flowContainer');
+            container.innerHTML = '';
+
+            if (!logData.file1.content && !logData.file2.content) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <h3>No Flow Data Available</h3>
+                        <p>Upload log files to see the flow analysis</p>
+                    </div>
+                `;
+                return;
+            }
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (logData[fileKey].content) {
+                    const panel = document.createElement('div');
+                    panel.className = 'flow-panel';
+
+                    const header = document.createElement('div');
+                    header.className = 'flow-header';
+                    header.innerHTML = `
+                        <span>📄 ${logData[fileKey].name}</span>
+                        <span class="line-count-badge">${logData[fileKey].flowSteps.length} steps</span>
+                    `;
+
+                    const content = document.createElement('div');
+                    content.className = 'flow-content';
+
+                    // Render flow steps
+                    logData[fileKey].flowSteps.forEach((step, index) => {
+                        const stepDiv = document.createElement('div');
+                        stepDiv.className = `flow-step ${step.type}`;
+                        stepDiv.setAttribute('data-file', fileKey);
+                        stepDiv.setAttribute('data-step-index', index);
+                        stepDiv.onclick = () => scrollToLogLine(fileKey, step.lineNumber);
+
+                        let statusIcon = '📋';
+                        if (step.type === 'success') statusIcon = '✅';
+                        else if (step.type === 'failure') statusIcon = '❌';
+                        else if (step.type === 'warning') statusIcon = '⚠️';
+
+                        stepDiv.innerHTML = `
+                            <div>
+                                ${statusIcon} <span class="flow-step-number">${step.lineNumber}</span>
+                                <span class="flow-step-content">${step.content}</span>
+                            </div>
+                            ${step.timestamp ? `<div class="flow-step-time">⏱️ ${step.timestamp}</div>` : ''}
+                        `;
+
+                        content.appendChild(stepDiv);
+                    });
+
+                    panel.appendChild(header);
+                    panel.appendChild(content);
+                    container.appendChild(panel);
+                }
+            });
+            
+            // Apply current search if exists
+            performFlowSearch();
+        }
+
+        function scrollToLogLine(fileKey, lineNumber) {
+            // Switch to standard tab
+            currentTab = 'standard';
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            tabs.forEach(tab => tab.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+
+            tabs[0].classList.add('active');
+            document.getElementById('standardTab').classList.add('active');
+
+            // Scroll to the line
+            setTimeout(() => {
+                const lineDiv = document.querySelector(`[data-file="${fileKey}"][data-line-index="${lineNumber - 1}"]`);
+                if (lineDiv) {
+                    lineDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    lineDiv.style.backgroundColor = '#ffd700';
+                    setTimeout(() => {
+                        lineDiv.style.backgroundColor = '';
+                    }, 2000);
+                }
+            }, 100);
+        }
+
+        function extractTraceData(lines) {
+            const traces = [];
+            
+            // Enhanced patterns for better matching
+            const requestIdPatterns = [
+                /request[\s_-]?id[:\s=]+([a-zA-Z0-9\-_]+)/i,
+                /correlation[\s_-]?id[:\s=]+([a-zA-Z0-9\-_]+)/i,
+                /trace[\s_-]?id[:\s=]+([a-zA-Z0-9\-_]+)/i,
+                /transaction[\s_-]?id[:\s=]+([a-zA-Z0-9\-_]+)/i,
+                /\[([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\]/i, // UUID in brackets
+                /"id"\s*:\s*"([a-zA-Z0-9\-_]+)"/i, // JSON id field
+            ];
+
+            const classPatterns = [
+                /\b([A-Z][a-zA-Z0-9]*(?:Controller|Service|Repository|Handler|Manager|Processor|Client|Provider))\b/g,
+                /class[\s:]+([A-Z][a-zA-Z0-9]*)/gi,
+                /\b([a-z]+\.[a-z]+\.[A-Z][a-zA-Z0-9]*)\b/g, // package.Class
+            ];
+
+            const methodPatterns = [
+                /\b([a-z][a-zA-Z0-9]*(?:Method)?)\s*\(/g,
+                /\.([a-z][a-zA-Z0-9]*)\(/g,
+                /method[\s:]+([a-z][a-zA-Z0-9]*)/gi,
+                /calling[\s:]+([a-z][a-zA-Z0-9]*)/gi,
+                /executing[\s:]+([a-z][a-zA-Z0-9]*)/gi,
+            ];
+
+            lines.forEach((line, index) => {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) return;
+
+                // Extract Request IDs
+                for (const pattern of requestIdPatterns) {
+                    const match = trimmedLine.match(pattern);
+                    if (match && match[1]) {
+                        traces.push({
+                            type: 'request-id',
+                            value: match[1],
+                            lineNumber: index + 1,
+                            context: trimmedLine.substring(0, 150)
+                        });
+                        break;
+                    }
+                }
+
+                // Extract Class Names
+                for (const pattern of classPatterns) {
+                    let match;
+                    const seen = new Set();
+                    while ((match = pattern.exec(trimmedLine)) !== null) {
+                        if (match[1] && match[1].length > 3 && !seen.has(match[1])) {
+                            seen.add(match[1]);
+                            traces.push({
+                                type: 'class-name',
+                                value: match[1],
+                                lineNumber: index + 1,
+                                context: trimmedLine.substring(0, 150)
+                            });
+                        }
+                    }
+                }
+
+                // Extract Method Names
+                for (const pattern of methodPatterns) {
+                    let match;
+                    const seen = new Set();
+                    while ((match = pattern.exec(trimmedLine)) !== null) {
+                        if (match[1] && match[1].length > 2 && !seen.has(match[1])) {
+                            seen.add(match[1]);
+                            traces.push({
+                                type: 'method-name',
+                                value: match[1],
+                                lineNumber: index + 1,
+                                context: trimmedLine.substring(0, 150)
+                            });
+                        }
+                    }
+                }
+            });
+
+            return traces;
+        }
+
+        function renderTraceDiagram() {
+            const container = document.getElementById('traceDiagram');
+            container.innerHTML = '';
+
+            if (!logData.file1.content && !logData.file2.content) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                        </svg>
+                        <h3>No Trace Data Available</h3>
+                        <p>Upload log files to see the trace diagram</p>
+                    </div>
+                `;
+                return;
+            }
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (logData[fileKey].content) {
+                    const column = document.createElement('div');
+                    column.className = 'service-column';
+
+                    const header = document.createElement('div');
+                    header.className = 'service-header';
+                    header.textContent = `🚀 ${logData[fileKey].name}`;
+
+                    column.appendChild(header);
+
+                    // Group traces by type
+                    const groupedTraces = {
+                        'request-id': [],
+                        'class-name': [],
+                        'method-name': []
+                    };
+
+                    logData[fileKey].traceData.forEach(trace => {
+                        groupedTraces[trace.type].push(trace);
+                    });
+
+                    // Render each group
+                    Object.entries(groupedTraces).forEach(([type, traces]) => {
+                        if (traces.length > 0) {
+                            traces.forEach(trace => {
+                                const item = document.createElement('div');
+                                item.className = `trace-item ${type}`;
+                                item.setAttribute('data-file', fileKey);
+                                item.setAttribute('data-trace-value', trace.value);
+                                item.setAttribute('data-trace-context', trace.context);
+                                item.onclick = () => scrollToLogLine(fileKey, trace.lineNumber);
+
+                                let typeLabel = 'REQ';
+                                if (type === 'class-name') typeLabel = 'CLS';
+                                if (type === 'method-name') typeLabel = 'MTD';
+
+                                item.innerHTML = `
+                                    <div>
+                                        <span class="trace-type ${type.split('-')[0]}">${typeLabel}</span>
+                                        <span class="trace-value">${trace.value}</span>
+                                        <span class="trace-line-ref">Line ${trace.lineNumber}</span>
+                                    </div>
+                                `;
+
+                                column.appendChild(item);
+                            });
+                        }
+                    });
+
+                    container.appendChild(column);
+                }
+            });
+            
+            // Apply current search if exists
+            performTraceSearch();
+        }
+
+        function performTraceSearch() {
+            const searchTerm = document.getElementById('traceSearchBox').value.toLowerCase();
+
+            document.querySelectorAll('.trace-item').forEach(item => {
+                const value = item.getAttribute('data-trace-value') || '';
+                const context = item.getAttribute('data-trace-context') || '';
+                const valueSpan = item.querySelector('.trace-value');
+                
+                if (!searchTerm) {
+                    item.classList.remove('hidden');
+                    if (valueSpan) valueSpan.innerHTML = value;
+                } else if (value.toLowerCase().includes(searchTerm) || context.toLowerCase().includes(searchTerm)) {
+                    item.classList.remove('hidden');
+                    if (valueSpan) {
+                        const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
+                        valueSpan.innerHTML = value.replace(regex, '<mark>$1</mark>');
+                    }
+                } else {
+                    item.classList.add('hidden');
+                }
+            });
+        }
+
+        function runDebugAnalysis() {
+            const content = document.getElementById('debugContent');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            
+            if (!logData.file1.content && !logData.file2.content) {
+                alert('Please upload at least one log file before analyzing.');
+                return;
+            }
+
+            // Show loading
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = '⚡ Analyzing...';
+            content.innerHTML = `
+                <div class="loading-spinner">
+                    <div class="spinner"></div>
+                    <p>Analyzing logs with AI-powered algorithms...</p>
+                </div>
+            `;
+
+            // Simulate AI analysis delay
+            setTimeout(() => {
+                const analysis = performIntelligentAnalysis();
+                renderDebugAnalysis(analysis);
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = '⚡ Re-Analyze Logs';
+            }, 1500);
+        }
+
+        function performIntelligentAnalysis() {
+            const analysis = {
+                stats: { errors: 0, warnings: 0, criticalIssues: 0, performanceIssues: 0 },
+                rootCauses: [],
+                timeline: [],
+                recommendations: [],
+                correlations: []
+            };
+
+            const allErrors = [];
+            const allWarnings = [];
+            const performancePatterns = [];
+            const exceptionMap = new Map();
+
+            // Analyze both files
+            ['file1', 'file2'].forEach(fileKey => {
+                if (!logData[fileKey].content) return;
+
+                logData[fileKey].lines.forEach((line, index) => {
+                    const lowerLine = line.toLowerCase();
+                    const lineNumber = index + 1;
+
+                    // Detect errors
+                    if (failureKeywords.some(kw => lowerLine.includes(kw)) || lowerLine.includes('error')) {
+                        analysis.stats.errors++;
+                        allErrors.push({ fileKey, line, lineNumber });
+                        
+                        // Extract exception type
+                        const exceptionMatch = line.match(/([A-Z][a-zA-Z]*Exception|Error)/g);
+                        if (exceptionMatch) {
+                            const exType = exceptionMatch[0];
+                            exceptionMap.set(exType, (exceptionMap.get(exType) || 0) + 1);
+                        }
+                    }
+
+                    // Detect warnings
+                    if (issueKeywords.some(kw => lowerLine.includes(kw))) {
+                        analysis.stats.warnings++;
+                        allWarnings.push({ fileKey, line, lineNumber });
+                    }
+
+                    // Detect performance issues
+                    const timeMatch = line.match(/(\d+)\s*(ms|milliseconds|seconds|s)/);
+                    if (timeMatch) {
+                        const time = parseInt(timeMatch[1]);
+                        const unit = timeMatch[2];
+                        const timeMs = unit.startsWith('s') ? time * 1000 : time;
+                        
+                        if (timeMs > 1000) {
+                            analysis.stats.performanceIssues++;
+                            performancePatterns.push({ fileKey, line, lineNumber, timeMs });
+                        }
+                    }
+
+                    // Add to timeline
+                    if (lowerLine.includes('error') || lowerLine.includes('critical') || lowerLine.includes('fatal')) {
+                        const timestampMatch = line.match(/\d{2}:\d{2}:\d{2}/);
+                        analysis.timeline.push({
+                            type: 'error',
+                            time: timestampMatch ? timestampMatch[0] : `Line ${lineNumber}`,
+                            message: line.substring(0, 100),
+                            fileKey,
+                            lineNumber
+                        });
+                    } else if (lowerLine.includes('warn')) {
+                        const timestampMatch = line.match(/\d{2}:\d{2}:\d{2}/);
+                        analysis.timeline.push({
+                            type: 'warning',
+                            time: timestampMatch ? timestampMatch[0] : `Line ${lineNumber}`,
+                            message: line.substring(0, 100),
+                            fileKey,
+                            lineNumber
+                        });
+                    }
+                });
+            });
+
+            // Sort timeline
+            analysis.timeline.sort((a, b) => a.lineNumber - b.lineNumber);
+            analysis.timeline = analysis.timeline.slice(0, 10); // Top 10
+
+            // Identify root causes
+            if (exceptionMap.size > 0) {
+                const topException = Array.from(exceptionMap.entries()).sort((a, b) => b[1] - a[1])[0];
+                analysis.rootCauses.push({
+                    severity: 'critical',
+                    title: `Frequent ${topException[0]} Detected`,
+                    description: `Found ${topException[1]} occurrences of ${topException[0]}. This is the most common exception in your logs and likely indicates a systemic issue.`,
+                    count: topException[1],
+                    type: topException[0]
+                });
+                analysis.stats.criticalIssues++;
+            }
+
+            // Performance analysis
+            if (performancePatterns.length > 0) {
+                const slowest = performancePatterns.sort((a, b) => b.timeMs - a.timeMs)[0];
+                analysis.rootCauses.push({
+                    severity: 'high',
+                    title: 'Performance Bottleneck Detected',
+                    description: `Identified operations taking up to ${slowest.timeMs}ms. This could be causing user experience degradation.`,
+                    count: performancePatterns.length,
+                    maxTime: slowest.timeMs
+                });
+            }
+
+            // Connection issues
+            const connectionErrors = allErrors.filter(e => 
+                e.line.toLowerCase().includes('connection') || 
+                e.line.toLowerCase().includes('timeout') ||
+                e.line.toLowerCase().includes('refused')
+            );
+            if (connectionErrors.length > 2) {
+                analysis.rootCauses.push({
+                    severity: 'critical',
+                    title: 'Network/Connection Issues',
+                    description: `Detected ${connectionErrors.length} connection-related errors. This suggests network instability or service unavailability.`,
+                    count: connectionErrors.length
+                });
+                analysis.stats.criticalIssues++;
+            }
+
+            // Generate smart recommendations
+            if (exceptionMap.has('NullPointerException') || exceptionMap.has('TypeError')) {
+                analysis.recommendations.push({
+                    icon: '🛡️',
+                    title: 'Add Null Safety Checks',
+                    text: 'Implement defensive programming with null checks and optional chaining to prevent null/undefined errors.'
+                });
+            }
+
+            if (performancePatterns.length > 3) {
+                analysis.recommendations.push({
+                    icon: '⚡',
+                    title: 'Optimize Slow Operations',
+                    text: 'Add caching, use async operations, or optimize database queries to reduce response times.'
+                });
+            }
+
+            if (connectionErrors.length > 0) {
+                analysis.recommendations.push({
+                    icon: '🔄',
+                    title: 'Implement Retry Logic',
+                    text: 'Add exponential backoff retry mechanism for network operations to handle transient failures.'
+                });
+            }
+
+            if (analysis.stats.errors > 10) {
+                analysis.recommendations.push({
+                    icon: '📊',
+                    title: 'Enhance Error Monitoring',
+                    text: 'Integrate application monitoring tools (Sentry, DataDog) for better visibility and alerting.'
+                });
+            }
+
+            analysis.recommendations.push({
+                icon: '🔍',
+                title: 'Add Structured Logging',
+                text: 'Use structured JSON logging with correlation IDs for better traceability across services.'
+            });
+
+            // Cross-service correlations
+            if (logData.file1.content && logData.file2.content) {
+                // Find common request IDs
+                const file1ReqIds = new Set(logData.file1.traceData.filter(t => t.type === 'request-id').map(t => t.value));
+                const file2ReqIds = new Set(logData.file2.traceData.filter(t => t.type === 'request-id').map(t => t.value));
+                
+                const commonReqIds = [...file1ReqIds].filter(id => file2ReqIds.has(id));
+                
+                if (commonReqIds.length > 0) {
+                    analysis.correlations.push({
+                        title: 'Shared Request IDs',
+                        items: commonReqIds.slice(0, 5).map(id => ({ value: id, files: ['file1', 'file2'] }))
+                    });
+                }
+
+                // Find common error patterns
+                const file1Errors = allErrors.filter(e => e.fileKey === 'file1');
+                const file2Errors = allErrors.filter(e => e.fileKey === 'file2');
+                
+                if (file1Errors.length > 0 && file2Errors.length > 0) {
+                    analysis.correlations.push({
+                        title: 'Related Errors Across Services',
+                        items: [
+                            { value: `${file1Errors.length} errors in ${logData.file1.name}`, files: ['file1'] },
+                            { value: `${file2Errors.length} errors in ${logData.file2.name}`, files: ['file2'] }
+                        ]
+                    });
+                }
+            }
+
+            return analysis;
+        }
+
+        function renderDebugAnalysis(analysis) {
+            const content = document.getElementById('debugContent');
+            
+            let html = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value error">${analysis.stats.errors}</div>
+                        <div class="stat-label">Total Errors</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value warning">${analysis.stats.warnings}</div>
+                        <div class="stat-label">Warnings</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value error">${analysis.stats.criticalIssues}</div>
+                        <div class="stat-label">Critical Issues</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value warning">${analysis.stats.performanceIssues}</div>
+                        <div class="stat-label">Performance Issues</div>
+                    </div>
+                </div>
+            `;
+
+            // Root Cause Analysis
+            if (analysis.rootCauses.length > 0) {
+                html += `
+                    <div class="debug-section">
+                        <div class="debug-section-title">
+                            <span class="icon">🎯</span>
+                            <span>Root Cause Analysis</span>
+                        </div>
+                `;
+                
+                analysis.rootCauses.forEach(cause => {
+                    html += `
+                        <div class="insight-card ${cause.severity}">
+                            <div class="insight-title">
+                                <span class="insight-severity ${cause.severity}">${cause.severity}</span>
+                                <span>${cause.title}</span>
+                            </div>
+                            <div class="insight-description">${cause.description}</div>
+                            <div class="insight-details">
+                                <div class="insight-metric">
+                                    <span>Occurrences:</span>
+                                    <strong>${cause.count}</strong>
+                                </div>
+                                ${cause.maxTime ? `<div class="insight-metric"><span>Max Duration:</span><strong>${cause.maxTime}ms</strong></div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `</div>`;
+            }
+
+            // Error Timeline
+            if (analysis.timeline.length > 0) {
+                html += `
+                    <div class="debug-section">
+                        <div class="debug-section-title">
+                            <span class="icon">⏱️</span>
+                            <span>Error Timeline</span>
+                        </div>
+                        <div class="timeline">
+                `;
+                
+                analysis.timeline.forEach(event => {
+                    html += `
+                        <div class="timeline-item">
+                            <div class="timeline-marker ${event.type}">
+                                ${event.type === 'error' ? '❌' : '⚠️'}
+                            </div>
+                            <div class="timeline-content" onclick="scrollToLogLine('${event.fileKey}', ${event.lineNumber})">
+                                <div class="timeline-time">${event.time}</div>
+                                <div class="timeline-message">${event.message}...</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `</div></div>`;
+            }
+
+            // Smart Recommendations
+            if (analysis.recommendations.length > 0) {
+                html += `
+                    <div class="debug-section">
+                        <div class="debug-section-title">
+                            <span class="icon">💡</span>
+                            <span>Smart Recommendations</span>
+                        </div>
+                        <ul class="recommendation-list">
+                `;
+                
+                analysis.recommendations.forEach(rec => {
+                    html += `
+                        <li class="recommendation-item">
+                            <div class="recommendation-icon">${rec.icon}</div>
+                            <div class="recommendation-content">
+                                <div class="recommendation-title">${rec.title}</div>
+                                <div class="recommendation-text">${rec.text}</div>
+                            </div>
+                        </li>
+                    `;
+                });
+                
+                html += `</ul></div>`;
+            }
+
+            // Cross-Service Correlations
+            if (analysis.correlations.length > 0) {
+                html += `
+                    <div class="debug-section">
+                        <div class="debug-section-title">
+                            <span class="icon">🔗</span>
+                            <span>Cross-Service Correlations</span>
+                        </div>
+                        <div class="correlation-grid">
+                `;
+                
+                analysis.correlations.forEach(corr => {
+                    html += `
+                        <div class="correlation-card">
+                            <div class="correlation-header">${corr.title}</div>
+                            <div class="correlation-items">
+                    `;
+                    
+                    corr.items.forEach(item => {
+                        html += `
+                            <div class="correlation-item">
+                                ${item.files.map(f => `<span class="correlation-badge ${f}">${f}</span>`).join('')}
+                                <span>${item.value}</span>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `</div></div>`;
+                });
+                
+                html += `</div></div>`;
+            }
+
+            content.innerHTML = html;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Universal Log File Viewer loaded successfully');
         });
-
-        spark.stop();
-    }
-fd
-}
+    </script>
+</body>
+</html>
