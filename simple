@@ -1264,6 +1264,179 @@
             display: none;
         }
 
+        .flashbox {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            width: 95vw;
+            max-width: 1400px;
+            height: 90vh;
+            max-height: 900px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.25s ease-out;
+        }
+
+        .flashbox.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+            pointer-events: all;
+        }
+
+        .flashbox-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .flashbox-overlay.show {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .flashbox-header {
+            background: #667eea;
+            color: white;
+            padding: 20px 30px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #5568d3;
+        }
+
+        .flashbox-title {
+            font-size: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .flashbox-close {
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .flashbox-close:hover {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        .flashbox-content {
+            padding: 30px;
+            height: calc(100% - 160px);
+            overflow-y: auto;
+        }
+
+        .flashbox-text {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 24px;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 16px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #dee2e6;
+            min-height: 200px;
+        }
+
+        .flashbox-actions {
+            padding: 20px 30px;
+            border-top: 1px solid #e9ecef;
+            background: #f8f9fa;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .flashbox-btn {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 5px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .flashbox-btn.copy {
+            background: #667eea;
+            color: white;
+        }
+
+        .flashbox-btn.copy:hover {
+            background: #5568d3;
+        }
+
+        .flashbox-btn.close {
+            background: #e9ecef;
+            color: #495057;
+        }
+
+        .flashbox-btn.close:hover {
+            background: #dee2e6;
+        }
+
+        .flashbox-info {
+            font-size: 14px;
+            color: #6c757d;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+        }
+
+        .selection-hint {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+
+        .selection-hint.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
         /* Optimizations for large monitors */
         @media (min-width: 2000px) {
             .container {
@@ -1445,6 +1618,36 @@
         </div>
     </div>
 
+    <!-- Flashbox Overlay -->
+    <div class="flashbox-overlay" id="flashboxOverlay" onclick="closeFlashbox()"></div>
+
+    <!-- Flashbox -->
+    <div class="flashbox" id="flashbox">
+        <div class="flashbox-header">
+            <div class="flashbox-title">
+                <span>📝</span>
+                <span>Selected Log Text</span>
+            </div>
+            <button class="flashbox-close" onclick="closeFlashbox()">×</button>
+        </div>
+        <div class="flashbox-content">
+            <div class="flashbox-info">
+                <span>📄</span>
+                <span id="flashboxLineInfo">0 lines selected</span>
+            </div>
+            <div class="flashbox-text" id="flashboxText"></div>
+        </div>
+        <div class="flashbox-actions">
+            <button class="flashbox-btn copy" onclick="copyFlashboxContent()">📋 Copy to Clipboard</button>
+            <button class="flashbox-btn close" onclick="closeFlashbox()">Close</button>
+        </div>
+    </div>
+
+    <!-- Selection Hint -->
+    <div class="selection-hint" id="selectionHint">
+        ✨ Text selected! Click anywhere to view in flashbox
+    </div>
+
     <script>
         let logData = {
             file1: { name: '', content: '', lines: [], flowSteps: [], traceData: [] },
@@ -1458,6 +1661,8 @@
         let stackTraceFormatEnabled = false;
         let filterTerms = [];
         let filterMode = 'OR';
+        let selectedText = '';
+        let selectionTimeout = null;
 
         const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
         const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
@@ -2672,10 +2877,122 @@
             content.innerHTML = html;
         }
 
+        function setupTextSelection() {
+            const logContents = document.querySelectorAll('.log-content, .flow-content, .stack-trace-content');
+
+            logContents.forEach(content => {
+                content.addEventListener('mouseup', handleTextSelection);
+            });
+
+            // Also handle selection on stack trace containers
+            document.addEventListener('mouseup', function(e) {
+                if (e.target.closest('.log-content') ||
+                    e.target.closest('.flow-content') ||
+                    e.target.closest('.stack-trace-content') ||
+                    e.target.closest('.timeline-content')) {
+                    handleTextSelection(e);
+                }
+            });
+        }
+
+        function handleTextSelection(event) {
+            // Clear any existing timeout
+            if (selectionTimeout) {
+                clearTimeout(selectionTimeout);
+            }
+
+            // Small delay to ensure selection is complete
+            selectionTimeout = setTimeout(() => {
+                const selection = window.getSelection();
+                const text = selection.toString().trim();
+
+                if (text.length > 0) {
+                    selectedText = text;
+                    showSelectionHint();
+
+                    // Show flashbox after a short delay or on click
+                    setTimeout(() => {
+                        if (window.getSelection().toString().trim() === text) {
+                            showFlashbox(text);
+                        }
+                    }, 300);
+                }
+            }, 100);
+        }
+
+        function showSelectionHint() {
+            const hint = document.getElementById('selectionHint');
+            hint.classList.add('show');
+
+            setTimeout(() => {
+                hint.classList.remove('show');
+            }, 2000);
+        }
+
+        function showFlashbox(text) {
+            const flashbox = document.getElementById('flashbox');
+            const overlay = document.getElementById('flashboxOverlay');
+            const flashboxText = document.getElementById('flashboxText');
+            const flashboxLineInfo = document.getElementById('flashboxLineInfo');
+
+            // Count lines
+            const lines = text.split('\n');
+            const lineCount = lines.length;
+            const charCount = text.length;
+
+            // Update content
+            flashboxText.textContent = text;
+            flashboxLineInfo.textContent = `${lineCount} line${lineCount !== 1 ? 's' : ''} selected • ${charCount} characters`;
+
+            // Show overlay and flashbox
+            overlay.classList.add('show');
+            flashbox.classList.add('show');
+
+            // Clear selection
+            window.getSelection().removeAllRanges();
+        }
+
+        function closeFlashbox() {
+            const flashbox = document.getElementById('flashbox');
+            const overlay = document.getElementById('flashboxOverlay');
+
+            flashbox.classList.remove('show');
+            overlay.classList.remove('show');
+        }
+
+        function copyFlashboxContent() {
+            const flashboxText = document.getElementById('flashboxText');
+            const text = flashboxText.textContent;
+
+            // Copy to clipboard
+            navigator.clipboard.writeText(text).then(() => {
+                // Show success feedback
+                const copyBtn = document.querySelector('.flashbox-btn.copy');
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '✅ Copied!';
+                copyBtn.style.background = '#28a745';
+
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            }).catch(err => {
+                alert('Failed to copy to clipboard');
+            });
+        }
+
+        // Close flashbox with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeFlashbox();
+            }
+        });
+
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Universal Log File Viewer loaded successfully');
             renderFilterTags();
+            setupTextSelection();
         });
     </script>
 </body>
