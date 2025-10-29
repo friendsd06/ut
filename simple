@@ -1268,6 +1268,18 @@
             display: none;
         }
 
+        .logger-filter-info {
+            background: #e3f2fd;
+            border-left: 4px solid #667eea;
+            padding: 12px 16px;
+            margin: 10px 0;
+            border-radius: 6px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
         .flashbox {
             position: fixed;
             top: 50%;
@@ -2299,6 +2311,8 @@
             if (cleanModeEnabled) {
                 applyCleanMode();
             }
+            // Apply logger filtering
+            applyLoggerFiltering();
         }
 
         function renderLogsStandard(content, fileKey) {
@@ -2436,6 +2450,10 @@
             logData[fileKey] = { name: '', content: '', lines: [], flowSteps: [], traceData: [] };
             document.getElementById(`file${fileNumber}`).value = '';
             document.getElementById(`file${fileNumber}-name`).textContent = 'No file selected';
+
+            // Re-extract logger info from remaining file
+            extractLoggerInfo();
+
             renderLogs();
             if (currentTab === 'flow') {
                 renderFlowAnalysis();
@@ -2864,6 +2882,8 @@
                 return;
             }
 
+            let hiddenCount = 0;
+
             // Hide lines matching hidden loggers
             document.querySelectorAll('.log-line').forEach(lineDiv => {
                 const line = lineDiv.getAttribute('data-original-line') || lineDiv.textContent;
@@ -2877,10 +2897,39 @@
 
                 if (shouldHide) {
                     lineDiv.classList.add('logger-hidden');
+                    hiddenCount++;
                 } else {
                     lineDiv.classList.remove('logger-hidden');
                 }
             });
+
+            // Show info if loggers are hidden
+            if (hiddenCount > 0) {
+                showLoggerFilterInfo(hiddenCount);
+            } else {
+                hideLoggerFilterInfo();
+            }
+        }
+
+        function showLoggerFilterInfo(count) {
+            // Remove existing info if any
+            const existing = document.querySelector('.logger-filter-info');
+            if (existing) existing.remove();
+
+            document.querySelectorAll('.log-content').forEach(content => {
+                const info = document.createElement('div');
+                info.className = 'logger-filter-info';
+                info.innerHTML = `
+                    <span style="font-size: 20px;">🎯</span>
+                    <span><strong>Logger Filter Active:</strong> Hiding ${count} lines from ${hiddenLoggers.size} logger(s)</span>
+                    <button onclick="toggleLoggerPanel()" style="margin-left: auto; padding: 4px 12px; background: white; border: 2px solid #667eea; border-radius: 4px; cursor: pointer; color: #667eea; font-weight: 600;">⚙️ Manage</button>
+                `;
+                content.insertBefore(info, content.firstChild);
+            });
+        }
+
+        function hideLoggerFilterInfo() {
+            document.querySelectorAll('.logger-filter-info').forEach(info => info.remove());
         }
 
         function removeCleanMode() {
