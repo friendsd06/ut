@@ -1078,6 +1078,98 @@
             100% { transform: rotate(360deg); }
         }
 
+        .stack-trace-container {
+            background: #2d2d2d;
+            border-left: 4px solid #dc3545;
+            margin: 10px 0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .stack-trace-header {
+            background: #dc3545;
+            color: white;
+            padding: 10px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+
+        .stack-trace-header:hover {
+            background: #c82333;
+        }
+
+        .stack-trace-toggle {
+            font-size: 18px;
+            transition: transform 0.3s ease;
+        }
+
+        .stack-trace-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .stack-trace-content {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .stack-trace-content.collapsed {
+            display: none;
+        }
+
+        .stack-trace-line {
+            padding: 3px 0;
+            color: #f87171;
+        }
+
+        .stack-trace-line.at {
+            color: #9ca3af;
+            padding-left: 20px;
+        }
+
+        .stack-trace-line.at:hover {
+            color: #d4d4d4;
+            background: #3d3d3d;
+        }
+
+        .stack-trace-summary {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .log-line.noise {
+            opacity: 0.3;
+            font-size: 11px;
+        }
+
+        .log-line.cleaned {
+            display: none;
+        }
+
+        .clean-mode-info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 12px 16px;
+            margin: 10px 0;
+            border-radius: 6px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .clean-mode-info.hidden {
+            display: none;
+        }
+
         @media (max-width: 768px) {
             .control-row {
                 flex-direction: column;
@@ -1136,6 +1228,8 @@
                     <button class="filter-btn issue" onclick="toggleFilter('issue')">⚠️ Quick Issue</button>
                     <button class="filter-btn success" onclick="toggleFilter('success')">✅ All Success Steps</button>
                     <button class="filter-btn failure" onclick="toggleFilter('failure')">❌ All Failure Steps</button>
+                    <button class="filter-btn" id="cleanLogsBtn" onclick="toggleCleanMode()">🧽 Clean View</button>
+                    <button class="filter-btn" id="stackTraceBtn" onclick="toggleStackTraceFormat()">📜 Format Stack Traces</button>
                 </div>
             </div>
         </div>
@@ -1235,10 +1329,27 @@
         let currentFilter = null;
         let currentView = 'stacked';
         let currentTab = 'standard';
+        let cleanModeEnabled = false;
+        let stackTraceFormatEnabled = false;
 
         const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
         const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
         const failureKeywords = ['failed', 'exception', 'crash', 'not completed', 'aborted', 'rejected', 'denied'];
+
+        // Noise patterns to filter out in clean mode
+        const noisePatterns = [
+            /^\s*at\s+/i,  // Stack trace lines
+            /^\s*debug/i,
+            /^\s*trace/i,
+            /^\s*verbose/i,
+            /health.*check/i,
+            /heartbeat/i,
+            /ping/i,
+            /^\s*INFO.*Starting/i,
+            /^\s*INFO.*Started/i,
+            /metrics/i,
+            /^\s*$/ // Empty lines
+        ];
 
         function handleFileUpload(fileNumber) {
             const fileInput = document.getElementById(`file${fileNumber}`);
@@ -1311,25 +1422,11 @@
                     content.className = 'log-content';
                     content.id = `log-content-${fileKey}`;
 
-                    logData[fileKey].lines.forEach((line, index) => {
-                        const lineDiv = document.createElement('div');
-                        lineDiv.className = 'log-line';
-                        lineDiv.setAttribute('data-line-index', index);
-                        lineDiv.setAttribute('data-file', fileKey);
-                        lineDiv.textContent = line;
-
-                        // Apply color coding
-                        const lowerLine = line.toLowerCase();
-                        if (successKeywords.some(keyword => lowerLine.includes(keyword))) {
-                            lineDiv.classList.add('success');
-                        } else if (failureKeywords.some(keyword => lowerLine.includes(keyword))) {
-                            lineDiv.classList.add('failure');
-                        } else if (issueKeywords.some(keyword => lowerLine.includes(keyword))) {
-                            lineDiv.classList.add('warning');
-                        }
-
-                        content.appendChild(lineDiv);
-                    });
+                    if (stackTraceFormatEnabled) {
+                        renderLogsWithStackTraceFormatting(content, fileKey);
+                    } else {
+                        renderLogsStandard(content, fileKey);
+                    }
 
                     section.appendChild(header);
                     section.appendChild(content);
@@ -1339,6 +1436,139 @@
 
             applyCurrentFilter();
             performSearch();
+            if (cleanModeEnabled) {
+                applyCleanMode();
+            }
+        }
+
+        function renderLogsStandard(content, fileKey) {
+            logData[fileKey].lines.forEach((line, index) => {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'log-line';
+                lineDiv.setAttribute('data-line-index', index);
+                lineDiv.setAttribute('data-file', fileKey);
+                lineDiv.setAttribute('data-original-line', line);
+                lineDiv.textContent = line;
+
+                // Apply color coding
+                const lowerLine = line.toLowerCase();
+                if (successKeywords.some(keyword => lowerLine.includes(keyword))) {
+                    lineDiv.classList.add('success');
+                } else if (failureKeywords.some(keyword => lowerLine.includes(keyword))) {
+                    lineDiv.classList.add('failure');
+                } else if (issueKeywords.some(keyword => lowerLine.includes(keyword))) {
+                    lineDiv.classList.add('warning');
+                }
+
+                // Mark noise lines
+                if (noisePatterns.some(pattern => pattern.test(line))) {
+                    lineDiv.classList.add('noise');
+                }
+
+                content.appendChild(lineDiv);
+            });
+        }
+
+        function renderLogsWithStackTraceFormatting(content, fileKey) {
+            const lines = logData[fileKey].lines;
+            let i = 0;
+            let stackTraceId = 0;
+
+            while (i < lines.length) {
+                const line = lines[i];
+                const lowerLine = line.toLowerCase();
+
+                // Check if this is the start of a stack trace (exception line)
+                if (line.match(/Exception|Error/i) && (line.includes(':') || line.includes('at '))) {
+                    // Found a stack trace
+                    const stackTraceLines = [line];
+                    let j = i + 1;
+
+                    // Collect all "at" lines
+                    while (j < lines.length && (lines[j].trim().startsWith('at ') || lines[j].trim().match(/^\s+at\s/))) {
+                        stackTraceLines.push(lines[j]);
+                        j++;
+                    }
+
+                    // Create collapsible stack trace
+                    const stackTraceContainer = document.createElement('div');
+                    stackTraceContainer.className = 'stack-trace-container';
+                    stackTraceContainer.setAttribute('data-stack-id', stackTraceId);
+
+                    const exceptionName = line.match(/([A-Za-z]+Exception|[A-Za-z]+Error)/)?.[0] || 'Exception';
+                    const exceptionMessage = line.split(':')[1]?.substring(0, 60) || '';
+
+                    const header = document.createElement('div');
+                    header.className = 'stack-trace-header';
+                    header.innerHTML = `
+                        <div>
+                            <strong>❌ ${exceptionName}</strong>
+                            <span class="stack-trace-summary">${exceptionMessage}</span>
+                        </div>
+                        <div>
+                            <span style="margin-right: 10px;">${stackTraceLines.length - 1} frames</span>
+                            <span class="stack-trace-toggle">▼</span>
+                        </div>
+                    `;
+                    header.onclick = () => toggleStackTrace(stackTraceId);
+
+                    const stackContent = document.createElement('div');
+                    stackContent.className = 'stack-trace-content';
+                    stackContent.id = `stack-trace-${stackTraceId}`;
+
+                    stackTraceLines.forEach((stackLine, idx) => {
+                        const stackLineDiv = document.createElement('div');
+                        stackLineDiv.className = 'stack-trace-line';
+                        if (stackLine.trim().startsWith('at ')) {
+                            stackLineDiv.classList.add('at');
+                        }
+                        stackLineDiv.textContent = stackLine;
+                        stackContent.appendChild(stackLineDiv);
+                    });
+
+                    stackTraceContainer.appendChild(header);
+                    stackTraceContainer.appendChild(stackContent);
+                    content.appendChild(stackTraceContainer);
+
+                    i = j;
+                    stackTraceId++;
+                } else {
+                    // Regular line
+                    const lineDiv = document.createElement('div');
+                    lineDiv.className = 'log-line';
+                    lineDiv.setAttribute('data-line-index', i);
+                    lineDiv.setAttribute('data-file', fileKey);
+                    lineDiv.setAttribute('data-original-line', line);
+                    lineDiv.textContent = line;
+
+                    // Apply color coding
+                    if (successKeywords.some(keyword => lowerLine.includes(keyword))) {
+                        lineDiv.classList.add('success');
+                    } else if (failureKeywords.some(keyword => lowerLine.includes(keyword))) {
+                        lineDiv.classList.add('failure');
+                    } else if (issueKeywords.some(keyword => lowerLine.includes(keyword))) {
+                        lineDiv.classList.add('warning');
+                    }
+
+                    // Mark noise lines
+                    if (noisePatterns.some(pattern => pattern.test(line))) {
+                        lineDiv.classList.add('noise');
+                    }
+
+                    content.appendChild(lineDiv);
+                    i++;
+                }
+            }
+        }
+
+        function toggleStackTrace(stackId) {
+            const content = document.getElementById(`stack-trace-${stackId}`);
+            const toggle = document.querySelector(`[data-stack-id="${stackId}"] .stack-trace-toggle`);
+
+            if (content && toggle) {
+                content.classList.toggle('collapsed');
+                toggle.classList.toggle('collapsed');
+            }
         }
 
         function clearLog(fileKey) {
@@ -1428,11 +1658,83 @@
             });
         }
 
+        function toggleCleanMode() {
+            cleanModeEnabled = !cleanModeEnabled;
+            const btn = document.getElementById('cleanLogsBtn');
+
+            if (cleanModeEnabled) {
+                btn.classList.add('active');
+                applyCleanMode();
+            } else {
+                btn.classList.remove('active');
+                removeCleanMode();
+            }
+        }
+
+        function applyCleanMode() {
+            let totalCleaned = 0;
+
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                const line = lineDiv.getAttribute('data-original-line') || lineDiv.textContent;
+
+                if (noisePatterns.some(pattern => pattern.test(line))) {
+                    lineDiv.classList.add('cleaned');
+                    totalCleaned++;
+                } else {
+                    lineDiv.classList.remove('cleaned');
+                }
+            });
+
+            // Show info banner
+            showCleanModeInfo(totalCleaned);
+        }
+
+        function removeCleanMode() {
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                lineDiv.classList.remove('cleaned');
+            });
+            hideCleanModeInfo();
+        }
+
+        function showCleanModeInfo(count) {
+            // Remove existing info if any
+            const existing = document.querySelector('.clean-mode-info');
+            if (existing) existing.remove();
+
+            document.querySelectorAll('.log-content').forEach(content => {
+                const info = document.createElement('div');
+                info.className = 'clean-mode-info';
+                info.innerHTML = `
+                    <span style="font-size: 20px;">🧽</span>
+                    <span><strong>Clean Mode Active:</strong> Hiding ${count} noise lines (debug, trace, health checks, empty lines, stack trace details)</span>
+                `;
+                content.insertBefore(info, content.firstChild);
+            });
+        }
+
+        function hideCleanModeInfo() {
+            document.querySelectorAll('.clean-mode-info').forEach(info => info.remove());
+        }
+
+        function toggleStackTraceFormat() {
+            stackTraceFormatEnabled = !stackTraceFormatEnabled;
+            const btn = document.getElementById('stackTraceBtn');
+
+            if (stackTraceFormatEnabled) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+
+            // Re-render logs with or without stack trace formatting
+            renderLogs();
+        }
+
         function switchView(viewType) {
             currentView = viewType;
             const container = document.getElementById('logsContainer');
             const buttons = document.querySelectorAll('.view-btn');
-            
+
             buttons.forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
 
@@ -1466,7 +1768,7 @@
         function extractFlowSteps(lines) {
             const steps = [];
             const timestampRegex = /\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}|\d{13}|\[\d+\]/;
-            
+
             lines.forEach((line, index) => {
                 const trimmedLine = line.trim();
                 if (!trimmedLine) return;
@@ -1504,7 +1806,7 @@
             document.querySelectorAll('.flow-step').forEach(stepDiv => {
                 const contentSpan = stepDiv.querySelector('.flow-step-content');
                 if (!contentSpan) return;
-                
+
                 const fileKey = stepDiv.getAttribute('data-file');
                 const stepIndex = stepDiv.getAttribute('data-step-index');
                 if (!fileKey || !stepIndex) return;
@@ -1586,7 +1888,7 @@
                     container.appendChild(panel);
                 }
             });
-            
+
             // Apply current search if exists
             performFlowSearch();
         }
@@ -1618,7 +1920,7 @@
 
         function extractTraceData(lines) {
             const traces = [];
-            
+
             // Enhanced patterns for better matching
             const requestIdPatterns = [
                 /request[\s_-]?id[:\s=]+([a-zA-Z0-9\-_]+)/i,
@@ -1769,7 +2071,7 @@
                     container.appendChild(column);
                 }
             });
-            
+
             // Apply current search if exists
             performTraceSearch();
         }
@@ -1781,7 +2083,7 @@
                 const value = item.getAttribute('data-trace-value') || '';
                 const context = item.getAttribute('data-trace-context') || '';
                 const valueSpan = item.querySelector('.trace-value');
-                
+
                 if (!searchTerm) {
                     item.classList.remove('hidden');
                     if (valueSpan) valueSpan.innerHTML = value;
@@ -1800,7 +2102,7 @@
         function runDebugAnalysis() {
             const content = document.getElementById('debugContent');
             const analyzeBtn = document.getElementById('analyzeBtn');
-            
+
             if (!logData.file1.content && !logData.file2.content) {
                 alert('Please upload at least one log file before analyzing.');
                 return;
@@ -1851,7 +2153,7 @@
                     if (failureKeywords.some(kw => lowerLine.includes(kw)) || lowerLine.includes('error')) {
                         analysis.stats.errors++;
                         allErrors.push({ fileKey, line, lineNumber });
-                        
+
                         // Extract exception type
                         const exceptionMatch = line.match(/([A-Z][a-zA-Z]*Exception|Error)/g);
                         if (exceptionMatch) {
@@ -1872,7 +2174,7 @@
                         const time = parseInt(timeMatch[1]);
                         const unit = timeMatch[2];
                         const timeMs = unit.startsWith('s') ? time * 1000 : time;
-                        
+
                         if (timeMs > 1000) {
                             analysis.stats.performanceIssues++;
                             performancePatterns.push({ fileKey, line, lineNumber, timeMs });
@@ -1932,8 +2234,8 @@
             }
 
             // Connection issues
-            const connectionErrors = allErrors.filter(e => 
-                e.line.toLowerCase().includes('connection') || 
+            const connectionErrors = allErrors.filter(e =>
+                e.line.toLowerCase().includes('connection') ||
                 e.line.toLowerCase().includes('timeout') ||
                 e.line.toLowerCase().includes('refused')
             );
@@ -1991,9 +2293,9 @@
                 // Find common request IDs
                 const file1ReqIds = new Set(logData.file1.traceData.filter(t => t.type === 'request-id').map(t => t.value));
                 const file2ReqIds = new Set(logData.file2.traceData.filter(t => t.type === 'request-id').map(t => t.value));
-                
+
                 const commonReqIds = [...file1ReqIds].filter(id => file2ReqIds.has(id));
-                
+
                 if (commonReqIds.length > 0) {
                     analysis.correlations.push({
                         title: 'Shared Request IDs',
@@ -2004,7 +2306,7 @@
                 // Find common error patterns
                 const file1Errors = allErrors.filter(e => e.fileKey === 'file1');
                 const file2Errors = allErrors.filter(e => e.fileKey === 'file2');
-                
+
                 if (file1Errors.length > 0 && file2Errors.length > 0) {
                     analysis.correlations.push({
                         title: 'Related Errors Across Services',
@@ -2021,7 +2323,7 @@
 
         function renderDebugAnalysis(analysis) {
             const content = document.getElementById('debugContent');
-            
+
             let html = `
                 <div class="stats-grid">
                     <div class="stat-card">
@@ -2052,7 +2354,7 @@
                             <span>Root Cause Analysis</span>
                         </div>
                 `;
-                
+
                 analysis.rootCauses.forEach(cause => {
                     html += `
                         <div class="insight-card ${cause.severity}">
@@ -2071,7 +2373,7 @@
                         </div>
                     `;
                 });
-                
+
                 html += `</div>`;
             }
 
@@ -2085,7 +2387,7 @@
                         </div>
                         <div class="timeline">
                 `;
-                
+
                 analysis.timeline.forEach(event => {
                     html += `
                         <div class="timeline-item">
@@ -2099,7 +2401,7 @@
                         </div>
                     `;
                 });
-                
+
                 html += `</div></div>`;
             }
 
@@ -2113,7 +2415,7 @@
                         </div>
                         <ul class="recommendation-list">
                 `;
-                
+
                 analysis.recommendations.forEach(rec => {
                     html += `
                         <li class="recommendation-item">
@@ -2125,7 +2427,7 @@
                         </li>
                     `;
                 });
-                
+
                 html += `</ul></div>`;
             }
 
@@ -2139,14 +2441,14 @@
                         </div>
                         <div class="correlation-grid">
                 `;
-                
+
                 analysis.correlations.forEach(corr => {
                     html += `
                         <div class="correlation-card">
                             <div class="correlation-header">${corr.title}</div>
                             <div class="correlation-items">
                     `;
-                    
+
                     corr.items.forEach(item => {
                         html += `
                             <div class="correlation-item">
@@ -2155,10 +2457,10 @@
                             </div>
                         `;
                     });
-                    
+
                     html += `</div></div>`;
                 });
-                
+
                 html += `</div></div>`;
             }
 
@@ -2172,6 +2474,3 @@
     </script>
 </body>
 </html>
-
-gbn
-
