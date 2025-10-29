@@ -1248,6 +1248,10 @@
             display: none;
         }
 
+        .log-line.logger-hidden {
+            display: none;
+        }
+
         .clean-mode-info {
             background: #e3f2fd;
             border-left: 4px solid #2196f3;
@@ -1678,6 +1682,216 @@
             text-align: center;
         }
 
+        .logger-panel {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .logger-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .logger-panel-header h4 {
+            margin: 0;
+            font-size: 16px;
+            color: #495057;
+        }
+
+        .logger-action-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .logger-action-btn:hover {
+            background: #5568d3;
+        }
+
+        .logger-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+        }
+
+        .logger-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 12px;
+            border: 1px solid #e9ecef;
+        }
+
+        .logger-item.hidden {
+            opacity: 0.5;
+            background: #fff5f5;
+        }
+
+        .logger-item-name {
+            font-family: 'Consolas', 'Courier New', monospace;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #667eea;
+        }
+
+        .logger-item.hidden .logger-item-name {
+            color: #adb5bd;
+            text-decoration: line-through;
+        }
+
+        .logger-toggle {
+            padding: 4px 8px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+            margin-left: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .logger-item.hidden .logger-toggle {
+            background: #dc3545;
+        }
+
+        .logger-toggle:hover {
+            opacity: 0.8;
+        }
+
+        .logger-count {
+            background: #667eea;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            margin-left: 8px;
+        }
+
+        .simplified-logger {
+            font-weight: 700;
+            color: #495057;
+        }
+
+        .logger-full-name {
+            font-size: 10px;
+            color: #adb5bd;
+            display: block;
+            margin-top: 2px;
+        }
+
+        .logger-presets {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .preset-label {
+            font-weight: 600;
+            font-size: 13px;
+            color: #495057;
+            margin-right: 8px;
+        }
+
+        .preset-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .preset-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .manual-logger-input {
+            padding: 12px;
+            background: #fff3cd;
+            border-bottom: 1px solid #ffc107;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .manual-input-label {
+            font-weight: 600;
+            font-size: 13px;
+            color: #495057;
+            white-space: nowrap;
+        }
+
+        .manual-logger-field {
+            flex: 1;
+            min-width: 300px;
+            padding: 8px 12px;
+            border: 2px solid #ffc107;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .manual-logger-field:focus {
+            outline: none;
+            border-color: #ff9800;
+            box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.2);
+        }
+
+        .manual-add-btn {
+            padding: 8px 16px;
+            background: #ff9800;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .manual-add-btn:hover {
+            background: #f57c00;
+            transform: translateY(-2px);
+        }
+
+        .manual-help {
+            width: 100%;
+            font-size: 11px;
+            color: #856404;
+            margin-top: 4px;
+        }
+
         /* Optimizations for large monitors */
         @media (min-width: 2000px) {
             .container {
@@ -1769,7 +1983,35 @@
                     <button class="filter-btn failure" onclick="toggleFilter('failure')">❌ All Failure Steps</button>
                     <button class="filter-btn" id="cleanLogsBtn" onclick="toggleCleanMode()">🧽 Clean View</button>
                     <button class="filter-btn" id="stackTraceBtn" onclick="toggleStackTraceFormat()">📜 Format Stack Traces</button>
+                    <button class="filter-btn" id="manageLoggersBtn" onclick="toggleLoggerPanel()">🎯 Manage Loggers</button>
                 </div>
+            </div>
+            <div class="logger-panel" id="loggerPanel" style="display: none;">
+                <div class="logger-panel-header">
+                    <h4>🎯 Logger Management - Hide Noisy Loggers</h4>
+                    <div>
+                        <button class="logger-action-btn" onclick="showAllLoggers()">Show All</button>
+                        <button class="logger-action-btn" onclick="hideAllLoggers()">Hide All</button>
+                        <button class="logger-action-btn" onclick="savePreferences()" style="background: #28a745;">💾 Save Prefs</button>
+                        <button class="logger-action-btn" onclick="toggleLoggerPanel()" style="background: #dc3545;">Close</button>
+                    </div>
+                </div>
+                <div class="manual-logger-input">
+                    <div class="manual-input-label">✏️ Add Logger Pattern Manually:</div>
+                    <input type="text" id="manualLoggerInput" placeholder="e.g., org.springframework or com.example.NoisyService" class="manual-logger-field">
+                    <button class="manual-add-btn" onclick="addManualLogger()">➕ Add & Hide</button>
+                    <div class="manual-help">💡 Tip: Add patterns before uploading logs to pre-filter them</div>
+                </div>
+                <div class="logger-presets">
+                    <div class="preset-label">Quick Presets:</div>
+                    <button class="preset-btn" onclick="applyPreset('springBoot')">🍃 Hide Spring Boot</button>
+                    <button class="preset-btn" onclick="applyPreset('hibernate')">📦 Hide Hibernate</button>
+                    <button class="preset-btn" onclick="applyPreset('tomcat')">🐈 Hide Tomcat</button>
+                    <button class="preset-btn" onclick="applyPreset('netty')">⚡ Hide Netty</button>
+                    <button class="preset-btn" onclick="applyPreset('frameworks')">🚫 Hide All Frameworks</button>
+                    <button class="preset-btn" onclick="loadPreferences()" style="background: #17a2b8;">📂 Load My Prefs</button>
+                </div>
+                <div class="logger-list" id="loggerList"></div>
             </div>
         </div>
 
@@ -1777,7 +2019,6 @@
             <button class="tab active" onclick="switchTab('standard')">📄 Standard View</button>
             <button class="tab" onclick="switchTab('flow')">🔄 Flow Analysis</button>
             <button class="tab" onclick="switchTab('trace')">🔗 Trace Diagram</button>
-            <button class="tab" onclick="switchTab('structured')">📋 Structured View</button>
             <button class="tab" onclick="switchTab('debug')">🤖 Debug Assistant</button>
         </div>
 
@@ -1836,34 +2077,6 @@
                         </svg>
                         <h3>No Trace Data Available</h3>
                         <p>Upload log files to see the trace diagram</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="structuredTab" class="tab-content">
-            <div class="structured-container">
-                <div class="structured-controls">
-                    <select class="filter-mode-select" id="structuredLevelFilter" onchange="renderStructuredView()">
-                        <option value="all">All Levels</option>
-                        <option value="ERROR">ERROR Only</option>
-                        <option value="WARN">WARN Only</option>
-                        <option value="INFO">INFO Only</option>
-                        <option value="DEBUG">DEBUG Only</option>
-                    </select>
-                    <label style="display: flex; align-items: center; gap: 8px; font-size: 14px;">
-                        <input type="checkbox" id="alignByTimestamp" onchange="renderStructuredView()" style="width: 18px; height: 18px;">
-                        <span>Align by Timestamp</span>
-                    </label>
-                    <button class="add-filter-btn" onclick="exportStructuredData()">📥 Export CSV</button>
-                </div>
-                <div class="structured-table-container" id="structuredTableContainer">
-                    <div class="empty-state">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        <h3>No Structured Data</h3>
-                        <p>Upload log files to see parsed log entries in table format</p>
                     </div>
                 </div>
             </div>
@@ -1933,7 +2146,48 @@
         let filterMode = 'OR';
         let selectedText = '';
         let selectionTimeout = null;
-        let structuredData = [];
+        let hiddenLoggers = new Set();
+        let loggerCounts = new Map();
+
+        // Predefined logger patterns to hide (common noisy frameworks)
+        const loggerPresets = {
+            springBoot: [
+                'org.springframework.boot',
+                'org.springframework.context',
+                'org.springframework.web',
+                'org.springframework.beans',
+                'org.springframework.jmx',
+                'org.springframework.core'
+            ],
+            hibernate: [
+                'org.hibernate',
+                'org.hibernate.SQL',
+                'org.hibernate.type',
+                'org.hibernate.engine',
+                'org.hibernate.loader'
+            ],
+            tomcat: [
+                'org.apache.catalina',
+                'org.apache.coyote',
+                'org.apache.tomcat'
+            ],
+            netty: [
+                'io.netty',
+                'io.netty.channel',
+                'io.netty.buffer'
+            ],
+            frameworks: [
+                'org.springframework',
+                'org.hibernate',
+                'org.apache',
+                'io.netty',
+                'com.zaxxer.hikari',
+                'reactor.netty',
+                'org.jboss',
+                'ch.qos.logback',
+                'org.slf4j'
+            ]
+        };
 
         const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
         const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
@@ -1976,16 +2230,14 @@
                     traceData: extractTraceData(lines)
                 };
 
-                // Extract structured data
-                extractStructuredData();
+                // Extract logger information
+                extractLoggerInfo();
 
                 renderLogs();
                 if (currentTab === 'flow') {
                     renderFlowAnalysis();
                 } else if (currentTab === 'trace') {
                     renderTraceDiagram();
-                } else if (currentTab === 'structured') {
-                    renderStructuredView();
                 }
             };
 
@@ -2375,6 +2627,262 @@
             showCleanModeInfo(totalCleaned);
         }
 
+        function extractLoggerInfo() {
+            loggerCounts.clear();
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (!logData[fileKey].content) return;
+
+                logData[fileKey].lines.forEach(line => {
+                    // Extract logger names using common patterns
+                    const loggerPatterns = [
+                        /\[([a-zA-Z0-9\._]+)\]/,  // [com.example.Service]
+                        /\s([a-z]+\.[a-z]+\.[A-Z][a-zA-Z0-9]*)/,  // package.Class
+                        /-\s([A-Z][a-zA-Z0-9]*(?:Controller|Service|Repository|Handler|Manager|Processor))/,  // ServiceName
+                    ];
+
+                    for (const pattern of loggerPatterns) {
+                        const match = line.match(pattern);
+                        if (match && match[1] && match[1].length > 3) {
+                            const logger = match[1];
+                            loggerCounts.set(logger, (loggerCounts.get(logger) || 0) + 1);
+                            break;
+                        }
+                    }
+                });
+            });
+        }
+
+        function toggleLoggerPanel() {
+            const panel = document.getElementById('loggerPanel');
+
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                renderLoggerList();
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function renderLoggerList() {
+            const list = document.getElementById('loggerList');
+
+            if (loggerCounts.size === 0 && hiddenLoggers.size === 0) {
+                list.innerHTML = '<p style="text-align: center; color: #6c757d; padding: 20px;">No loggers found in the logs</p>';
+                return;
+            }
+
+            // Combine loggerCounts and hiddenLoggers (for manually added ones)
+            const allLoggers = new Map(loggerCounts);
+            hiddenLoggers.forEach(logger => {
+                if (!allLoggers.has(logger)) {
+                    allLoggers.set(logger, 0); // 0 count for manually added
+                }
+            });
+
+            // Sort loggers by count (descending), then alphabetically
+            const sortedLoggers = Array.from(allLoggers.entries())
+                .sort((a, b) => {
+                    if (b[1] !== a[1]) return b[1] - a[1];
+                    return a[0].localeCompare(b[0]);
+                });
+
+            let html = '';
+            sortedLoggers.forEach(([logger, count]) => {
+                const isHidden = hiddenLoggers.has(logger);
+                const itemClass = isHidden ? 'logger-item hidden' : 'logger-item';
+                const btnText = isHidden ? 'Show' : 'Hide';
+
+                const countDisplay = count === 0 ? '<span style="color: #ff9800; font-size: 10px;">manual</span>' : `<span class="logger-count">${count}</span>`;
+
+                html += `
+                    <div class="${itemClass}" id="logger-item-${encodeURIComponent(logger)}">
+                        <span class="logger-item-name" title="${logger}">${logger}</span>
+                        ${countDisplay}
+                        <button class="logger-toggle" onclick="toggleLogger('${logger.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">
+                            ${btnText}
+                        </button>
+                    </div>
+                `;
+            });
+
+            list.innerHTML = html;
+        }
+
+        function toggleLogger(logger) {
+            if (hiddenLoggers.has(logger)) {
+                hiddenLoggers.delete(logger);
+            } else {
+                hiddenLoggers.add(logger);
+            }
+
+            renderLoggerList();
+            applyLoggerFiltering();
+        }
+
+        function showAllLoggers() {
+            hiddenLoggers.clear();
+            renderLoggerList();
+            applyLoggerFiltering();
+        }
+
+        function hideAllLoggers() {
+            loggerCounts.forEach((count, logger) => {
+                hiddenLoggers.add(logger);
+            });
+            renderLoggerList();
+            applyLoggerFiltering();
+        }
+
+        function applyPreset(presetName) {
+            const patterns = loggerPresets[presetName];
+            if (!patterns) return;
+
+            let hiddenCount = 0;
+
+            // Hide all loggers matching the preset patterns
+            loggerCounts.forEach((count, logger) => {
+                for (const pattern of patterns) {
+                    if (logger.includes(pattern)) {
+                        hiddenLoggers.add(logger);
+                        hiddenCount++;
+                        break;
+                    }
+                }
+            });
+
+            renderLoggerList();
+            applyLoggerFiltering();
+
+            // Show notification
+            if (hiddenCount > 0) {
+                showNotification(`🎯 Hidden ${hiddenCount} ${presetName} logger(s)`);
+            } else {
+                showNotification(`No ${presetName} loggers found`);
+            }
+        }
+
+        function savePreferences() {
+            try {
+                const prefs = {
+                    hiddenLoggers: Array.from(hiddenLoggers),
+                    savedAt: new Date().toISOString()
+                };
+
+                localStorage.setItem('logViewerPreferences', JSON.stringify(prefs));
+                showNotification('💾 Preferences saved! (' + hiddenLoggers.size + ' hidden loggers)');
+            } catch (e) {
+                alert('Failed to save preferences: ' + e.message);
+            }
+        }
+
+        function loadPreferences() {
+            try {
+                const saved = localStorage.getItem('logViewerPreferences');
+                if (!saved) {
+                    showNotification('No saved preferences found');
+                    return;
+                }
+
+                const prefs = JSON.parse(saved);
+                hiddenLoggers = new Set(prefs.hiddenLoggers);
+
+                renderLoggerList();
+                applyLoggerFiltering();
+
+                const savedDate = new Date(prefs.savedAt).toLocaleString();
+                showNotification(`📂 Loaded preferences from ${savedDate} (${hiddenLoggers.size} hidden loggers)`);
+            } catch (e) {
+                alert('Failed to load preferences: ' + e.message);
+            }
+        }
+
+        function addManualLogger() {
+            const input = document.getElementById('manualLoggerInput');
+            const pattern = input.value.trim();
+
+            if (!pattern) {
+                showNotification('⚠️ Please enter a logger pattern');
+                return;
+            }
+
+            // Add to hidden loggers
+            hiddenLoggers.add(pattern);
+
+            // Also add to logger counts so it shows in the list
+            if (!loggerCounts.has(pattern)) {
+                loggerCounts.set(pattern, 0);
+            }
+
+            // Clear input
+            input.value = '';
+
+            // Update UI
+            renderLoggerList();
+            applyLoggerFiltering();
+
+            showNotification(`✅ Added "${pattern}" to hidden loggers`);
+        }
+
+        function showNotification(message) {
+            // Create or reuse notification element
+            let notification = document.getElementById('loggerNotification');
+            if (!notification) {
+                notification = document.createElement('div');
+                notification.id = 'loggerNotification';
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 80px;
+                    right: 20px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 12px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                    z-index: 10001;
+                    font-size: 14px;
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                `;
+                document.body.appendChild(notification);
+            }
+
+            notification.textContent = message;
+            notification.style.opacity = '1';
+
+            setTimeout(() => {
+                notification.style.opacity = '0';
+            }, 3000);
+        }
+
+        function applyLoggerFiltering() {
+            if (hiddenLoggers.size === 0) {
+                // Show all lines
+                document.querySelectorAll('.log-line').forEach(lineDiv => {
+                    lineDiv.classList.remove('logger-hidden');
+                });
+                return;
+            }
+
+            // Hide lines matching hidden loggers
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                const line = lineDiv.getAttribute('data-original-line') || lineDiv.textContent;
+                let shouldHide = false;
+
+                hiddenLoggers.forEach(logger => {
+                    if (line.includes(logger)) {
+                        shouldHide = true;
+                    }
+                });
+
+                if (shouldHide) {
+                    lineDiv.classList.add('logger-hidden');
+                } else {
+                    lineDiv.classList.remove('logger-hidden');
+                }
+            });
+        }
+
         function removeCleanMode() {
             document.querySelectorAll('.log-line').forEach(lineDiv => {
                 lineDiv.classList.remove('cleaned');
@@ -2446,8 +2954,6 @@
                 renderFlowAnalysis();
             } else if (tabName === 'trace') {
                 renderTraceDiagram();
-            } else if (tabName === 'structured') {
-                renderStructuredView();
             } else if (tabName === 'debug') {
                 // Debug tab - analysis triggered manually
             }
@@ -3261,6 +3767,7 @@
 
         function extractStructuredData() {
             structuredData = [];
+            loggerCounts.clear();
 
             ['file1', 'file2'].forEach(fileKey => {
                 if (!logData[fileKey].content) return;
@@ -3269,6 +3776,11 @@
                     const entry = parseLogLine(line, index + 1, fileKey);
                     if (entry) {
                         structuredData.push(entry);
+
+                        // Count loggers
+                        if (entry.logger) {
+                            loggerCounts.set(entry.logger, (loggerCounts.get(entry.logger) || 0) + 1);
+                        }
                     }
                 });
             });
@@ -3398,15 +3910,21 @@
 
             const levelFilter = document.getElementById('structuredLevelFilter').value;
             const alignByTimestamp = document.getElementById('alignByTimestamp').checked;
+            const simplifyLoggers = document.getElementById('simplifyLoggers').checked;
 
             // Separate data by file
             const file1Data = structuredData.filter(e => e.fileKey === 'file1');
             const file2Data = structuredData.filter(e => e.fileKey === 'file2');
 
-            // Apply level filter
+            // Apply level filter and logger hiding
             const filterByLevel = (data) => {
-                if (levelFilter === 'all') return data;
-                return data.filter(entry => entry.level === levelFilter);
+                let filtered = data;
+                if (levelFilter !== 'all') {
+                    filtered = filtered.filter(entry => entry.level === levelFilter);
+                }
+                // Filter out hidden loggers
+                filtered = filtered.filter(entry => !hiddenLoggers.has(entry.logger));
+                return filtered;
             };
 
             const filteredFile1 = filterByLevel(file1Data);
@@ -3458,7 +3976,7 @@
 
                     // File 1 columns
                     if (entry1) {
-                        html += `<td class="logger-name file1-cell">${entry1.logger || '-'}</td>`;
+                        html += `<td class="logger-name file1-cell">${formatLoggerName(entry1.logger, simplifyLoggers)}</td>`;
                         html += `<td class="file1-cell">`;
                         html += `<div class="structured-cell-content">`;
                         html += `<div class="log-message">${entry1.message}</div>`;
@@ -3477,7 +3995,7 @@
 
                     // File 2 columns
                     if (entry2) {
-                        html += `<td class="logger-name file2-cell">${entry2.logger || '-'}</td>`;
+                        html += `<td class="logger-name file2-cell">${formatLoggerName(entry2.logger, simplifyLoggers)}</td>`;
                         html += `<td class="file2-cell">`;
                         html += `<div class="structured-cell-content">`;
                         html += `<div class="log-message">${entry2.message}</div>`;
@@ -3555,7 +4073,7 @@
 
                 // File 1
                 if (e1) {
-                    html += `<td class="logger-name file1-cell">${e1.logger || '-'}</td>`;
+                    html += `<td class="logger-name file1-cell">${formatLoggerName(e1.logger, simplifyLoggers)}</td>`;
                     html += `<td class="file1-cell">`;
                     html += `<div class="structured-cell-content">`;
                     html += `<div class="log-message">${e1.message}</div>`;
@@ -3573,7 +4091,7 @@
 
                 // File 2
                 if (e2) {
-                    html += `<td class="logger-name file2-cell">${e2.logger || '-'}</td>`;
+                    html += `<td class="logger-name file2-cell">${formatLoggerName(e2.logger, simplifyLoggers)}</td>`;
                     html += `<td class="file2-cell">`;
                     html += `<div class="structured-cell-content">`;
                     html += `<div class="log-message">${e2.message}</div>`;
@@ -3591,6 +4109,88 @@
             }
 
             return html;
+        }
+
+        function formatLoggerName(logger, simplify) {
+            if (!logger) return '-';
+
+            if (!simplify) return logger;
+
+            // Simplify package names
+            // com.example.service.UserService -> UserService
+            // org.springframework.web.Controller -> Controller
+            const parts = logger.split('.');
+            const simplified = parts[parts.length - 1];
+
+            return `<span class="simplified-logger" title="${logger}">${simplified}</span>`;
+        }
+
+        function toggleLoggerPanel() {
+            const panel = document.getElementById('loggerPanel');
+            const list = document.getElementById('loggerList');
+
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                renderLoggerList();
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function renderLoggerList() {
+            const list = document.getElementById('loggerList');
+
+            if (loggerCounts.size === 0) {
+                list.innerHTML = '<p style="text-align: center; color: #6c757d;">No loggers found</p>';
+                return;
+            }
+
+            // Sort loggers by count (descending)
+            const sortedLoggers = Array.from(loggerCounts.entries())
+                .sort((a, b) => b[1] - a[1]);
+
+            let html = '';
+            sortedLoggers.forEach(([logger, count]) => {
+                const isHidden = hiddenLoggers.has(logger);
+                const itemClass = isHidden ? 'logger-item hidden' : 'logger-item';
+                const btnText = isHidden ? 'Show' : 'Hide';
+
+                html += `
+                    <div class="${itemClass}" id="logger-${encodeURIComponent(logger)}">
+                        <span class="logger-item-name" title="${logger}">${logger}</span>
+                        <span class="logger-count">${count}</span>
+                        <button class="logger-toggle" onclick="toggleLogger('${logger.replace(/'/g, "\\'")}')">\n                            ${btnText}
+                        </button>
+                    </div>
+                `;
+            });
+
+            list.innerHTML = html;
+        }
+
+        function toggleLogger(logger) {
+            if (hiddenLoggers.has(logger)) {
+                hiddenLoggers.delete(logger);
+            } else {
+                hiddenLoggers.add(logger);
+            }
+
+            renderLoggerList();
+            renderStructuredView();
+        }
+
+        function showAllLoggers() {
+            hiddenLoggers.clear();
+            renderLoggerList();
+            renderStructuredView();
+        }
+
+        function hideAllLoggers() {
+            loggerCounts.forEach((count, logger) => {
+                hiddenLoggers.add(logger);
+            });
+            renderLoggerList();
+            renderStructuredView();
         }
 
         function renderObjectAttributes(attributes, index) {
@@ -3679,6 +4279,17 @@
             console.log('Universal Log File Viewer loaded successfully');
             renderFilterTags();
             setupTextSelection();
+
+            // Auto-load preferences if available
+            const saved = localStorage.getItem('logViewerPreferences');
+            if (saved) {
+                try {
+                    const prefs = JSON.parse(saved);
+                    hiddenLoggers = new Set(prefs.hiddenLoggers);
+                } catch (e) {
+                    console.log('Failed to auto-load preferences');
+                }
+            }
         });
     </script>
 </body>
