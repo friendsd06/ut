@@ -1451,6 +1451,7 @@
             padding: 15px;
             background: #f8f9fa;
             border-radius: 8px;
+            align-items: center;
         }
 
         .structured-table-container {
@@ -1480,12 +1481,46 @@
             font-weight: 600;
             border-bottom: 2px solid #5568d3;
             white-space: nowrap;
+            position: sticky;
+            top: 0;
+        }
+
+        .structured-table th.file1-header {
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            border-bottom: 2px solid #1565c0;
+        }
+
+        .structured-table th.file2-header {
+            background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%);
+            border-bottom: 2px solid #6a1b9a;
+        }
+
+        .structured-table th.divider {
+            background: #e9ecef;
+            width: 2px;
+            padding: 0;
         }
 
         .structured-table td {
             padding: 12px;
             border-bottom: 1px solid #e9ecef;
             vertical-align: top;
+        }
+
+        .structured-table td.divider {
+            background: #e9ecef;
+            width: 2px;
+            padding: 0;
+            border-left: 1px solid #dee2e6;
+            border-right: 1px solid #dee2e6;
+        }
+
+        .structured-table td.file1-cell {
+            background: #f0f9ff;
+        }
+
+        .structured-table td.file2-cell {
+            background: #faf5ff;
         }
 
         .structured-table tbody tr:hover {
@@ -1626,10 +1661,21 @@
             cursor: pointer;
             font-size: 11px;
             transition: all 0.2s ease;
+            white-space: nowrap;
         }
 
         .expand-btn:hover {
             background: #5568d3;
+        }
+
+        .structured-cell-content {
+            max-width: 500px;
+        }
+
+        .structured-empty-cell {
+            color: #adb5bd;
+            font-style: italic;
+            text-align: center;
         }
 
         /* Optimizations for large monitors */
@@ -1798,11 +1844,6 @@
         <div id="structuredTab" class="tab-content">
             <div class="structured-container">
                 <div class="structured-controls">
-                    <select class="filter-mode-select" id="structuredFileFilter" onchange="renderStructuredView()">
-                        <option value="all">Show Both Files</option>
-                        <option value="file1">File 1 Only</option>
-                        <option value="file2">File 2 Only</option>
-                    </select>
                     <select class="filter-mode-select" id="structuredLevelFilter" onchange="renderStructuredView()">
                         <option value="all">All Levels</option>
                         <option value="ERROR">ERROR Only</option>
@@ -1810,6 +1851,10 @@
                         <option value="INFO">INFO Only</option>
                         <option value="DEBUG">DEBUG Only</option>
                     </select>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 14px;">
+                        <input type="checkbox" id="alignByTimestamp" onchange="renderStructuredView()" style="width: 18px; height: 18px;">
+                        <span>Align by Timestamp</span>
+                    </label>
                     <button class="add-filter-btn" onclick="exportStructuredData()">📥 Export CSV</button>
                 </div>
                 <div class="structured-table-container" id="structuredTableContainer">
@@ -3351,62 +3396,201 @@
                 return;
             }
 
-            // Apply filters
-            const fileFilter = document.getElementById('structuredFileFilter').value;
             const levelFilter = document.getElementById('structuredLevelFilter').value;
+            const alignByTimestamp = document.getElementById('alignByTimestamp').checked;
 
-            const filteredData = structuredData.filter(entry => {
-                if (fileFilter !== 'all' && entry.fileKey !== fileFilter) return false;
-                if (levelFilter !== 'all' && entry.level !== levelFilter) return false;
-                return true;
-            });
+            // Separate data by file
+            const file1Data = structuredData.filter(e => e.fileKey === 'file1');
+            const file2Data = structuredData.filter(e => e.fileKey === 'file2');
 
+            // Apply level filter
+            const filterByLevel = (data) => {
+                if (levelFilter === 'all') return data;
+                return data.filter(entry => entry.level === levelFilter);
+            };
+
+            const filteredFile1 = filterByLevel(file1Data);
+            const filteredFile2 = filterByLevel(file2Data);
+
+            // Build table
             let html = `
                 <table class="structured-table">
                     <thead>
                         <tr>
-                            <th style="width: 50px;">#</th>
-                            <th style="width: 80px;">File</th>
-                            <th style="width: 150px;">Timestamp</th>
-                            <th style="width: 80px;">Level</th>
-                            <th style="width: 200px;">Logger</th>
-                            <th>Message</th>
-                            <th style="width: 80px;">Actions</th>
+                            <th rowspan="2" style="width: 50px;">#</th>
+                            <th rowspan="2" style="width: 150px;">Timestamp</th>
+                            <th rowspan="2" style="width: 80px;">Level</th>
+                            <th colspan="2" class="file1-header">📄 ${logData.file1.name || 'File 1'}</th>
+                            <th class="divider"></th>
+                            <th colspan="2" class="file2-header">📄 ${logData.file2.name || 'File 2'}</th>
+                        </tr>
+                        <tr>
+                            <th class="file1-header" style="width: 200px;">Logger</th>
+                            <th class="file1-header">Message</th>
+                            <th class="divider"></th>
+                            <th class="file2-header" style="width: 200px;">Logger</th>
+                            <th class="file2-header">Message</th>
                         </tr>
                     </thead>
                     <tbody>
             `;
 
-            filteredData.forEach((entry, index) => {
-                const rowClass = entry.level ? entry.level.toLowerCase() : '';
-                const fileLabel = entry.fileKey === 'file1' ? 'File 1' : 'File 2';
+            if (alignByTimestamp) {
+                // Align by timestamp logic
+                html += renderAlignedRows(filteredFile1, filteredFile2);
+            } else {
+                // Simple row-by-row comparison
+                const maxRows = Math.max(filteredFile1.length, filteredFile2.length);
 
-                html += `
-                    <tr class="${rowClass}">
-                        <td class="line-number-cell">${entry.lineNumber}</td>
-                        <td><span class="file-badge ${entry.fileKey}">${fileLabel}</span></td>
-                        <td class="timestamp-cell">${entry.timestamp || '-'}</td>
-                        <td>
-                            ${entry.level ? `<span class="log-level-badge ${entry.level.toLowerCase()}">${entry.level}</span>` : '-'}
-                        </td>
-                        <td class="logger-name">${entry.logger || '-'}</td>
-                        <td>
-                            <div class="log-message">${entry.message}</div>
-                            ${entry.objectAttributes.length > 0 ? renderObjectAttributes(entry.objectAttributes, index) : ''}
-                        </td>
-                        <td>
-                            <button class="expand-btn" onclick="jumpToLine('${entry.fileKey}', ${entry.lineNumber})">🔍 View</button>
-                        </td>
-                    </tr>
-                `;
-            });
+                for (let i = 0; i < maxRows; i++) {
+                    const entry1 = filteredFile1[i];
+                    const entry2 = filteredFile2[i];
 
-            html += `
-                    </tbody>
-                </table>
-            `;
+                    // Determine row class from whichever entry exists
+                    const level = entry1?.level || entry2?.level;
+                    const rowClass = level ? level.toLowerCase() : '';
+                    const timestamp = entry1?.timestamp || entry2?.timestamp || '-';
 
+                    html += `<tr class="${rowClass}">`;
+                    html += `<td class="line-number-cell">${i + 1}</td>`;
+                    html += `<td class="timestamp-cell">${timestamp}</td>`;
+                    html += `<td>${level ? `<span class="log-level-badge ${level.toLowerCase()}">${level}</span>` : '-'}</td>`;
+
+                    // File 1 columns
+                    if (entry1) {
+                        html += `<td class="logger-name file1-cell">${entry1.logger || '-'}</td>`;
+                        html += `<td class="file1-cell">`;
+                        html += `<div class="structured-cell-content">`;
+                        html += `<div class="log-message">${entry1.message}</div>`;
+                        if (entry1.objectAttributes.length > 0) {
+                            html += renderObjectAttributes(entry1.objectAttributes, i);
+                        }
+                        html += `<button class="expand-btn" onclick="jumpToLine('file1', ${entry1.lineNumber})" style="margin-top: 8px;">🔍 View Line ${entry1.lineNumber}</button>`;
+                        html += `</div></td>`;
+                    } else {
+                        html += `<td class="file1-cell structured-empty-cell">-</td>`;
+                        html += `<td class="file1-cell structured-empty-cell">No entry</td>`;
+                    }
+
+                    // Divider
+                    html += `<td class="divider"></td>`;
+
+                    // File 2 columns
+                    if (entry2) {
+                        html += `<td class="logger-name file2-cell">${entry2.logger || '-'}</td>`;
+                        html += `<td class="file2-cell">`;
+                        html += `<div class="structured-cell-content">`;
+                        html += `<div class="log-message">${entry2.message}</div>`;
+                        if (entry2.objectAttributes.length > 0) {
+                            html += renderObjectAttributes(entry2.objectAttributes, i);
+                        }
+                        html += `<button class="expand-btn" onclick="jumpToLine('file2', ${entry2.lineNumber})" style="margin-top: 8px;">🔍 View Line ${entry2.lineNumber}</button>`;
+                        html += `</div></td>`;
+                    } else {
+                        html += `<td class="file2-cell structured-empty-cell">-</td>`;
+                        html += `<td class="file2-cell structured-empty-cell">No entry</td>`;
+                    }
+
+                    html += `</tr>`;
+                }
+            }
+
+            html += `</tbody></table>`;
             container.innerHTML = html;
+        }
+
+        function renderAlignedRows(file1Data, file2Data) {
+            let html = '';
+            let i1 = 0, i2 = 0;
+            let rowNum = 1;
+
+            while (i1 < file1Data.length || i2 < file2Data.length) {
+                const entry1 = file1Data[i1];
+                const entry2 = file2Data[i2];
+
+                let useEntry1 = false, useEntry2 = false;
+
+                if (!entry1) {
+                    useEntry2 = true;
+                    i2++;
+                } else if (!entry2) {
+                    useEntry1 = true;
+                    i1++;
+                } else {
+                    // Both exist - compare timestamps
+                    const t1 = entry1.timestamp;
+                    const t2 = entry2.timestamp;
+
+                    if (!t1 && !t2) {
+                        useEntry1 = useEntry2 = true;
+                        i1++; i2++;
+                    } else if (!t1) {
+                        useEntry1 = true;
+                        i1++;
+                    } else if (!t2) {
+                        useEntry2 = true;
+                        i2++;
+                    } else if (t1 === t2) {
+                        useEntry1 = useEntry2 = true;
+                        i1++; i2++;
+                    } else if (t1 < t2) {
+                        useEntry1 = true;
+                        i1++;
+                    } else {
+                        useEntry2 = true;
+                        i2++;
+                    }
+                }
+
+                const e1 = useEntry1 ? entry1 : null;
+                const e2 = useEntry2 ? entry2 : null;
+                const level = e1?.level || e2?.level;
+                const rowClass = level ? level.toLowerCase() : '';
+                const timestamp = e1?.timestamp || e2?.timestamp || '-';
+
+                html += `<tr class="${rowClass}">`;
+                html += `<td class="line-number-cell">${rowNum++}</td>`;
+                html += `<td class="timestamp-cell">${timestamp}</td>`;
+                html += `<td>${level ? `<span class="log-level-badge ${level.toLowerCase()}">${level}</span>` : '-'}</td>`;
+
+                // File 1
+                if (e1) {
+                    html += `<td class="logger-name file1-cell">${e1.logger || '-'}</td>`;
+                    html += `<td class="file1-cell">`;
+                    html += `<div class="structured-cell-content">`;
+                    html += `<div class="log-message">${e1.message}</div>`;
+                    if (e1.objectAttributes.length > 0) {
+                        html += renderObjectAttributes(e1.objectAttributes, rowNum);
+                    }
+                    html += `<button class="expand-btn" onclick="jumpToLine('file1', ${e1.lineNumber})" style="margin-top: 8px;">🔍 View Line ${e1.lineNumber}</button>`;
+                    html += `</div></td>`;
+                } else {
+                    html += `<td class="file1-cell structured-empty-cell">-</td>`;
+                    html += `<td class="file1-cell structured-empty-cell">No entry</td>`;
+                }
+
+                html += `<td class="divider"></td>`;
+
+                // File 2
+                if (e2) {
+                    html += `<td class="logger-name file2-cell">${e2.logger || '-'}</td>`;
+                    html += `<td class="file2-cell">`;
+                    html += `<div class="structured-cell-content">`;
+                    html += `<div class="log-message">${e2.message}</div>`;
+                    if (e2.objectAttributes.length > 0) {
+                        html += renderObjectAttributes(e2.objectAttributes, rowNum);
+                    }
+                    html += `<button class="expand-btn" onclick="jumpToLine('file2', ${e2.lineNumber})" style="margin-top: 8px;">🔍 View Line ${e2.lineNumber}</button>`;
+                    html += `</div></td>`;
+                } else {
+                    html += `<td class="file2-cell structured-empty-cell">-</td>`;
+                    html += `<td class="file2-cell structured-empty-cell">No entry</td>`;
+                }
+
+                html += `</tr>`;
+            }
+
+            return html;
         }
 
         function renderObjectAttributes(attributes, index) {
