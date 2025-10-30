@@ -1115,11 +1115,10 @@
 
         .json-table {
             width: 100%;
-            min-width: 1200px;
+            min-width: 1000px;
             border-collapse: collapse;
             font-size: 13px;
             background: white;
-            table-layout: fixed;
         }
 
         .json-table thead {
@@ -1171,6 +1170,10 @@
             font-size: 12px;
             color: #28a745;
             font-weight: 600;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .json-message {
@@ -5383,6 +5386,19 @@
             document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${jsonLogs.length} logs found</span>`;
         }
 
+        function getSimpleClassName(fullLogger) {
+            // Extract just the class name from package.Class format
+            if (!fullLogger) return 'Unknown';
+
+            // Handle package.ClassName format (e.g., com.example.UserService -> UserService)
+            const parts = fullLogger.split('.');
+            if (parts.length > 1) {
+                return parts[parts.length - 1];
+            }
+
+            return fullLogger;
+        }
+
         function renderJSONCombined(container) {
             const tableContainer = document.createElement('div');
             tableContainer.className = 'json-table-container';
@@ -5391,11 +5407,11 @@
                 <table class="json-table">
                     <thead>
                         <tr>
-                            <th style="width: 60px;">#</th>
-                            <th style="width: 180px;">File Name</th>
-                            <th style="width: 200px;">Timestamp</th>
-                            <th style="width: 280px;">Logger</th>
-                            <th style="min-width: 500px;">Message</th>
+                            <th style="width: 50px;">#</th>
+                            <th style="width: 140px;">File</th>
+                            <th style="width: 180px;">Timestamp</th>
+                            <th style="width: 150px;">Logger</th>
+                            <th style="width: auto; min-width: 600px;">Message</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5403,6 +5419,8 @@
 
             jsonLogs.forEach((log, index) => {
                 const fileBadgeClass = log.fileKey === 'file1' ? 'json-file-badge' : 'json-file-badge file2';
+                const simpleLogger = getSimpleClassName(log.logger);
+
                 tableHTML += `
                     <tr data-log-index="${index}" data-timestamp="${log.sortableTimestamp}"
                         data-logger="${escapeHtml(log.logger.toLowerCase())}"
@@ -5410,7 +5428,7 @@
                         <td class="json-line-number">${log.lineNumber}</td>
                         <td><span class="${fileBadgeClass}" title="${escapeHtml(log.file)}">${escapeHtml(log.file)}</span></td>
                         <td class="json-timestamp">${escapeHtml(String(log.timestamp))}</td>
-                        <td class="json-logger" title="${escapeHtml(log.logger)}">${escapeHtml(log.logger)}</td>
+                        <td class="json-logger" title="Full: ${escapeHtml(log.logger)}">${escapeHtml(simpleLogger)}</td>
                         <td class="json-message">${escapeHtml(log.message)}</td>
                     </tr>
                 `;
@@ -5515,12 +5533,17 @@
                     if (searchTerm) {
                         const messageCell = row.querySelector('.json-message');
                         const loggerCell = row.querySelector('.json-logger');
-                        const originalMessage = jsonLogs[row.getAttribute('data-log-index')]?.message || '';
-                        const originalLogger = jsonLogs[row.getAttribute('data-log-index')]?.logger || '';
+                        const logIndex = row.getAttribute('data-log-index');
+                        const originalMessage = jsonLogs[logIndex]?.message || '';
+                        const originalLogger = jsonLogs[logIndex]?.logger || '';
+                        const simpleLogger = getSimpleClassName(originalLogger);
 
                         const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
                         if (messageCell) messageCell.innerHTML = escapeHtml(originalMessage).replace(regex, '<mark>$1</mark>');
-                        if (loggerCell) loggerCell.innerHTML = escapeHtml(originalLogger).replace(regex, '<mark>$1</mark>');
+                        if (loggerCell) {
+                            loggerCell.innerHTML = escapeHtml(simpleLogger).replace(regex, '<mark>$1</mark>');
+                            loggerCell.title = `Full: ${originalLogger}`;
+                        }
                     }
                 } else {
                     row.classList.add('hidden');
