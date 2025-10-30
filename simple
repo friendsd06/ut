@@ -782,6 +782,149 @@
             border-color: #667eea;
         }
 
+        .sql-viewer {
+            padding: 20px;
+            height: calc(100vh - 250px);
+            min-height: 750px;
+            overflow-y: auto;
+        }
+
+        .sql-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+        }
+
+        .sql-header h2 {
+            font-size: 24px;
+            margin: 0;
+        }
+
+        .sql-search {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .sql-search input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .sql-search input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .sql-stats {
+            white-space: nowrap;
+        }
+
+        .sql-content {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .sql-query-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .sql-query-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .sql-query-card.hidden {
+            display: none;
+        }
+
+        .sql-query-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #667eea;
+            color: white;
+        }
+
+        .sql-query-type {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .sql-query-source {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .sql-query-body {
+            padding: 16px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .sql-query-body mark {
+            background-color: #ffd700;
+            color: #000;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .sql-query-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .sql-copy-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .sql-copy-btn:hover {
+            background: #5568d3;
+        }
+
         .debug-assistant {
             padding: 20px;
             height: calc(100vh - 250px);
@@ -2032,6 +2175,7 @@
             <button class="tab active" onclick="switchTab('standard')">📄 Standard View</button>
             <button class="tab" onclick="switchTab('flow')">🔄 Flow Analysis</button>
             <button class="tab" onclick="switchTab('trace')">🔗 Trace Diagram</button>
+            <button class="tab" onclick="switchTab('sql')">📊 SQL Queries</button>
             <button class="tab" onclick="switchTab('debug')">🤖 Debug Assistant</button>
         </div>
 
@@ -2090,6 +2234,33 @@
                         </svg>
                         <h3>No Trace Data Available</h3>
                         <p>Upload log files to see the trace diagram</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="sqlTab" class="tab-content">
+            <div class="sql-viewer">
+                <div class="sql-header">
+                    <h2>📊 SQL Query Viewer</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="analyze-btn" onclick="extractSQLQueries()">🔍 Extract SQL</button>
+                        <button class="analyze-btn" onclick="exportSQLQueries()" style="background: #28a745;">📥 Export SQL</button>
+                    </div>
+                </div>
+                <div class="sql-search">
+                    <input type="text" id="sqlSearchBox" placeholder="🔍 Search in SQL queries..." oninput="filterSQLQueries()">
+                    <div class="sql-stats" id="sqlStats">
+                        <span class="stat-badge">0 queries found</span>
+                    </div>
+                </div>
+                <div id="sqlContent" class="sql-content">
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                        </svg>
+                        <h3>No SQL Queries Found</h3>
+                        <p>Upload log files and click "Extract SQL" to view all SQL queries</p>
                     </div>
                 </div>
             </div>
@@ -3090,6 +3261,12 @@
                 renderFlowAnalysis();
             } else if (tabName === 'trace') {
                 renderTraceDiagram();
+            } else if (tabName === 'sql') {
+                // SQL tab - extraction triggered manually
+                if (sqlQueries.length === 0 && (logData.file1.content || logData.file2.content)) {
+                    // Auto-extract on first visit if logs are loaded
+                    extractSQLQueries();
+                }
             } else if (tabName === 'debug') {
                 // Debug tab - analysis triggered manually
             }
@@ -4403,6 +4580,197 @@
             window.URL.revokeObjectURL(url);
         }
 
+        let sqlQueries = [];
+
+        function extractSQLQueries() {
+            sqlQueries = [];
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (!logData[fileKey].content) return;
+
+                const fileName = logData[fileKey].name;
+
+                logData[fileKey].lines.forEach((line, lineNumber) => {
+                    // SQL query patterns to detect
+                    const sqlPatterns = [
+                        // Hibernate/JPA style
+                        /(?:Hibernate|JPA|SQL).*?(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+[\s\S]*?(?:FROM|INTO|TABLE|VALUES)[\s\S]*?(?:;|$)/gi,
+                        // Plain SQL statements
+                        /(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+[\s\S]*?(?:FROM|INTO|TABLE|VALUES)[\s\S]*?(?:;|WHERE|GROUP|ORDER|LIMIT|$)/gi,
+                        // Prepared statements
+                        /(?:PreparedStatement|Statement).*?(SELECT|INSERT|UPDATE|DELETE)[\s\S]*?(?:;|$)/gi,
+                        // SQL in quotes or strings
+                        /["']\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+[\s\S]*?["']/gi
+                    ];
+
+                    sqlPatterns.forEach(pattern => {
+                        const matches = line.matchAll(pattern);
+                        for (const match of matches) {
+                            let query = match[0];
+
+                            // Clean up the query
+                            query = query
+                                .replace(/^[\s\S]*?(?:Hibernate|JPA|SQL).*?:/i, '') // Remove prefixes
+                                .replace(/^["']|["']$/g, '') // Remove quotes
+                                .replace(/\\n/g, ' ') // Replace escaped newlines
+                                .replace(/\s+/g, ' ') // Normalize whitespace
+                                .trim();
+
+                            // Only keep queries that look valid
+                            if (query.length > 15 && /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)/i.test(query)) {
+                                const queryType = query.match(/^(\w+)/i)[1].toUpperCase();
+
+                                sqlQueries.push({
+                                    query: query,
+                                    type: queryType,
+                                    file: fileName,
+                                    fileKey: fileKey,
+                                    lineNumber: lineNumber + 1,
+                                    originalLine: line
+                                });
+                            }
+                        }
+                    });
+                });
+            });
+
+            // Remove duplicates
+            const uniqueQueries = [];
+            const seen = new Set();
+
+            sqlQueries.forEach(q => {
+                const key = q.query.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    uniqueQueries.push(q);
+                }
+            });
+
+            sqlQueries = uniqueQueries;
+
+            renderSQLQueries();
+
+            if (sqlQueries.length > 0) {
+                showNotification(`✅ Found ${sqlQueries.length} SQL queries`);
+            } else {
+                showNotification('⚠️ No SQL queries found in logs');
+            }
+        }
+
+        function renderSQLQueries() {
+            const container = document.getElementById('sqlContent');
+
+            if (sqlQueries.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                        </svg>
+                        <h3>No SQL Queries Found</h3>
+                        <p>Upload log files and click "Extract SQL" to view all SQL queries</p>
+                    </div>
+                `;
+                document.getElementById('sqlStats').innerHTML = '<span class="stat-badge">0 queries found</span>';
+                return;
+            }
+
+            container.innerHTML = '';
+
+            sqlQueries.forEach((sqlData, index) => {
+                const card = document.createElement('div');
+                card.className = 'sql-query-card';
+                card.setAttribute('data-query-index', index);
+                card.setAttribute('data-query', sqlData.query.toLowerCase());
+
+                card.innerHTML = `
+                    <div class="sql-query-header">
+                        <div>
+                            <span class="sql-query-type">${sqlData.type}</span>
+                        </div>
+                        <div class="sql-query-source">
+                            📄 ${sqlData.file} : Line ${sqlData.lineNumber}
+                        </div>
+                    </div>
+                    <div class="sql-query-body">${escapeHtml(sqlData.query)}</div>
+                    <div class="sql-query-footer">
+                        <span>Query #${index + 1}</span>
+                        <button class="sql-copy-btn" onclick="copySQLQuery(${index})">📋 Copy</button>
+                    </div>
+                `;
+
+                container.appendChild(card);
+            });
+
+            document.getElementById('sqlStats').innerHTML = `<span class="stat-badge">${sqlQueries.length} queries found</span>`;
+        }
+
+        function filterSQLQueries() {
+            const searchTerm = document.getElementById('sqlSearchBox').value.toLowerCase();
+            let visibleCount = 0;
+
+            document.querySelectorAll('.sql-query-card').forEach(card => {
+                const query = card.getAttribute('data-query');
+
+                if (!searchTerm || query.includes(searchTerm)) {
+                    card.classList.remove('hidden');
+                    visibleCount++;
+                } else {
+                    card.classList.add('hidden');
+                }
+            });
+
+            if (searchTerm) {
+                document.getElementById('sqlStats').innerHTML = `<span class="stat-badge">${visibleCount} of ${sqlQueries.length} queries</span>`;
+            } else {
+                document.getElementById('sqlStats').innerHTML = `<span class="stat-badge">${sqlQueries.length} queries found</span>`;
+            }
+        }
+
+        function copySQLQuery(index) {
+            const query = sqlQueries[index].query;
+
+            navigator.clipboard.writeText(query).then(() => {
+                showNotification('✅ SQL query copied to clipboard');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                showNotification('❌ Failed to copy query');
+            });
+        }
+
+        function exportSQLQueries() {
+            if (sqlQueries.length === 0) {
+                showNotification('⚠️ No SQL queries to export');
+                return;
+            }
+
+            let content = '-- SQL Queries Extracted from Log Files\n';
+            content += `-- Total Queries: ${sqlQueries.length}\n`;
+            content += `-- Generated: ${new Date().toISOString()}\n\n`;
+
+            sqlQueries.forEach((sqlData, index) => {
+                content += `-- Query #${index + 1}\n`;
+                content += `-- Type: ${sqlData.type}\n`;
+                content += `-- Source: ${sqlData.file} : Line ${sqlData.lineNumber}\n`;
+                content += `${sqlData.query};\n\n`;
+            });
+
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sql_queries_${Date.now()}.sql`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            showNotification(`✅ Exported ${sqlQueries.length} SQL queries`);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function exportFilteredResults() {
             // Get all visible log lines
             const visibleLines = [];
@@ -4469,5 +4837,3 @@
     </script>
 </body>
 </html>
-
-
