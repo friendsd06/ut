@@ -1,18 +1,16 @@
-package com.example.aspect;
+package com.example.config;
 
+import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ParameterMapping;
+import org.apache.ibatis.plugin.*;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.session.Configuration;
-import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.type.TypeHandlerRegistry;
-import org.aspectj.lang.ProceedingJoinPoint;
-import org.aspectj.lang.annotation.Around;
-import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -22,43 +20,50 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-@Aspect
-public class SqlLoggingAspect {
+/**
+ * MyBatis Interceptor for logging executable SQL
+ * Handles:
+ * - All query types: SELECT, INSERT, UPDATE, DELETE
+ * - JDBC types: with and without jdbcType specification
+ * - SqlProvider: @SelectProvider, @InsertProvider, @UpdateProvider, @DeleteProvider
+ * - All data types: String, Number, Date, Boolean, Collection, Array, Enum, UUID, byte[], etc.
+ * - Dynamic SQL: foreach, if, where, choose, etc.
+ */
+@Component
+@Intercepts({
+    @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
+    @Signature(type = Executor.class, method = "query", args = {MappedStatement.class, Object.class,
+               org.apache.ibatis.session.RowBounds.class, org.apache.ibatis.session.ResultHandler.class})
+})
+public class SqlLoggingInterceptor implements Interceptor {
 
-    private static final Logger log = LoggerFactory.getLogger(SqlLoggingAspect.class);
+    private static final Logger log = LoggerFactory.getLogger(SqlLoggingInterceptor.class);
 
-    private final SqlSessionFactory sqlSessionFactory;
-
-    public SqlLoggingAspect(SqlSessionFactory sqlSessionFactory) {
-        this.sqlSessionFactory = sqlSessionFactory;
-        log.info("========================================");
-        log.info("SQL Logging Aspect Initialized");
-        log.info("========================================");
-    }
-
-    /**
-     * UPDATE THIS: Change "com.example.mapper" to YOUR mapper package
-     */
-    @Around("execution(* com.example.mapper..*.*(..))")
-    public Object logExecutableSql(ProceedingJoinPoint joinPoint) throws Throwable {
+    @Override
+    public Object intercept(Invocation invocation) throws Throwable {
+        // Execute the original method first
         Object result = null;
         Throwable executionException = null;
 
-        // Execute the original method first
         try {
-            result = joinPoint.proceed();
+            result = invocation.proceed();
         } catch (Throwable e) {
             executionException = e;
         }
 
-        // Try to log SQL (won't affect execution if logging fails)
+        // Try to log SQL (won't affect execution)
         try {
-            String executableSql = extractExecutableSql(joinPoint);
-            if (executableSql != null && !executableSql.isEmpty()) {
-                log.info("\n[EXECUTABLE SQL] {}\n", executableSql);
+            MappedStatement ms = (MappedStatement) invocation.getArgs()[0];
+            Object param = invocation.getArgs()[1];
+
+            if (ms != null && param != null) {
+                String executableSql = getExecutableSql(ms, param);
+                if (executableSql != null && !executableSql.isEmpty()) {
+                    log.info("\n[EXECUTABLE SQL] {}\n", executableSql);
+                }
             }
         } catch (Exception e) {
-            log.debug("Could not log SQL: {}", e.getMessage());
+            log.debug("Failed to log SQL: {}", e.getMessage());
         }
 
         // Throw original exception if any
@@ -69,27 +74,12 @@ public class SqlLoggingAspect {
         return result;
     }
 
-    private String extractExecutableSql(ProceedingJoinPoint joinPoint) {
+    /**
+     * Extracts executable SQL with all parameters replaced
+     */
+    private String getExecutableSql(MappedStatement ms, Object param) {
         try {
-            MethodSignature signature = (MethodSignature) joinPoint.getSignature();
-            String className = signature.getDeclaringType().getName();
-            String methodName = signature.getName();
-            String statementId = className + "." + methodName;
-
-            Configuration configuration = sqlSessionFactory.getConfiguration();
-
-            if (!configuration.hasStatement(statementId)) {
-                return null;
-            }
-
-            MappedStatement mappedStatement = configuration.getMappedStatement(statementId);
-            if (mappedStatement == null) {
-                return null;
-            }
-
-            Object parameterObject = buildParameterObject(joinPoint.getArgs());
-            BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
-
+            BoundSql boundSql = ms.getBoundSql(param);
             if (boundSql == null) {
                 return null;
             }
@@ -99,163 +89,188 @@ public class SqlLoggingAspect {
                 return null;
             }
 
-            List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+            List<ParameterMapping> mappings = boundSql.getParameterMappings();
+            if (mappings == null || mappings.isEmpty()) {
+                return cleanSql(sql);
+            }
 
-            return replacePlaceholders(sql, parameterMappings, boundSql, configuration);
+            Configuration config = ms.getConfiguration();
+            TypeHandlerRegistry typeHandlerRegistry = config.getTypeHandlerRegistry();
 
-        } catch (Exception e) {
-            log.debug("Failed to extract SQL: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private Object buildParameterObject(Object[] args) {
-        if (args == null || args.length == 0) {
-            return null;
-        }
-
-        if (args.length == 1) {
-            return args[0];
-        }
-
-        Map<String, Object> paramMap = new HashMap<>();
-        for (int i = 0; i < args.length; i++) {
-            paramMap.put("param" + (i + 1), args[i]);
-            paramMap.put("arg" + i, args[i]);
-        }
-        return paramMap;
-    }
-
-    private String replacePlaceholders(String sql,
-                                       List<ParameterMapping> parameterMappings,
-                                       BoundSql boundSql,
-                                       Configuration configuration) {
-
-        if (parameterMappings == null || parameterMappings.isEmpty()) {
-            return cleanSql(sql);
-        }
-
-        String result = sql;
-        Object parameterObject = boundSql.getParameterObject();
-        TypeHandlerRegistry typeHandlerRegistry = configuration.getTypeHandlerRegistry();
-
-        try {
-            for (ParameterMapping parameterMapping : parameterMappings) {
+            // Replace each ? with actual parameter value
+            for (ParameterMapping mapping : mappings) {
                 try {
-                    String propertyName = parameterMapping.getProperty();
-                    Object value = null;
-
-                    if (parameterObject != null) {
-                        if (boundSql.hasAdditionalParameter(propertyName)) {
-                            value = boundSql.getAdditionalParameter(propertyName);
-                        } else if (typeHandlerRegistry.hasTypeHandler(parameterObject.getClass())) {
-                            value = parameterObject;
-                        } else {
-                            MetaObject metaObject = configuration.newMetaObject(parameterObject);
-                            value = metaObject.getValue(propertyName);
-                        }
-                    }
-
+                    String property = mapping.getProperty();
+                    Object value = getParameterValue(property, param, boundSql, config, typeHandlerRegistry);
                     String formattedValue = formatValue(value);
-                    result = result.replaceFirst("\\?", formattedValue);
-
+                    sql = sql.replaceFirst("\\?", formattedValue);
                 } catch (Exception e) {
-                    result = result.replaceFirst("\\?", "NULL");
+                    // If parameter extraction fails, use NULL
+                    sql = sql.replaceFirst("\\?", "NULL");
                 }
             }
-        } catch (Exception e) {
-            log.debug("Error replacing placeholders: {}", e.getMessage());
-        }
 
-        return cleanSql(result);
+            return cleanSql(sql);
+
+        } catch (Exception e) {
+            log.debug("Error extracting SQL: {}", e.getMessage());
+            return null;
+        }
     }
 
+    /**
+     * Gets parameter value using MyBatis utilities
+     * Handles:
+     * - Additional parameters (from foreach, if, etc.)
+     * - Type handler registry
+     * - Map parameters
+     * - Bean properties (nested and simple)
+     */
+    private Object getParameterValue(String property, Object param, BoundSql boundSql,
+                                     Configuration config, TypeHandlerRegistry typeHandlerRegistry) {
+        if (param == null) {
+            return null;
+        }
+
+        try {
+            // Check additional parameters first (dynamic SQL like foreach)
+            if (boundSql.hasAdditionalParameter(property)) {
+                return boundSql.getAdditionalParameter(property);
+            }
+
+            // Check if parameter object has a type handler
+            if (typeHandlerRegistry.hasTypeHandler(param.getClass())) {
+                return param;
+            }
+
+            // Handle Map parameters
+            if (param instanceof Map) {
+                return ((Map<?, ?>) param).get(property);
+            }
+
+            // Use MetaObject for bean properties
+            MetaObject metaObject = config.newMetaObject(param);
+            if (metaObject.hasGetter(property)) {
+                return metaObject.getValue(property);
+            }
+
+            return null;
+        } catch (Exception e) {
+            log.debug("Could not get parameter value for: {}", property);
+            return null;
+        }
+    }
+
+    /**
+     * Formats value based on type
+     * Handles ALL common Java types and JDBC types
+     */
     private String formatValue(Object value) {
         if (value == null) {
             return "NULL";
         }
 
         try {
+            // String / VARCHAR / CHAR / CLOB
             if (value instanceof String) {
                 return "'" + escapeSql((String) value) + "'";
             }
 
+            // Character / CHAR
             if (value instanceof Character) {
                 return "'" + escapeSql(value.toString()) + "'";
             }
 
+            // Boolean / BIT / BOOLEAN
             if (value instanceof Boolean) {
                 return ((Boolean) value) ? "TRUE" : "FALSE";
             }
 
+            // Integer types / INTEGER / SMALLINT / TINYINT / BIGINT
             if (value instanceof Byte || value instanceof Short ||
                 value instanceof Integer || value instanceof Long) {
                 return value.toString();
             }
 
+            // Floating point / FLOAT / DOUBLE / REAL
             if (value instanceof Float || value instanceof Double) {
                 return value.toString();
             }
 
+            // Decimal / NUMERIC / DECIMAL
             if (value instanceof BigDecimal || value instanceof BigInteger) {
                 return value.toString();
             }
 
+            // java.util.Date / TIMESTAMP
             if (value instanceof java.util.Date) {
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
                 return "'" + sdf.format((java.util.Date) value) + "'";
             }
 
+            // java.sql.Date / DATE
             if (value instanceof java.sql.Date) {
                 return "'" + value.toString() + "'";
             }
 
+            // java.sql.Time / TIME
             if (value instanceof java.sql.Time) {
                 return "'" + value.toString() + "'";
             }
 
+            // java.sql.Timestamp / TIMESTAMP
             if (value instanceof Timestamp) {
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
                 return "'" + sdf.format((Timestamp) value) + "'";
             }
 
+            // LocalDate / DATE
             if (value instanceof LocalDate) {
                 return "'" + ((LocalDate) value).format(DateTimeFormatter.ISO_LOCAL_DATE) + "'";
             }
 
+            // LocalTime / TIME
             if (value instanceof LocalTime) {
                 return "'" + ((LocalTime) value).format(DateTimeFormatter.ISO_LOCAL_TIME) + "'";
             }
 
+            // LocalDateTime / TIMESTAMP
             if (value instanceof LocalDateTime) {
                 return "'" + ((LocalDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
             }
 
+            // ZonedDateTime / TIMESTAMP
             if (value instanceof ZonedDateTime) {
                 return "'" + ((ZonedDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
             }
 
+            // Instant / TIMESTAMP
             if (value instanceof Instant) {
                 return "'" + ((Instant) value).toString() + "'";
             }
 
+            // OffsetDateTime / TIMESTAMP
             if (value instanceof OffsetDateTime) {
                 return "'" + ((OffsetDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
             }
 
+            // byte[] / BINARY / VARBINARY / BLOB
             if (value instanceof byte[]) {
                 byte[] bytes = (byte[]) value;
                 return bytes.length > 0 ? "0x" + bytesToHex(bytes) : "NULL";
             }
 
+            // UUID / VARCHAR
             if (value instanceof UUID) {
                 return "'" + value.toString() + "'";
             }
 
+            // Enum / VARCHAR
             if (value instanceof Enum) {
                 return "'" + ((Enum<?>) value).name() + "'";
             }
 
+            // Collection - for IN clauses
             if (value instanceof Collection) {
                 Collection<?> collection = (Collection<?>) value;
                 if (collection.isEmpty()) {
@@ -266,6 +281,7 @@ public class SqlLoggingAspect {
                 for (Object item : collection) {
                     if (i++ > 0) sb.append(", ");
                     sb.append(formatValue(item));
+                    // Limit to prevent huge output
                     if (i > 100) {
                         sb.append(", ...");
                         break;
@@ -275,12 +291,13 @@ public class SqlLoggingAspect {
                 return sb.toString();
             }
 
+            // Array - for IN clauses
             if (value.getClass().isArray()) {
                 List<Object> list = new ArrayList<>();
                 if (value instanceof Object[]) {
-                    Object[] arr = (Object[]) value;
-                    list.addAll(Arrays.asList(arr));
+                    list.addAll(Arrays.asList((Object[]) value));
                 } else {
+                    // Handle primitive arrays
                     int length = Math.min(java.lang.reflect.Array.getLength(value), 100);
                     for (int i = 0; i < length; i++) {
                         list.add(java.lang.reflect.Array.get(value, i));
@@ -289,6 +306,7 @@ public class SqlLoggingAspect {
                 return formatValue(list);
             }
 
+            // Default: treat as string
             return "'" + escapeSql(String.valueOf(value)) + "'";
 
         } catch (Exception e) {
@@ -297,13 +315,23 @@ public class SqlLoggingAspect {
         }
     }
 
+    /**
+     * Escapes single quotes for SQL
+     */
     private String escapeSql(String str) {
-        if (str == null) return "";
+        if (str == null) {
+            return "";
+        }
         return str.replace("'", "''");
     }
 
+    /**
+     * Converts byte array to hex string (limited for large data)
+     */
     private String bytesToHex(byte[] bytes) {
-        if (bytes == null || bytes.length == 0) return "";
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
         StringBuilder sb = new StringBuilder();
         int limit = Math.min(bytes.length, 50);
         for (int i = 0; i < limit; i++) {
@@ -315,8 +343,23 @@ public class SqlLoggingAspect {
         return sb.toString();
     }
 
+    /**
+     * Cleans SQL by removing extra whitespace
+     */
     private String cleanSql(String sql) {
-        if (sql == null) return "";
+        if (sql == null) {
+            return "";
+        }
         return sql.replaceAll("\\s+", " ").trim();
+    }
+
+    @Override
+    public Object plugin(Object target) {
+        return Plugin.wrap(target, this);
+    }
+
+    @Override
+    public void setProperties(Properties properties) {
+        // Can be used for configuration if needed
     }
 }
