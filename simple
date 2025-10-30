@@ -1108,13 +1108,18 @@
 
         .json-table-container {
             overflow-x: auto;
+            width: 100%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
         }
 
         .json-table {
             width: 100%;
+            min-width: 1200px;
             border-collapse: collapse;
             font-size: 13px;
             background: white;
+            table-layout: fixed;
         }
 
         .json-table thead {
@@ -1132,6 +1137,12 @@
             border-bottom: 2px solid #5568d3;
             white-space: nowrap;
         }
+
+        .json-table th:nth-child(1) { width: 60px; }    /* # column */
+        .json-table th:nth-child(2) { width: 150px; }   /* File column */
+        .json-table th:nth-child(3) { width: 200px; }   /* Timestamp column */
+        .json-table th:nth-child(4) { width: 250px; }   /* Logger column */
+        .json-table th:nth-child(5) { width: auto; }    /* Message column - takes remaining space */
 
         .json-table td {
             padding: 12px;
@@ -1164,10 +1175,12 @@
 
         .json-message {
             font-family: 'Consolas', 'Courier New', monospace;
-            font-size: 12px;
-            line-height: 1.5;
+            font-size: 13px;
+            line-height: 1.6;
             word-wrap: break-word;
-            max-width: 600px;
+            word-break: break-word;
+            white-space: pre-wrap;
+            min-width: 400px;
         }
 
         .json-message mark {
@@ -1179,12 +1192,17 @@
 
         .json-file-badge {
             display: inline-block;
-            padding: 3px 8px;
-            border-radius: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
             font-size: 11px;
             font-weight: 600;
             background: #e3f2fd;
             color: #1976d2;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            vertical-align: middle;
         }
 
         .json-file-badge.file2 {
@@ -2543,10 +2561,6 @@
                         <button class="analyze-btn" onclick="extractJSONLogs()">🔍 Parse JSON</button>
                         <button class="analyze-btn" onclick="exportJSONLogs()" style="background: #28a745;">📥 Export</button>
                     </div>
-                </div>
-                <div class="json-view-toggle">
-                    <button class="view-btn active" onclick="setJSONViewMode('combined')">📊 Combined Table</button>
-                    <button class="view-btn" onclick="setJSONViewMode('side-by-side')">⬌ Side-by-Side</button>
                 </div>
                 <div class="json-controls">
                     <input type="text" id="jsonSearchBox" placeholder="🔍 Filter logs by message or logger..." oninput="filterJSONLogs()" class="json-search-input">
@@ -5347,18 +5361,6 @@
             renderJSONLogs();
         }
 
-        function setJSONViewMode(mode) {
-            jsonViewMode = mode;
-
-            // Update active button
-            document.querySelectorAll('.json-view-toggle .view-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-
-            renderJSONLogs();
-        }
-
         function renderJSONLogs() {
             const container = document.getElementById('jsonContent');
 
@@ -5377,13 +5379,7 @@
             }
 
             container.innerHTML = '';
-
-            if (jsonViewMode === 'side-by-side') {
-                renderJSONSideBySide(container);
-            } else {
-                renderJSONCombined(container);
-            }
-
+            renderJSONCombined(container);
             document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${jsonLogs.length} logs found</span>`;
         }
 
@@ -5395,11 +5391,11 @@
                 <table class="json-table">
                     <thead>
                         <tr>
-                            <th>#</th>
-                            <th>File</th>
-                            <th>Timestamp</th>
-                            <th>Logger</th>
-                            <th>Message</th>
+                            <th style="width: 60px;">#</th>
+                            <th style="width: 180px;">File Name</th>
+                            <th style="width: 200px;">Timestamp</th>
+                            <th style="width: 280px;">Logger</th>
+                            <th style="min-width: 500px;">Message</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5412,9 +5408,9 @@
                         data-logger="${escapeHtml(log.logger.toLowerCase())}"
                         data-message="${escapeHtml(log.message.toLowerCase())}">
                         <td class="json-line-number">${log.lineNumber}</td>
-                        <td><span class="${fileBadgeClass}">${escapeHtml(log.file)}</span></td>
-                        <td class="json-timestamp">${escapeHtml(log.timestamp)}</td>
-                        <td class="json-logger">${escapeHtml(log.logger)}</td>
+                        <td><span class="${fileBadgeClass}" title="${escapeHtml(log.file)}">${escapeHtml(log.file)}</span></td>
+                        <td class="json-timestamp">${escapeHtml(String(log.timestamp))}</td>
+                        <td class="json-logger" title="${escapeHtml(log.logger)}">${escapeHtml(log.logger)}</td>
                         <td class="json-message">${escapeHtml(log.message)}</td>
                     </tr>
                 `;
