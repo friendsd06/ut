@@ -1996,6 +1996,7 @@
                     <button class="filter-btn" id="cleanLogsBtn" onclick="toggleCleanMode()">🧽 Clean View</button>
                     <button class="filter-btn" id="stackTraceBtn" onclick="toggleStackTraceFormat()">📜 Format Stack Traces</button>
                     <button class="filter-btn" id="manageLoggersBtn" onclick="toggleLoggerPanel()">🎯 Manage Loggers</button>
+                    <button class="filter-btn" onclick="exportFilteredResults()" style="background: #28a745; color: white;">📥 Export Visible Lines</button>
                 </div>
             </div>
             <div class="logger-panel" id="loggerPanel" style="display: none;">
@@ -2201,9 +2202,21 @@
             ]
         };
 
-        const issueKeywords = ['error', 'fail', 'warn', 'exception', 'timeout', 'critical', 'fatal', 'alert'];
-        const successKeywords = ['success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished'];
-        const failureKeywords = ['failed', 'exception', 'crash', 'not completed', 'aborted', 'rejected', 'denied'];
+        const issueKeywords = [
+            'error', 'fail', 'warn', 'warning', 'exception', 'timeout', 'critical', 'fatal', 'alert',
+            'unable', 'cannot', 'could not', 'invalid', 'missing', 'not found', 'failure',
+            'stack trace', 'stacktrace', 'null pointer', 'nullpointer', 'out of memory'
+        ];
+        const successKeywords = [
+            'success', 'completed', 'done', 'passed', 'ok', 'successful', 'finished',
+            'complete', 'resolved', 'accepted', 'approved', 'validated', 'verified',
+            'healthy', 'ready', 'started successfully', 'deployed'
+        ];
+        const failureKeywords = [
+            'failed', 'exception', 'crash', 'not completed', 'aborted', 'rejected', 'denied',
+            'killed', 'terminated', 'stopped unexpectedly', 'unsuccessful', 'unreachable',
+            'connection refused', 'access denied', 'permission denied', 'forbidden'
+        ];
 
         // Noise patterns to filter out in clean mode
         const noisePatterns = [
@@ -2614,6 +2627,47 @@
             });
         }
 
+        function applyCurrentFilter() {
+            if (!currentFilter) {
+                // No filter active - don't hide anything
+                return;
+            }
+
+            const keywordMap = {
+                'issue': issueKeywords,
+                'success': successKeywords,
+                'failure': failureKeywords
+            };
+
+            const keywords = keywordMap[currentFilter];
+            if (!keywords) return;
+
+            let matchCount = 0;
+
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                const fileKey = lineDiv.getAttribute('data-file');
+                const lineIndex = lineDiv.getAttribute('data-line-index');
+
+                if (!fileKey || lineIndex === null) return;
+
+                const originalText = logData[fileKey].lines[lineIndex];
+                const lowerText = originalText.toLowerCase();
+
+                // Check if line contains any of the filter keywords
+                const matches = keywords.some(keyword => lowerText.includes(keyword));
+
+                if (matches) {
+                    lineDiv.classList.remove('hidden');
+                    matchCount++;
+                } else {
+                    lineDiv.classList.add('hidden');
+                }
+            });
+
+            // Update match count badge
+            document.getElementById('matchCount').textContent = matchCount;
+        }
+
         function toggleCleanMode() {
             cleanModeEnabled = !cleanModeEnabled;
             const btn = document.getElementById('cleanLogsBtn');
@@ -2739,17 +2793,34 @@
         }
 
         function showAllLoggers() {
+            const previousCount = hiddenLoggers.size;
             hiddenLoggers.clear();
             renderLoggerList();
             applyLoggerFiltering();
+
+            if (previousCount > 0) {
+                showNotification(`✅ Showing all loggers (${previousCount} were hidden)`);
+            } else {
+                showNotification('ℹ️ All loggers are already visible');
+            }
         }
 
         function hideAllLoggers() {
+            let addedCount = 0;
             loggerCounts.forEach((count, logger) => {
+                if (!hiddenLoggers.has(logger)) {
+                    addedCount++;
+                }
                 hiddenLoggers.add(logger);
             });
             renderLoggerList();
             applyLoggerFiltering();
+
+            if (addedCount > 0) {
+                showNotification(`🚫 Hidden all ${hiddenLoggers.size} logger(s)`);
+            } else {
+                showNotification('ℹ️ All loggers are already hidden');
+            }
         }
 
         function applyPreset(presetName) {
@@ -2879,6 +2950,7 @@
                 document.querySelectorAll('.log-line').forEach(lineDiv => {
                     lineDiv.classList.remove('logger-hidden');
                 });
+                hideLoggerFilterInfo();
                 return;
             }
 
@@ -2886,11 +2958,26 @@
 
             // Hide lines matching hidden loggers
             document.querySelectorAll('.log-line').forEach(lineDiv => {
-                const line = lineDiv.getAttribute('data-original-line') || lineDiv.textContent;
+                // Get the original line text
+                const fileKey = lineDiv.getAttribute('data-file');
+                const lineIndex = lineDiv.getAttribute('data-line-index');
+                let line = lineDiv.getAttribute('data-original-line');
+
+                // Fallback to stored data if attributes are missing
+                if (!line && fileKey && lineIndex !== null) {
+                    line = logData[fileKey].lines[lineIndex];
+                }
+
+                // Final fallback to textContent
+                if (!line) {
+                    line = lineDiv.textContent;
+                }
+
                 let shouldHide = false;
 
+                // Check if line contains any hidden logger pattern
                 hiddenLoggers.forEach(logger => {
-                    if (line.includes(logger)) {
+                    if (line.toLowerCase().includes(logger.toLowerCase())) {
                         shouldHide = true;
                     }
                 });
@@ -4314,6 +4401,45 @@
             a.download = `log_export_${Date.now()}.csv`;
             a.click();
             window.URL.revokeObjectURL(url);
+        }
+
+        function exportFilteredResults() {
+            // Get all visible log lines
+            const visibleLines = [];
+
+            document.querySelectorAll('.log-line').forEach(lineDiv => {
+                // Check if line is visible (not hidden by any filter)
+                if (!lineDiv.classList.contains('hidden') &&
+                    !lineDiv.classList.contains('cleaned') &&
+                    !lineDiv.classList.contains('logger-hidden')) {
+
+                    const fileKey = lineDiv.getAttribute('data-file');
+                    const lineIndex = lineDiv.getAttribute('data-line-index');
+                    const fileName = logData[fileKey]?.name || fileKey;
+                    const lineText = lineDiv.getAttribute('data-original-line') || lineDiv.textContent;
+
+                    visibleLines.push(`[${fileName}] ${lineText}`);
+                }
+            });
+
+            if (visibleLines.length === 0) {
+                showNotification('⚠️ No visible lines to export');
+                return;
+            }
+
+            // Create text file content
+            const content = visibleLines.join('\n');
+
+            // Download as text file
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `filtered_logs_${Date.now()}.txt`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            showNotification(`✅ Exported ${visibleLines.length} visible lines`);
         }
 
         // Close flashbox with Escape key
