@@ -1027,6 +1027,199 @@
             z-index: 10;
         }
 
+        .json-viewer {
+            padding: 20px;
+            height: calc(100vh - 250px);
+            min-height: 750px;
+            overflow-y: auto;
+        }
+
+        .json-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+        }
+
+        .json-header h2 {
+            font-size: 24px;
+            margin: 0;
+        }
+
+        .json-view-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .json-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            flex-wrap: wrap;
+        }
+
+        .json-search-input {
+            flex: 1;
+            min-width: 300px;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .json-search-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .json-sort-select {
+            padding: 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            background: white;
+            cursor: pointer;
+        }
+
+        .json-sort-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .json-stats {
+            white-space: nowrap;
+        }
+
+        .json-content {
+            background: white;
+            border-radius: 8px;
+            overflow: auto;
+        }
+
+        .json-table-container {
+            overflow-x: auto;
+        }
+
+        .json-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            background: white;
+        }
+
+        .json-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .json-table th {
+            padding: 14px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: white;
+            border-bottom: 2px solid #5568d3;
+            white-space: nowrap;
+        }
+
+        .json-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: top;
+        }
+
+        .json-table tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .json-table tbody tr.hidden {
+            display: none;
+        }
+
+        .json-timestamp {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: #667eea;
+            white-space: nowrap;
+            font-weight: 600;
+        }
+
+        .json-logger {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .json-message {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            max-width: 600px;
+        }
+
+        .json-message mark {
+            background-color: #ffd700;
+            color: #000;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .json-file-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .json-file-badge.file2 {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .json-side-by-side {
+            display: flex;
+            gap: 20px;
+        }
+
+        .json-panel {
+            flex: 1;
+            min-width: 48%;
+        }
+
+        .json-panel-header {
+            font-size: 18px;
+            font-weight: 600;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .json-line-number {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+            color: #6c757d;
+            text-align: center;
+            background: #f8f9fa;
+        }
+
         .debug-assistant {
             padding: 20px;
             height: calc(100vh - 250px);
@@ -2278,6 +2471,7 @@
             <button class="tab" onclick="switchTab('flow')">🔄 Flow Analysis</button>
             <button class="tab" onclick="switchTab('trace')">🔗 Trace Diagram</button>
             <button class="tab" onclick="switchTab('sql')">📊 SQL Queries</button>
+            <button class="tab" onclick="switchTab('json')">📊 JSON Logs</button>
             <button class="tab" onclick="switchTab('debug')">🤖 Debug Assistant</button>
         </div>
 
@@ -2336,6 +2530,41 @@
                         </svg>
                         <h3>No Trace Data Available</h3>
                         <p>Upload log files to see the trace diagram</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="jsonTab" class="tab-content">
+            <div class="json-viewer">
+                <div class="json-header">
+                    <h2>📊 JSON Log Viewer</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="analyze-btn" onclick="extractJSONLogs()">🔍 Parse JSON</button>
+                        <button class="analyze-btn" onclick="exportJSONLogs()" style="background: #28a745;">📥 Export</button>
+                    </div>
+                </div>
+                <div class="json-view-toggle">
+                    <button class="view-btn active" onclick="setJSONViewMode('combined')">📊 Combined Table</button>
+                    <button class="view-btn" onclick="setJSONViewMode('side-by-side')">⬌ Side-by-Side</button>
+                </div>
+                <div class="json-controls">
+                    <input type="text" id="jsonSearchBox" placeholder="🔍 Filter logs by message or logger..." oninput="filterJSONLogs()" class="json-search-input">
+                    <select id="jsonSortOrder" onchange="sortJSONLogs()" class="json-sort-select">
+                        <option value="asc">↑ Oldest First</option>
+                        <option value="desc" selected>↓ Newest First</option>
+                    </select>
+                    <div class="json-stats" id="jsonStats">
+                        <span class="stat-badge">0 logs found</span>
+                    </div>
+                </div>
+                <div id="jsonContent" class="json-content">
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <h3>No JSON Logs Found</h3>
+                        <p>Upload log files and click "Parse JSON" to view structured logs</p>
                     </div>
                 </div>
             </div>
@@ -3373,6 +3602,11 @@
                 if (sqlQueries.length === 0 && (logData.file1.content || logData.file2.content)) {
                     // Auto-extract on first visit if logs are loaded
                     extractSQLQueries();
+                }
+            } else if (tabName === 'json') {
+                // JSON tab - auto-extract on first visit
+                if (jsonLogs.length === 0 && (logData.file1.content || logData.file2.content)) {
+                    extractJSONLogs();
                 }
             } else if (tabName === 'debug') {
                 // Debug tab - analysis triggered manually
@@ -4690,6 +4924,10 @@
         let sqlQueries = [];
         let sqlViewMode = 'combined'; // 'combined', 'separate', 'side-by-side'
 
+        let jsonLogs = [];
+        let jsonViewMode = 'combined'; // 'combined', 'side-by-side'
+        let jsonSortOrder = 'desc'; // 'asc' or 'desc'
+
         function extractSQLQueries() {
             sqlQueries = [];
 
@@ -5021,6 +5259,314 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function extractJSONLogs() {
+            jsonLogs = [];
+
+            ['file1', 'file2'].forEach(fileKey => {
+                if (!logData[fileKey].content) return;
+
+                const fileName = logData[fileKey].name;
+
+                logData[fileKey].lines.forEach((line, lineNumber) => {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine || !trimmedLine.startsWith('{')) return;
+
+                    try {
+                        const jsonObj = JSON.parse(trimmedLine);
+
+                        // Extract timestamp (try common field names)
+                        let timestamp = jsonObj.timestamp || jsonObj.time || jsonObj['@timestamp'] ||
+                                      jsonObj.date || jsonObj.datetime || jsonObj.ts || '';
+
+                        // Extract logger (try common field names)
+                        let logger = jsonObj.logger || jsonObj.logger_name || jsonObj.loggerName ||
+                                   jsonObj.class || jsonObj.category || jsonObj.name || 'Unknown';
+
+                        // Extract message (try common field names)
+                        let message = jsonObj.message || jsonObj.msg || jsonObj.text ||
+                                    jsonObj.log || jsonObj.event || JSON.stringify(jsonObj);
+
+                        // Convert timestamp to sortable format if it's a string
+                        let sortableTimestamp = timestamp;
+                        try {
+                            if (timestamp) {
+                                const date = new Date(timestamp);
+                                if (!isNaN(date.getTime())) {
+                                    sortableTimestamp = date.getTime();
+                                }
+                            }
+                        } catch (e) {
+                            // Keep original timestamp if conversion fails
+                        }
+
+                        jsonLogs.push({
+                            timestamp: timestamp,
+                            sortableTimestamp: sortableTimestamp,
+                            logger: logger,
+                            message: message,
+                            file: fileName,
+                            fileKey: fileKey,
+                            lineNumber: lineNumber + 1,
+                            originalLine: line,
+                            rawJson: jsonObj
+                        });
+                    } catch (e) {
+                        // Not valid JSON, skip
+                    }
+                });
+            });
+
+            // Sort by timestamp
+            sortJSONLogs();
+
+            renderJSONLogs();
+
+            if (jsonLogs.length > 0) {
+                showNotification(`✅ Parsed ${jsonLogs.length} JSON log entries`);
+            } else {
+                showNotification('⚠️ No JSON logs found');
+            }
+        }
+
+        function sortJSONLogs() {
+            jsonSortOrder = document.getElementById('jsonSortOrder').value;
+
+            jsonLogs.sort((a, b) => {
+                const aTime = a.sortableTimestamp || 0;
+                const bTime = b.sortableTimestamp || 0;
+
+                if (jsonSortOrder === 'asc') {
+                    return aTime - bTime;
+                } else {
+                    return bTime - aTime;
+                }
+            });
+
+            renderJSONLogs();
+        }
+
+        function setJSONViewMode(mode) {
+            jsonViewMode = mode;
+
+            // Update active button
+            document.querySelectorAll('.json-view-toggle .view-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            renderJSONLogs();
+        }
+
+        function renderJSONLogs() {
+            const container = document.getElementById('jsonContent');
+
+            if (jsonLogs.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <h3>No JSON Logs Found</h3>
+                        <p>Upload log files and click "Parse JSON" to view structured logs</p>
+                    </div>
+                `;
+                document.getElementById('jsonStats').innerHTML = '<span class="stat-badge">0 logs found</span>';
+                return;
+            }
+
+            container.innerHTML = '';
+
+            if (jsonViewMode === 'side-by-side') {
+                renderJSONSideBySide(container);
+            } else {
+                renderJSONCombined(container);
+            }
+
+            document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${jsonLogs.length} logs found</span>`;
+        }
+
+        function renderJSONCombined(container) {
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'json-table-container';
+
+            let tableHTML = `
+                <table class="json-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>File</th>
+                            <th>Timestamp</th>
+                            <th>Logger</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            jsonLogs.forEach((log, index) => {
+                const fileBadgeClass = log.fileKey === 'file1' ? 'json-file-badge' : 'json-file-badge file2';
+                tableHTML += `
+                    <tr data-log-index="${index}" data-timestamp="${log.sortableTimestamp}"
+                        data-logger="${escapeHtml(log.logger.toLowerCase())}"
+                        data-message="${escapeHtml(log.message.toLowerCase())}">
+                        <td class="json-line-number">${log.lineNumber}</td>
+                        <td><span class="${fileBadgeClass}">${escapeHtml(log.file)}</span></td>
+                        <td class="json-timestamp">${escapeHtml(log.timestamp)}</td>
+                        <td class="json-logger">${escapeHtml(log.logger)}</td>
+                        <td class="json-message">${escapeHtml(log.message)}</td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += '</tbody></table>';
+            tableContainer.innerHTML = tableHTML;
+            container.appendChild(tableContainer);
+        }
+
+        function renderJSONSideBySide(container) {
+            const file1Logs = jsonLogs.filter(log => log.fileKey === 'file1');
+            const file2Logs = jsonLogs.filter(log => log.fileKey === 'file2');
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'json-side-by-side';
+
+            // Left panel (File 1)
+            const leftPanel = document.createElement('div');
+            leftPanel.className = 'json-panel';
+            leftPanel.innerHTML = `
+                <h3 class="json-panel-header">📄 ${file1Logs[0]?.file || 'File 1'} (${file1Logs.length} logs)</h3>
+                <div class="json-table-container">
+                    <table class="json-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Timestamp</th>
+                                <th>Logger</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            file1Logs.forEach((log, index) => {
+                leftPanel.innerHTML += `
+                    <tr data-log-index="${index}" data-timestamp="${log.sortableTimestamp}"
+                        data-logger="${escapeHtml(log.logger.toLowerCase())}"
+                        data-message="${escapeHtml(log.message.toLowerCase())}">
+                        <td class="json-line-number">${log.lineNumber}</td>
+                        <td class="json-timestamp">${escapeHtml(log.timestamp)}</td>
+                        <td class="json-logger">${escapeHtml(log.logger)}</td>
+                        <td class="json-message">${escapeHtml(log.message)}</td>
+                    </tr>
+                `;
+            });
+
+            leftPanel.innerHTML += '</tbody></table></div>';
+
+            // Right panel (File 2)
+            const rightPanel = document.createElement('div');
+            rightPanel.className = 'json-panel';
+            rightPanel.innerHTML = `
+                <h3 class="json-panel-header">📄 ${file2Logs[0]?.file || 'File 2'} (${file2Logs.length} logs)</h3>
+                <div class="json-table-container">
+                    <table class="json-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Timestamp</th>
+                                <th>Logger</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            file2Logs.forEach((log, index) => {
+                rightPanel.innerHTML += `
+                    <tr data-log-index="${file1Logs.length + index}" data-timestamp="${log.sortableTimestamp}"
+                        data-logger="${escapeHtml(log.logger.toLowerCase())}"
+                        data-message="${escapeHtml(log.message.toLowerCase())}">
+                        <td class="json-line-number">${log.lineNumber}</td>
+                        <td class="json-timestamp">${escapeHtml(log.timestamp)}</td>
+                        <td class="json-logger">${escapeHtml(log.logger)}</td>
+                        <td class="json-message">${escapeHtml(log.message)}</td>
+                    </tr>
+                `;
+            });
+
+            rightPanel.innerHTML += '</tbody></table></div>';
+
+            wrapper.appendChild(leftPanel);
+            wrapper.appendChild(rightPanel);
+            container.appendChild(wrapper);
+        }
+
+        function filterJSONLogs() {
+            const searchTerm = document.getElementById('jsonSearchBox').value.toLowerCase();
+            let visibleCount = 0;
+
+            document.querySelectorAll('.json-table tbody tr').forEach(row => {
+                const logger = row.getAttribute('data-logger') || '';
+                const message = row.getAttribute('data-message') || '';
+
+                if (!searchTerm || logger.includes(searchTerm) || message.includes(searchTerm)) {
+                    row.classList.remove('hidden');
+                    visibleCount++;
+
+                    // Highlight matching text
+                    if (searchTerm) {
+                        const messageCell = row.querySelector('.json-message');
+                        const loggerCell = row.querySelector('.json-logger');
+                        const originalMessage = jsonLogs[row.getAttribute('data-log-index')]?.message || '';
+                        const originalLogger = jsonLogs[row.getAttribute('data-log-index')]?.logger || '';
+
+                        const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
+                        if (messageCell) messageCell.innerHTML = escapeHtml(originalMessage).replace(regex, '<mark>$1</mark>');
+                        if (loggerCell) loggerCell.innerHTML = escapeHtml(originalLogger).replace(regex, '<mark>$1</mark>');
+                    }
+                } else {
+                    row.classList.add('hidden');
+                }
+            });
+
+            if (searchTerm) {
+                document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${visibleCount} of ${jsonLogs.length} logs</span>`;
+            } else {
+                document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${jsonLogs.length} logs found</span>`;
+            }
+        }
+
+        function exportJSONLogs() {
+            if (jsonLogs.length === 0) {
+                showNotification('⚠️ No JSON logs to export');
+                return;
+            }
+
+            // Create CSV
+            let csv = 'Line Number,File,Timestamp,Logger,Message\n';
+
+            jsonLogs.forEach(log => {
+                const row = [
+                    log.lineNumber,
+                    `"${log.file.replace(/"/g, '""')}"`,
+                    `"${log.timestamp.replace(/"/g, '""')}"`,
+                    `"${log.logger.replace(/"/g, '""')}"`,
+                    `"${log.message.replace(/"/g, '""')}"`
+                ];
+                csv += row.join(',') + '\n';
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `json_logs_${Date.now()}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            showNotification(`✅ Exported ${jsonLogs.length} JSON logs`);
         }
 
         function exportFilteredResults() {
