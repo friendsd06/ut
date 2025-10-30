@@ -1241,6 +1241,154 @@
             background: #f8f9fa;
         }
 
+        .json-insights-panel {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .insight-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .insight-card-mini {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .insight-card-mini:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+        }
+
+        .insight-card-mini.error-card {
+            border-left: 4px solid #dc3545;
+        }
+
+        .insight-card-mini.warn-card {
+            border-left: 4px solid #ffc107;
+        }
+
+        .insight-card-mini.info-card {
+            border-left: 4px solid #17a2b8;
+        }
+
+        .insight-card-mini.time-card {
+            border-left: 4px solid #667eea;
+        }
+
+        .insight-card-mini.logger-card {
+            border-left: 4px solid #28a745;
+        }
+
+        .insight-icon {
+            font-size: 32px;
+            line-height: 1;
+        }
+
+        .insight-data {
+            flex: 1;
+        }
+
+        .insight-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #495057;
+            line-height: 1;
+            margin-bottom: 5px;
+        }
+
+        .insight-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .quick-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .quick-action-btn {
+            padding: 10px 20px;
+            border: 2px solid #e9ecef;
+            background: white;
+            color: #495057;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .quick-action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .quick-action-btn.error-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .quick-action-btn.warn-btn:hover {
+            background: #ffc107;
+            color: #000;
+            border-color: #ffc107;
+        }
+
+        .quick-action-btn.info-btn:hover {
+            background: #17a2b8;
+            color: white;
+            border-color: #17a2b8;
+        }
+
+        .json-level-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-right: 8px;
+        }
+
+        .json-level-badge.error {
+            background: #dc3545;
+            color: white;
+        }
+
+        .json-level-badge.warn {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .json-level-badge.info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .json-level-badge.debug {
+            background: #6c757d;
+            color: white;
+        }
+
         .debug-assistant {
             padding: 20px;
             height: calc(100vh - 250px);
@@ -2565,6 +2713,51 @@
                         <button class="analyze-btn" onclick="exportJSONLogs()" style="background: #28a745;">📥 Export</button>
                     </div>
                 </div>
+                <div class="json-insights-panel" id="jsonInsightsPanel" style="display: none;">
+                    <div class="insight-cards-grid">
+                        <div class="insight-card-mini error-card">
+                            <div class="insight-icon">❌</div>
+                            <div class="insight-data">
+                                <div class="insight-value" id="errorCount">0</div>
+                                <div class="insight-label">Errors</div>
+                            </div>
+                        </div>
+                        <div class="insight-card-mini warn-card">
+                            <div class="insight-icon">⚠️</div>
+                            <div class="insight-data">
+                                <div class="insight-value" id="warnCount">0</div>
+                                <div class="insight-label">Warnings</div>
+                            </div>
+                        </div>
+                        <div class="insight-card-mini info-card">
+                            <div class="insight-icon">ℹ️</div>
+                            <div class="insight-data">
+                                <div class="insight-value" id="infoCount">0</div>
+                                <div class="insight-label">Info</div>
+                            </div>
+                        </div>
+                        <div class="insight-card-mini time-card">
+                            <div class="insight-icon">⏱️</div>
+                            <div class="insight-data">
+                                <div class="insight-value" id="timeSpan">-</div>
+                                <div class="insight-label">Time Span</div>
+                            </div>
+                        </div>
+                        <div class="insight-card-mini logger-card">
+                            <div class="insight-icon">🎯</div>
+                            <div class="insight-data">
+                                <div class="insight-value" id="topLogger">-</div>
+                                <div class="insight-label">Most Active</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="quick-actions">
+                        <button class="quick-action-btn error-btn" onclick="filterJSONByLevel('error')">❌ Errors Only</button>
+                        <button class="quick-action-btn warn-btn" onclick="filterJSONByLevel('warn')">⚠️ Warnings Only</button>
+                        <button class="quick-action-btn info-btn" onclick="filterJSONByLevel('info')">ℹ️ Info Only</button>
+                        <button class="quick-action-btn" onclick="filterJSONByLevel('all')">🔄 Show All</button>
+                    </div>
+                </div>
                 <div class="json-controls">
                     <input type="text" id="jsonSearchBox" placeholder="🔍 Filter logs by message or logger..." oninput="filterJSONLogs()" class="json-search-input">
                     <select id="jsonSortOrder" onchange="sortJSONLogs()" class="json-sort-select">
@@ -2783,10 +2976,30 @@
                 extractLoggerInfo();
 
                 renderLogs();
+
+                // Re-extract data for active tab
                 if (currentTab === 'flow') {
                     renderFlowAnalysis();
                 } else if (currentTab === 'trace') {
                     renderTraceDiagram();
+                } else if (currentTab === 'sql') {
+                    // Re-extract SQL queries if SQL tab was already visited
+                    if (sqlQueries.length > 0) {
+                        extractSQLQueries();
+                    }
+                } else if (currentTab === 'json') {
+                    // Re-extract JSON logs if JSON tab was already visited
+                    if (jsonLogs.length > 0) {
+                        extractJSONLogs();
+                    }
+                }
+
+                // Also re-extract if user has visited these tabs before (even if not currently active)
+                if (currentTab !== 'sql' && sqlQueries.length > 0) {
+                    extractSQLQueries();
+                }
+                if (currentTab !== 'json' && jsonLogs.length > 0) {
+                    extractJSONLogs();
                 }
             };
 
@@ -5305,6 +5518,26 @@
                         let message = jsonObj.message || jsonObj.msg || jsonObj.text ||
                                     jsonObj.log || jsonObj.event || JSON.stringify(jsonObj);
 
+                        // Extract log level (try common field names)
+                        let level = jsonObj.level || jsonObj.loglevel || jsonObj.severity ||
+                                  jsonObj.priority || '';
+
+                        // Detect level from message or logger if not explicitly provided
+                        if (!level) {
+                            const combinedText = (message + ' ' + logger).toLowerCase();
+                            if (/error|exception|fatal|critical/.test(combinedText)) {
+                                level = 'ERROR';
+                            } else if (/warn|warning/.test(combinedText)) {
+                                level = 'WARN';
+                            } else if (/debug/.test(combinedText)) {
+                                level = 'DEBUG';
+                            } else {
+                                level = 'INFO';
+                            }
+                        } else {
+                            level = String(level).toUpperCase();
+                        }
+
                         // Convert timestamp to sortable format if it's a string
                         let sortableTimestamp = timestamp;
                         try {
@@ -5323,6 +5556,7 @@
                             sortableTimestamp: sortableTimestamp,
                             logger: logger,
                             message: message,
+                            level: level,
                             file: fileName,
                             fileKey: fileKey,
                             lineNumber: lineNumber + 1,
@@ -5338,12 +5572,103 @@
             // Sort by timestamp
             sortJSONLogs();
 
+            // Calculate insights
+            calculateJSONInsights();
+
             renderJSONLogs();
 
             if (jsonLogs.length > 0) {
                 showNotification(`✅ Parsed ${jsonLogs.length} JSON log entries`);
             } else {
                 showNotification('⚠️ No JSON logs found');
+            }
+        }
+
+        function calculateJSONInsights() {
+            if (jsonLogs.length === 0) {
+                document.getElementById('jsonInsightsPanel').style.display = 'none';
+                return;
+            }
+
+            document.getElementById('jsonInsightsPanel').style.display = 'block';
+
+            // Count by level
+            let errorCount = 0, warnCount = 0, infoCount = 0;
+            const loggerCounts = {};
+
+            jsonLogs.forEach(log => {
+                const level = log.level || 'INFO';
+                if (level === 'ERROR') errorCount++;
+                else if (level === 'WARN') warnCount++;
+                else infoCount++;
+
+                // Count logger occurrences
+                const simpleLogger = getSimpleClassName(log.logger);
+                loggerCounts[simpleLogger] = (loggerCounts[simpleLogger] || 0) + 1;
+            });
+
+            // Find most active logger
+            let topLogger = '-';
+            let maxCount = 0;
+            for (const [logger, count] of Object.entries(loggerCounts)) {
+                if (count > maxCount) {
+                    maxCount = count;
+                    topLogger = logger;
+                }
+            }
+
+            // Calculate time span
+            let timeSpan = '-';
+            if (jsonLogs.length > 1) {
+                const times = jsonLogs.map(log => log.sortableTimestamp).filter(t => t && t !== 0);
+                if (times.length > 1) {
+                    const minTime = Math.min(...times);
+                    const maxTime = Math.max(...times);
+                    const diffMs = maxTime - minTime;
+
+                    if (diffMs < 60000) {
+                        timeSpan = Math.round(diffMs / 1000) + 's';
+                    } else if (diffMs < 3600000) {
+                        timeSpan = Math.round(diffMs / 60000) + 'm';
+                    } else {
+                        timeSpan = Math.round(diffMs / 3600000) + 'h';
+                    }
+                }
+            }
+
+            // Update UI
+            document.getElementById('errorCount').textContent = errorCount;
+            document.getElementById('warnCount').textContent = warnCount;
+            document.getElementById('infoCount').textContent = infoCount;
+            document.getElementById('timeSpan').textContent = timeSpan;
+            document.getElementById('topLogger').textContent = topLogger;
+        }
+
+        function filterJSONByLevel(level) {
+            document.querySelectorAll('.json-table tbody tr').forEach(row => {
+                const logIndex = row.getAttribute('data-log-index');
+                const log = jsonLogs[logIndex];
+
+                if (!log) return;
+
+                if (level === 'all') {
+                    row.classList.remove('hidden');
+                } else {
+                    const logLevel = (log.level || 'INFO').toLowerCase();
+                    if (logLevel === level) {
+                        row.classList.remove('hidden');
+                    } else {
+                        row.classList.add('hidden');
+                    }
+                }
+            });
+
+            // Update stats
+            const visibleRows = document.querySelectorAll('.json-table tbody tr:not(.hidden)').length;
+            if (level === 'all') {
+                document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${jsonLogs.length} logs found</span>`;
+            } else {
+                document.getElementById('jsonStats').innerHTML = `<span class="stat-badge">${visibleRows} ${level.toUpperCase()} logs</span>`;
             }
         }
 
@@ -5408,10 +5733,11 @@
                     <thead>
                         <tr>
                             <th style="width: 50px;">#</th>
-                            <th style="width: 140px;">File</th>
-                            <th style="width: 180px;">Timestamp</th>
-                            <th style="width: 150px;">Logger</th>
-                            <th style="width: auto; min-width: 600px;">Message</th>
+                            <th style="width: 80px;">Level</th>
+                            <th style="width: 130px;">File</th>
+                            <th style="width: 170px;">Timestamp</th>
+                            <th style="width: 140px;">Logger</th>
+                            <th style="width: auto; min-width: 550px;">Message</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5420,12 +5746,15 @@
             jsonLogs.forEach((log, index) => {
                 const fileBadgeClass = log.fileKey === 'file1' ? 'json-file-badge' : 'json-file-badge file2';
                 const simpleLogger = getSimpleClassName(log.logger);
+                const level = log.level || 'INFO';
+                const levelClass = level.toLowerCase();
 
                 tableHTML += `
                     <tr data-log-index="${index}" data-timestamp="${log.sortableTimestamp}"
                         data-logger="${escapeHtml(log.logger.toLowerCase())}"
                         data-message="${escapeHtml(log.message.toLowerCase())}">
                         <td class="json-line-number">${log.lineNumber}</td>
+                        <td><span class="json-level-badge ${levelClass}">${level}</span></td>
                         <td><span class="${fileBadgeClass}" title="${escapeHtml(log.file)}">${escapeHtml(log.file)}</span></td>
                         <td class="json-timestamp">${escapeHtml(String(log.timestamp))}</td>
                         <td class="json-logger" title="Full: ${escapeHtml(log.logger)}">${escapeHtml(simpleLogger)}</td>
