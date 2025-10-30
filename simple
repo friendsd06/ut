@@ -805,6 +805,12 @@
             margin: 0;
         }
 
+        .sql-view-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
         .sql-search {
             display: flex;
             gap: 15px;
@@ -833,9 +839,11 @@
         }
 
         .sql-content {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
+            display: block;
+        }
+
+        .sql-content > .sql-query-card {
+            margin-bottom: 15px;
         }
 
         .sql-query-card {
@@ -923,6 +931,100 @@
 
         .sql-copy-btn:hover {
             background: #5568d3;
+        }
+
+        .sql-logger-info {
+            padding: 10px 16px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sql-logger-label {
+            font-weight: 600;
+            color: #6c757d;
+        }
+
+        .sql-logger-name {
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .sql-parameters {
+            padding: 12px 16px;
+            background: #fff3cd;
+            border-top: 1px solid #ffc107;
+            font-size: 13px;
+        }
+
+        .sql-parameters strong {
+            color: #856404;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .sql-param-item {
+            padding: 4px 0;
+            padding-left: 16px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            border-left: 2px solid #ffc107;
+            margin-bottom: 4px;
+        }
+
+        .sql-param-name {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .sql-param-value {
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .sql-param-type {
+            color: #6c757d;
+            font-size: 11px;
+        }
+
+        .sql-file-section {
+            margin-bottom: 30px;
+        }
+
+        .sql-file-header {
+            font-size: 20px;
+            font-weight: 600;
+            padding: 15px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .sql-side-by-side {
+            display: flex;
+            gap: 20px;
+        }
+
+        .sql-panel {
+            flex: 1;
+            min-width: 48%;
+        }
+
+        .sql-panel-header {
+            font-size: 18px;
+            font-weight: 600;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
 
         .debug-assistant {
@@ -2247,6 +2349,11 @@
                         <button class="analyze-btn" onclick="extractSQLQueries()">🔍 Extract SQL</button>
                         <button class="analyze-btn" onclick="exportSQLQueries()" style="background: #28a745;">📥 Export SQL</button>
                     </div>
+                </div>
+                <div class="sql-view-toggle">
+                    <button class="view-btn active" onclick="setSQLViewMode('combined')">📊 Combined View</button>
+                    <button class="view-btn" onclick="setSQLViewMode('separate')">📄 Separate Files</button>
+                    <button class="view-btn" onclick="setSQLViewMode('side-by-side')">⬌ Side-by-Side</button>
                 </div>
                 <div class="sql-search">
                     <input type="text" id="sqlSearchBox" placeholder="🔍 Search in SQL queries..." oninput="filterSQLQueries()">
@@ -4581,6 +4688,7 @@
         }
 
         let sqlQueries = [];
+        let sqlViewMode = 'combined'; // 'combined', 'separate', 'side-by-side'
 
         function extractSQLQueries() {
             sqlQueries = [];
@@ -4591,6 +4699,22 @@
                 const fileName = logData[fileKey].name;
 
                 logData[fileKey].lines.forEach((line, lineNumber) => {
+                    // Extract logger name
+                    let logger = '';
+                    const loggerPatterns = [
+                        /\[([a-zA-Z0-9\._]+)\]/,  // [com.example.Service]
+                        /\s([a-z]+\.[a-z]+\.[A-Z][a-zA-Z0-9]*)/,  // package.Class
+                        /-\s([A-Z][a-zA-Z0-9]*(?:Controller|Service|Repository|DAO|Mapper))/,  // ServiceName
+                    ];
+
+                    for (const pattern of loggerPatterns) {
+                        const match = line.match(pattern);
+                        if (match && match[1]) {
+                            logger = match[1];
+                            break;
+                        }
+                    }
+
                     // SQL query patterns to detect
                     const sqlPatterns = [
                         // Hibernate/JPA style
@@ -4616,6 +4740,9 @@
                                 .replace(/\s+/g, ' ') // Normalize whitespace
                                 .trim();
 
+                            // Extract parameters
+                            const parameters = extractParameters(line, query);
+
                             // Only keep queries that look valid
                             if (query.length > 15 && /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)/i.test(query)) {
                                 const queryType = query.match(/^(\w+)/i)[1].toUpperCase();
@@ -4626,7 +4753,9 @@
                                     file: fileName,
                                     fileKey: fileKey,
                                     lineNumber: lineNumber + 1,
-                                    originalLine: line
+                                    originalLine: line,
+                                    logger: logger || 'Unknown',
+                                    parameters: parameters
                                 });
                             }
                         }
@@ -4634,19 +4763,7 @@
                 });
             });
 
-            // Remove duplicates
-            const uniqueQueries = [];
-            const seen = new Set();
-
-            sqlQueries.forEach(q => {
-                const key = q.query.toLowerCase();
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    uniqueQueries.push(q);
-                }
-            });
-
-            sqlQueries = uniqueQueries;
+            // Don't remove duplicates - keep all instances to show parameter variations
 
             renderSQLQueries();
 
@@ -4655,6 +4772,60 @@
             } else {
                 showNotification('⚠️ No SQL queries found in logs');
             }
+        }
+
+        function extractParameters(line, query) {
+            const parameters = [];
+
+            // Look for parameter patterns after the query
+            const paramPatterns = [
+                // binding parameter [1] as [VARCHAR] - [value]
+                /binding parameter \[(\d+)\] as \[([^\]]+)\] - \[([^\]]+)\]/gi,
+                // Parameters: [value1, value2, value3]
+                /Parameters?:\s*\[([^\]]+)\]/gi,
+                // param1=value1, param2=value2
+                /(\w+)\s*=\s*(['"]?)([^,\s'"]+)\2/g,
+                // ? = value (for prepared statements)
+                /\?\s*=\s*(['"]?)([^,\s'"]+)\1/g
+            ];
+
+            paramPatterns.forEach(pattern => {
+                const matches = line.matchAll(pattern);
+                for (const match of matches) {
+                    if (match[1] && match[3]) {
+                        // Pattern: binding parameter [1] as [VARCHAR] - [value]
+                        parameters.push({
+                            name: `param${match[1]}`,
+                            type: match[2],
+                            value: match[3]
+                        });
+                    } else if (match[1]) {
+                        // Pattern: Parameters: [value1, value2, value3]
+                        const values = match[1].split(',').map(v => v.trim());
+                        values.forEach((val, idx) => {
+                            parameters.push({
+                                name: `param${idx + 1}`,
+                                type: 'unknown',
+                                value: val
+                            });
+                        });
+                    }
+                }
+            });
+
+            return parameters;
+        }
+
+        function setSQLViewMode(mode) {
+            sqlViewMode = mode;
+
+            // Update active button
+            document.querySelectorAll('.sql-view-toggle .view-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            renderSQLQueries();
         }
 
         function renderSQLQueries() {
@@ -4676,32 +4847,113 @@
 
             container.innerHTML = '';
 
-            sqlQueries.forEach((sqlData, index) => {
-                const card = document.createElement('div');
-                card.className = 'sql-query-card';
-                card.setAttribute('data-query-index', index);
-                card.setAttribute('data-query', sqlData.query.toLowerCase());
-
-                card.innerHTML = `
-                    <div class="sql-query-header">
-                        <div>
-                            <span class="sql-query-type">${sqlData.type}</span>
-                        </div>
-                        <div class="sql-query-source">
-                            📄 ${sqlData.file} : Line ${sqlData.lineNumber}
-                        </div>
-                    </div>
-                    <div class="sql-query-body">${escapeHtml(sqlData.query)}</div>
-                    <div class="sql-query-footer">
-                        <span>Query #${index + 1}</span>
-                        <button class="sql-copy-btn" onclick="copySQLQuery(${index})">📋 Copy</button>
-                    </div>
-                `;
-
-                container.appendChild(card);
-            });
+            if (sqlViewMode === 'side-by-side') {
+                renderSideBySideView(container);
+            } else if (sqlViewMode === 'separate') {
+                renderSeparateView(container);
+            } else {
+                renderCombinedView(container);
+            }
 
             document.getElementById('sqlStats').innerHTML = `<span class="stat-badge">${sqlQueries.length} queries found</span>`;
+        }
+
+        function renderCombinedView(container) {
+            sqlQueries.forEach((sqlData, index) => {
+                const card = createSQLCard(sqlData, index);
+                container.appendChild(card);
+            });
+        }
+
+        function renderSeparateView(container) {
+            const file1Queries = sqlQueries.filter(q => q.fileKey === 'file1');
+            const file2Queries = sqlQueries.filter(q => q.fileKey === 'file2');
+
+            if (file1Queries.length > 0) {
+                const section = document.createElement('div');
+                section.className = 'sql-file-section';
+                section.innerHTML = `<h3 class="sql-file-header">📄 ${file1Queries[0].file} (${file1Queries.length} queries)</h3>`;
+                file1Queries.forEach((sqlData, index) => {
+                    section.appendChild(createSQLCard(sqlData, index));
+                });
+                container.appendChild(section);
+            }
+
+            if (file2Queries.length > 0) {
+                const section = document.createElement('div');
+                section.className = 'sql-file-section';
+                section.innerHTML = `<h3 class="sql-file-header">📄 ${file2Queries[0].file} (${file2Queries.length} queries)</h3>`;
+                file2Queries.forEach((sqlData, index) => {
+                    section.appendChild(createSQLCard(sqlData, file1Queries.length + index));
+                });
+                container.appendChild(section);
+            }
+        }
+
+        function renderSideBySideView(container) {
+            const file1Queries = sqlQueries.filter(q => q.fileKey === 'file1');
+            const file2Queries = sqlQueries.filter(q => q.fileKey === 'file2');
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'sql-side-by-side';
+
+            const leftPanel = document.createElement('div');
+            leftPanel.className = 'sql-panel';
+            leftPanel.innerHTML = `<h3 class="sql-panel-header">📄 ${file1Queries[0]?.file || 'File 1'} (${file1Queries.length} queries)</h3>`;
+            file1Queries.forEach((sqlData, index) => {
+                leftPanel.appendChild(createSQLCard(sqlData, index));
+            });
+
+            const rightPanel = document.createElement('div');
+            rightPanel.className = 'sql-panel';
+            rightPanel.innerHTML = `<h3 class="sql-panel-header">📄 ${file2Queries[0]?.file || 'File 2'} (${file2Queries.length} queries)</h3>`;
+            file2Queries.forEach((sqlData, index) => {
+                rightPanel.appendChild(createSQLCard(sqlData, file1Queries.length + index));
+            });
+
+            wrapper.appendChild(leftPanel);
+            wrapper.appendChild(rightPanel);
+            container.appendChild(wrapper);
+        }
+
+        function createSQLCard(sqlData, index) {
+            const card = document.createElement('div');
+            card.className = 'sql-query-card';
+            card.setAttribute('data-query-index', index);
+            card.setAttribute('data-query', sqlData.query.toLowerCase());
+            card.setAttribute('data-file-key', sqlData.fileKey);
+
+            let parametersHtml = '';
+            if (sqlData.parameters && sqlData.parameters.length > 0) {
+                parametersHtml = '<div class="sql-parameters"><strong>🔹 Parameters:</strong><br>';
+                sqlData.parameters.forEach(param => {
+                    parametersHtml += `<div class="sql-param-item"><span class="sql-param-name">${param.name}</span>: <span class="sql-param-value">${escapeHtml(param.value)}</span> <span class="sql-param-type">(${param.type})</span></div>`;
+                });
+                parametersHtml += '</div>';
+            }
+
+            card.innerHTML = `
+                <div class="sql-query-header">
+                    <div>
+                        <span class="sql-query-type">${sqlData.type}</span>
+                    </div>
+                    <div class="sql-query-source">
+                        📄 ${sqlData.file} : Line ${sqlData.lineNumber}
+                    </div>
+                </div>
+                <div class="sql-logger-info">
+                    <span class="sql-logger-label">🎯 Logger:</span>
+                    <span class="sql-logger-name">${sqlData.logger}</span>
+                </div>
+                <div class="sql-query-body">${escapeHtml(sqlData.query)}</div>
+                ${parametersHtml}
+                <div class="sql-query-footer">
+                    <span>Query #${index + 1}</span>
+                    <button class="sql-copy-btn" onclick="copySQLQuery(${index})">📋 Copy Query</button>
+                </div>
+            `;
+
+            return card;
         }
 
         function filterSQLQueries() {
