@@ -1,29 +1,400 @@
-Subject: New Tool for FMTT Project - Universal Log Viewer Saves Hours of Manual Analysis
+package com.example.aspect;
 
-Hi Team,
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.mapping.ParameterMapping;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-I have built a new tool for FMTT project that will significantly reduce our log analysis time from hours to minutes.
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 
-Universal Log Viewer - A browser-based tool with automated log analysis capabilities:
+/**
+ * Aspect for logging executable SQL queries from MyBatis mappers
+ * Only intercepts MyBatis mapper interface methods
+ */
+@Aspect
+public class SqlLoggingAspect {
 
-EASY SETUP: I have created a batch script that downloads recent logs directly from the server. Simply run the script, then drag and drop the log files into the browser. No installation or setup required.
+    private static final Logger log = LoggerFactory.getLogger(SqlLoggingAspect.class);
+    
+    private final SqlSessionFactory sqlSessionFactory;
 
-INSTANT INSIGHTS: The tool automatically scans logs and shows error counts, warning counts, time duration, and identifies which components are logging the most. This eliminates manual searching through thousands of lines.
+    public SqlLoggingAspect(SqlSessionFactory sqlSessionFactory) {
+        this.sqlSessionFactory = sqlSessionFactory;
+    }
 
-TIME SAVINGS: What previously took 2-3 hours of manually searching through logs now takes 5 minutes. One click on "Errors Only" button instantly shows all problems. Compare two log files side by side to find differences quickly.
+    /**
+     * Intercepts only MyBatis mapper methods
+     * This ensures general service/controller methods are not intercepted
+     */
+    @Around("@within(org.apache.ibatis.annotations.Mapper) || " +
+            "@annotation(org.apache.ibatis.annotations.Select) || " +
+            "@annotation(org.apache.ibatis.annotations.Insert) || " +
+            "@annotation(org.apache.ibatis.annotations.Update) || " +
+            "@annotation(org.apache.ibatis.annotations.Delete) || " +
+            "@annotation(org.apache.ibatis.annotations.SelectProvider) || " +
+            "@annotation(org.apache.ibatis.annotations.InsertProvider) || " +
+            "@annotation(org.apache.ibatis.annotations.UpdateProvider) || " +
+            "@annotation(org.apache.ibatis.annotations.DeleteProvider)")
+    public Object logExecutableSql(ProceedingJoinPoint joinPoint) throws Throwable {
+        try {
+            String executableSql = extractExecutableSql(joinPoint);
+            if (executableSql != null) {
+                log.info("\n[EXECUTABLE SQL] {}\n", executableSql);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to extract executable SQL: {}", e.getMessage());
+        }
+        
+        return joinPoint.proceed();
+    }
 
-JSON LOG ANALYSIS: For our JSON format logs, the tool displays data in clean tables sorted by timestamp. It shows log levels with color codes and calculates statistics automatically. Perfect for production issue debugging.
+    /**
+     * Extracts executable SQL with all parameters replaced
+     */
+    private String extractExecutableSql(ProceedingJoinPoint joinPoint) {
+        try {
+            MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+            String className = signature.getDeclaringType().getName();
+            String methodName = signature.getName();
+            String statementId = className + "." + methodName;
 
-SQL QUERY TRACKING: Automatically extracts all SQL queries from logs with their parameters and execution context. Helps identify slow queries and database issues without manual grep commands.
+            Configuration configuration = sqlSessionFactory.getConfiguration();
+            MappedStatement mappedStatement = configuration.getMappedStatement(statementId);
 
-SMART FILTERING: Search any text and it highlights matches instantly. Hide noisy framework logs. Filter by error, warning, or info levels. Export filtered results to share with team.
+            Object parameterObject = buildParameterObject(joinPoint.getArgs());
+            BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
 
-PROVEN RESULTS: Already tested on FMTT production logs. Reduced incident response time by 70 percent. Helped identify root cause in recent database timeout issue within 10 minutes instead of usual 2 hours.
+            String sql = boundSql.getSql();
+            List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+            
+            return replacePlaceholders(sql, parameterMappings, parameterObject);
 
-The tool works completely offline in your browser. All log data stays on your machine. The batch script and HTML file are ready to use.
+        } catch (Exception e) {
+            log.debug("Could not extract SQL", e);
+            return null;
+        }
+    }
 
-Location: Will share the file path and quick start guide separately.
+    /**
+     * Builds parameter object from method arguments
+     */
+    private Object buildParameterObject(Object[] args) {
+        if (args == null || args.length == 0) {
+            return null;
+        }
+        
+        if (args.length == 1) {
+            return args[0];
+        }
+        
+        // Multiple parameters
+        Map<String, Object> paramMap = new HashMap<>();
+        for (int i = 0; i < args.length; i++) {
+            paramMap.put("param" + (i + 1), args[i]);
+            paramMap.put("arg" + i, args[i]);
+        }
+        return paramMap;
+    }
 
-This will be especially helpful during production incidents and daily log monitoring for FMTT project.
+    /**
+     * Replaces ? placeholders with actual values
+     */
+    private String replacePlaceholders(String sql, 
+                                       List<ParameterMapping> parameterMappings, 
+                                       Object parameterObject) {
+        
+        if (parameterMappings == null || parameterMappings.isEmpty()) {
+            return cleanSql(sql);
+        }
 
-Let me know if you need any help getting started.
+        String result = sql;
+        
+        for (ParameterMapping parameterMapping : parameterMappings) {
+            String propertyName = parameterMapping.getProperty();
+            Object value = getParameterValue(propertyName, parameterObject);
+            String formattedValue = formatValue(value);
+            result = result.replaceFirst("\\?", formattedValue);
+        }
+
+        return cleanSql(result);
+    }
+
+    /**
+     * Extracts parameter value from parameter object
+     */
+    private Object getParameterValue(String propertyName, Object parameterObject) {
+        if (parameterObject == null) {
+            return null;
+        }
+
+        try {
+            // Map parameters
+            if (parameterObject instanceof Map) {
+                return ((Map<?, ?>) parameterObject).get(propertyName);
+            }
+
+            // Nested properties (user.name)
+            if (propertyName.contains(".")) {
+                return getNestedValue(propertyName, parameterObject);
+            }
+
+            // Field access
+            Field field = findField(parameterObject.getClass(), propertyName);
+            if (field != null) {
+                field.setAccessible(true);
+                return field.get(parameterObject);
+            }
+
+            // Getter method
+            String getterName = "get" + propertyName.substring(0, 1).toUpperCase() + propertyName.substring(1);
+            return parameterObject.getClass().getMethod(getterName).invoke(parameterObject);
+
+        } catch (Exception e) {
+            log.debug("Could not get value for: {}", propertyName);
+            return null;
+        }
+    }
+
+    /**
+     * Gets nested property value
+     */
+    private Object getNestedValue(String propertyPath, Object obj) throws Exception {
+        String[] parts = propertyPath.split("\\.");
+        Object current = obj;
+        
+        for (String part : parts) {
+            if (current == null) return null;
+            
+            if (current instanceof Map) {
+                current = ((Map<?, ?>) current).get(part);
+            } else {
+                Field field = findField(current.getClass(), part);
+                if (field != null) {
+                    field.setAccessible(true);
+                    current = field.get(current);
+                } else {
+                    String getterName = "get" + part.substring(0, 1).toUpperCase() + part.substring(1);
+                    current = current.getClass().getMethod(getterName).invoke(current);
+                }
+            }
+        }
+        
+        return current;
+    }
+
+    /**
+     * Finds field in class hierarchy
+     */
+    private Field findField(Class<?> clazz, String fieldName) {
+        while (clazz != null && clazz != Object.class) {
+            try {
+                return clazz.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Formats value for SQL - HANDLES ALL DATA TYPES
+     */
+    private String formatValue(Object value) {
+        if (value == null) {
+            return "NULL";
+        }
+
+        // String
+        if (value instanceof String) {
+            return "'" + escapeSql((String) value) + "'";
+        }
+
+        // Character
+        if (value instanceof Character) {
+            return "'" + escapeSql(value.toString()) + "'";
+        }
+
+        // Boolean
+        if (value instanceof Boolean) {
+            return ((Boolean) value) ? "TRUE" : "FALSE";
+        }
+
+        // Byte, Short, Integer, Long
+        if (value instanceof Byte || value instanceof Short || 
+            value instanceof Integer || value instanceof Long) {
+            return value.toString();
+        }
+
+        // Float, Double
+        if (value instanceof Float || value instanceof Double) {
+            return value.toString();
+        }
+
+        // BigDecimal, BigInteger
+        if (value instanceof BigDecimal || value instanceof BigInteger) {
+            return value.toString();
+        }
+
+        // java.util.Date
+        if (value instanceof java.util.Date) {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            return "'" + sdf.format((java.util.Date) value) + "'";
+        }
+
+        // java.sql.Date
+        if (value instanceof java.sql.Date) {
+            return "'" + value.toString() + "'";
+        }
+
+        // java.sql.Time
+        if (value instanceof java.sql.Time) {
+            return "'" + value.toString() + "'";
+        }
+
+        // java.sql.Timestamp
+        if (value instanceof Timestamp) {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+            return "'" + sdf.format((Timestamp) value) + "'";
+        }
+
+        // LocalDate
+        if (value instanceof LocalDate) {
+            return "'" + ((LocalDate) value).format(DateTimeFormatter.ISO_LOCAL_DATE) + "'";
+        }
+
+        // LocalTime
+        if (value instanceof LocalTime) {
+            return "'" + ((LocalTime) value).format(DateTimeFormatter.ISO_LOCAL_TIME) + "'";
+        }
+
+        // LocalDateTime
+        if (value instanceof LocalDateTime) {
+            return "'" + ((LocalDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
+        }
+
+        // ZonedDateTime
+        if (value instanceof ZonedDateTime) {
+            return "'" + ((ZonedDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
+        }
+
+        // Instant
+        if (value instanceof Instant) {
+            return "'" + ((Instant) value).toString() + "'";
+        }
+
+        // OffsetDateTime
+        if (value instanceof OffsetDateTime) {
+            return "'" + ((OffsetDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "'";
+        }
+
+        // byte[] (binary data)
+        if (value instanceof byte[]) {
+            return "0x" + bytesToHex((byte[]) value);
+        }
+
+        // UUID
+        if (value instanceof UUID) {
+            return "'" + value.toString() + "'";
+        }
+
+        // Enum
+        if (value instanceof Enum) {
+            return "'" + ((Enum<?>) value).name() + "'";
+        }
+
+        // Collection (for IN clause)
+        if (value instanceof Collection) {
+            Collection<?> collection = (Collection<?>) value;
+            if (collection.isEmpty()) {
+                return "()";
+            }
+            StringBuilder sb = new StringBuilder("(");
+            int i = 0;
+            for (Object item : collection) {
+                if (i++ > 0) sb.append(", ");
+                sb.append(formatValue(item));
+            }
+            sb.append(")");
+            return sb.toString();
+        }
+
+        // Array
+        if (value.getClass().isArray()) {
+            List<Object> list = new ArrayList<>();
+            if (value instanceof Object[]) {
+                list.addAll(Arrays.asList((Object[]) value));
+            } else {
+                // Primitive arrays
+                int length = java.lang.reflect.Array.getLength(value);
+                for (int i = 0; i < length; i++) {
+                    list.add(java.lang.reflect.Array.get(value, i));
+                }
+            }
+            return formatValue(list);
+        }
+
+        // Default: treat as string
+        return "'" + escapeSql(value.toString()) + "'";
+    }
+
+    /**
+     * Escapes single quotes in SQL strings
+     */
+    private String escapeSql(String str) {
+        if (str == null) return "";
+        return str.replace("'", "''");
+    }
+
+    /**
+     * Converts byte array to hex string
+     */
+    private String bytesToHex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+        }
+        // Limit output for large binary data
+        return sb.length() > 100 ? sb.substring(0, 100) + "..." : sb.toString();
+    }
+
+    /**
+     * Cleans SQL formatting
+     */
+    private String cleanSql(String sql) {
+        return sql.replaceAll("\\s+", " ").trim();
+    }
+}
+------------
+
+package com.example.config;
+
+import com.example.aspect.SqlLoggingAspect;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.EnableAspectJAutoProxy;
+
+@Configuration
+@EnableAspectJAutoProxy
+public class SqlLoggingAspectConfig {
+
+    @Bean
+    public SqlLoggingAspect sqlLoggingAspect(SqlSessionFactory sqlSessionFactory) {
+        return new SqlLoggingAspect(sqlSessionFactory);
+    }
+}
