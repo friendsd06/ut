@@ -1,548 +1,309 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Request Status Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+{
+  "title": "Request Status Dashboard",
+  "description": "Track request phases and adjustment types",
+  "widgets": [
+    {
+      "id": 1,
+      "definition": {
+        "title": "Pending",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:pending cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#c05621"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "timeseries_background": {
+          "type": "area"
         }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px;
-            color: #333;
-            min-height: 100vh;
-        }
-
-        .dashboard-container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .dashboard-header {
-            background: white;
-            padding: 25px 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-
-        .dashboard-header h1 {
-            color: #2d3748;
-            font-size: 28px;
-            margin-bottom: 10px;
-        }
-
-        .dashboard-header p {
-            color: #718096;
-            font-size: 14px;
-        }
-
-        .filters-section {
-            background: white;
-            padding: 20px 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .filter-group label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #4a5568;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .filter-group select,
-        .filter-group input {
-            padding: 10px 14px;
-            border: 1px solid #cbd5e0;
-            border-radius: 6px;
-            font-size: 14px;
-            background: white;
-            color: #2d3748;
-            min-width: 180px;
-        }
-
-        .filter-group input[type="date"] {
-            min-width: 200px;
-        }
-
-        .filter-group select:focus,
-        .filter-group input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .btn-search {
-            padding: 12px 30px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.3s;
-            margin-left: auto;
-            margin-top: 20px;
-        }
-
-        .btn-search:hover {
-            background: #5568d3;
-        }
-
-        .btn-search:active {
-            transform: scale(0.98);
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            background: white;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-        }
-
-        .stat-card h3 {
-            font-size: 14px;
-            color: #718096;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-            font-size: 36px;
-            font-weight: 700;
-            margin-bottom: 5px;
-        }
-
-        .stat-change {
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .stat-change.positive {
-            color: #48bb78;
-        }
-
-        .stat-change.negative {
-            color: #f56565;
-        }
-
-        .stat-card.pending .stat-value { color: #ed8936; }
-        .stat-card.in-progress .stat-value { color: #4299e1; }
-        .stat-card.completed .stat-value { color: #48bb78; }
-        .stat-card.failed .stat-value { color: #f56565; }
-
-        .table-section {
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-
-        .table-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .table-section h3 {
-            font-size: 20px;
-            color: #2d3748;
-            font-weight: 600;
-        }
-
-        .record-count {
-            font-size: 14px;
-            color: #718096;
-            background: #f7fafc;
-            padding: 6px 14px;
-            border-radius: 6px;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        thead {
-            background: #f7fafc;
-        }
-
-        th {
-            padding: 15px;
-            text-align: left;
-            font-size: 13px;
-            font-weight: 700;
-            color: #4a5568;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 2px solid #e2e8f0;
-        }
-
-        td {
-            padding: 18px 15px;
-            border-bottom: 1px solid #e2e8f0;
-            font-size: 14px;
-            color: #2d3748;
-        }
-
-        tbody tr {
-            transition: background 0.2s;
-        }
-
-        tbody tr:hover {
-            background: #f7fafc;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 5px 14px;
-            border-radius: 14px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: capitalize;
-        }
-
-        .status-badge.pending {
-            background: #feebc8;
-            color: #c05621;
-        }
-
-        .status-badge.in-progress {
-            background: #bee3f8;
-            color: #2c5282;
-        }
-
-        .status-badge.completed {
-            background: #c6f6d5;
-            color: #22543d;
-        }
-
-        .status-badge.failed {
-            background: #fed7d7;
-            color: #c53030;
-        }
-
-        @media (max-width: 768px) {
-            .filters-section {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .btn-search {
-                margin-left: 0;
-                width: 100%;
-            }
-
-            .filter-group select,
-            .filter-group input {
-                width: 100%;
-                min-width: 100%;
-            }
-
-            .table-wrapper {
-                overflow-x: scroll;
-            }
-
-            table {
-                min-width: 700px;
-            }
-        }
-
-        .no-data {
-            text-align: center;
-            padding: 60px 20px;
-            color: #a0aec0;
-            font-size: 16px;
-        }
-
-        .btn-export {
-            padding: 8px 16px;
-            background: #48bb78;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-
-        .btn-export:hover {
-            background: #38a169;
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard-container">
-        <!-- Header -->
-        <div class="dashboard-header">
-            <h1>Request Status Dashboard</h1>
-            <p>Track request phases and adjustment types</p>
-        </div>
-
-        <!-- Filters Section -->
-        <div class="filters-section">
-            <div class="filter-group">
-                <label>COB Date</label>
-                <input type="date" id="cobDate" value="2024-11-14">
-            </div>
-            <div class="filter-group">
-                <label>Request ID</label>
-                <input type="text" id="requestId" placeholder="Enter Request ID">
-            </div>
-            <div class="filter-group">
-                <label>Status</label>
-                <select id="statusFilter">
-                    <option value="">All Statuses</option>
-                    <option value="pending">Pending</option>
-                    <option value="in-progress">In Progress</option>
-                    <option value="completed">Completed</option>
-                    <option value="failed">Failed</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Phase</label>
-                <select id="phaseFilter">
-                    <option value="">All Phases</option>
-                    <option value="phase1">Phase 1: Initial Review</option>
-                    <option value="phase2">Phase 2: Validation</option>
-                    <option value="phase3">Phase 3: Processing</option>
-                    <option value="phase4">Phase 4: Finalized</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Adjustment Type</label>
-                <select id="adjustmentFilter">
-                    <option value="">All Types</option>
-                    <option value="rate">Rate Adjustment</option>
-                    <option value="type">Type Adjustment</option>
-                    <option value="manual">Manual Override</option>
-                </select>
-            </div>
-            <button class="btn-search" onclick="searchRequests()">Search</button>
-        </div>
-
-        <!-- Stats Grid -->
-        <div class="stats-grid">
-            <div class="stat-card pending">
-                <h3>Pending</h3>
-                <div class="stat-value">142</div>
-                <div class="stat-change positive">↑ 12% from previous COB</div>
-            </div>
-            <div class="stat-card in-progress">
-                <h3>In Progress</h3>
-                <div class="stat-value">87</div>
-                <div class="stat-change negative">↓ 5% from previous COB</div>
-            </div>
-            <div class="stat-card completed">
-                <h3>Completed</h3>
-                <div class="stat-value">1,245</div>
-                <div class="stat-change positive">↑ 18% from previous COB</div>
-            </div>
-            <div class="stat-card failed">
-                <h3>Failed</h3>
-                <div class="stat-value">23</div>
-                <div class="stat-change negative">↑ 3% from previous COB</div>
-            </div>
-        </div>
-
-        <!-- Request Phase Details Table -->
-        <div class="table-section">
-            <div class="table-header">
-                <h3>Request Phase Details</h3>
-                <div>
-                    <span class="record-count">Total Records: 156</span>
-                    <button class="btn-export" onclick="exportData()" style="margin-left: 10px;">Export to CSV</button>
-                </div>
-            </div>
-            
-            <div class="table-wrapper">
-                <table id="requestTable">
-                    <thead>
-                        <tr>
-                            <th>Request ID</th>
-                            <th>Status</th>
-                            <th>Phase</th>
-                            <th>Adjustment Type</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>REQ-2024-10145</td>
-                            <td><span class="status-badge in-progress">In Progress</span></td>
-                            <td>Phase 2: Validation</td>
-                            <td>Rate Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10144</td>
-                            <td><span class="status-badge completed">Completed</span></td>
-                            <td>Phase 4: Finalized</td>
-                            <td>Type Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10143</td>
-                            <td><span class="status-badge pending">Pending</span></td>
-                            <td>Phase 1: Initial Review</td>
-                            <td>Manual Override</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10142</td>
-                            <td><span class="status-badge completed">Completed</span></td>
-                            <td>Phase 4: Finalized</td>
-                            <td>Rate Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10141</td>
-                            <td><span class="status-badge failed">Failed</span></td>
-                            <td>Phase 2: Validation</td>
-                            <td>Type Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10140</td>
-                            <td><span class="status-badge in-progress">In Progress</span></td>
-                            <td>Phase 3: Processing</td>
-                            <td>Rate Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10139</td>
-                            <td><span class="status-badge completed">Completed</span></td>
-                            <td>Phase 4: Finalized</td>
-                            <td>Manual Override</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10138</td>
-                            <td><span class="status-badge pending">Pending</span></td>
-                            <td>Phase 1: Initial Review</td>
-                            <td>Rate Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10137</td>
-                            <td><span class="status-badge in-progress">In Progress</span></td>
-                            <td>Phase 2: Validation</td>
-                            <td>Type Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10136</td>
-                            <td><span class="status-badge completed">Completed</span></td>
-                            <td>Phase 4: Finalized</td>
-                            <td>Rate Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10135</td>
-                            <td><span class="status-badge in-progress">In Progress</span></td>
-                            <td>Phase 3: Processing</td>
-                            <td>Manual Override</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10134</td>
-                            <td><span class="status-badge pending">Pending</span></td>
-                            <td>Phase 1: Initial Review</td>
-                            <td>Type Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10133</td>
-                            <td><span class="status-badge completed">Completed</span></td>
-                            <td>Phase 4: Finalized</td>
-                            <td>Rate Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10132</td>
-                            <td><span class="status-badge failed">Failed</span></td>
-                            <td>Phase 2: Validation</td>
-                            <td>Type Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td>REQ-2024-10131</td>
-                            <td><span class="status-badge in-progress">In Progress</span></td>
-                            <td>Phase 3: Processing</td>
-                            <td>Manual Override</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Search functionality
-        function searchRequests() {
-            const cobDate = document.getElementById('cobDate').value;
-            const requestId = document.getElementById('requestId').value;
-            const status = document.getElementById('statusFilter').value;
-            const phase = document.getElementById('phaseFilter').value;
-            const adjustment = document.getElementById('adjustmentFilter').value;
-
-            console.log('Searching with filters:', {
-                cobDate, requestId, status, phase, adjustment
-            });
-
-            alert(`Searching requests for COB Date: ${cobDate}\n\nIn real implementation, this would fetch data from your backend.`);
-        }
-
-        // Export functionality
-        function exportData() {
-            alert('Exporting data to CSV...\n\nIn real implementation, this would download a CSV file with all filtered records.');
-        }
-
-        // Make table rows clickable
-        document.querySelectorAll('#requestTable tbody tr').forEach(row => {
-            row.style.cursor = 'pointer';
-            row.addEventListener('click', function() {
-                const requestId = this.cells[0].textContent;
-                const status = this.cells[1].textContent.trim();
-                const phase = this.cells[2].textContent;
-                const adjustmentType = this.cells[3].textContent;
-                
-                alert(`Request Details:\n\nRequest ID: ${requestId}\nStatus: ${status}\nPhase: ${phase}\nAdjustment Type: ${adjustmentType}\n\nIn real implementation, this would open detailed view.`);
-            });
-        });
-
-        // Set today's date as default COB date
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('cobDate').value = today;
-    </script>
-</body>
-</html>
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 2,
+      "definition": {
+        "title": "In Progress",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:in-progress cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#2c5282"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 3,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 3,
+      "definition": {
+        "title": "Completed",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:completed cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#22543d"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 6,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 4,
+      "definition": {
+        "title": "Failed",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:failed cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#c53030"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 9,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 5,
+      "definition": {
+        "title": "Request Phase Details",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "list_stream",
+        "requests": [
+          {
+            "columns": [
+              {
+                "width": "auto",
+                "field": "@request_id"
+              },
+              {
+                "width": "auto",
+                "field": "@status"
+              },
+              {
+                "width": "auto",
+                "field": "@phase"
+              },
+              {
+                "width": "auto",
+                "field": "@adjustment_type"
+              }
+            ],
+            "query": {
+              "data_source": "logs_stream",
+              "query_string": "cob_date:$cob_date.value request_id:$request_id.value status:$status.value phase:$phase.value adjustment_type:$adjustment_type.value",
+              "indexes": [],
+              "storage": "hot"
+            },
+            "response_format": "event_list"
+          }
+        ],
+        "show_date_column": false,
+        "show_message_column": false
+      },
+      "layout": {
+        "x": 0,
+        "y": 2,
+        "width": 12,
+        "height": 6
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "cob_date",
+      "prefix": "cob_date",
+      "available_values": [],
+      "default": "*"
+    },
+    {
+      "name": "request_id",
+      "prefix": "request_id",
+      "available_values": [],
+      "default": "*"
+    },
+    {
+      "name": "status",
+      "prefix": "status",
+      "available_values": [
+        "pending",
+        "in-progress",
+        "completed",
+        "failed"
+      ],
+      "default": "*"
+    },
+    {
+      "name": "phase",
+      "prefix": "phase",
+      "available_values": [
+        "Phase 1: Initial Review",
+        "Phase 2: Validation",
+        "Phase 3: Processing",
+        "Phase 4: Finalized"
+      ],
+      "default": "*"
+    },
+    {
+      "name": "adjustment_type",
+      "prefix": "adjustment_type",
+      "available_values": [
+        "Rate Adjustment",
+        "Type Adjustment",
+        "Manual Override"
+      ],
+      "default": "*"
+    }
+  ],
+  "layout_type": "ordered",
+  "notify_list": [],
+  "reflow_type": "fixed",
+  "autogenerated": false
+}
