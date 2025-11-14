@@ -596,3 +596,222 @@ public class LogSearchService extends Task<List<LogEntry>> {
     }
 }
 -------------------
+
+package com.logviewer.service;
+
+import com.logviewer.model.LogEntry;
+import com.logviewer.model.SequenceEvent;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Analyzes logs to build sequence diagrams showing service-to-service interactions
+ */
+public class SequenceDiagramAnalyzer {
+
+    // Patterns to extract service calls
+    private static final Pattern HTTP_CALL_PATTERN = Pattern.compile(
+        "(GET|POST|PUT|DELETE|PATCH)\\s+([^\\s]+).*?(\\d+)ms", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern SERVICE_CALL_PATTERN = Pattern.compile(
+        "(?:Calling|Invoking|Requesting)\\s+([A-Za-z0-9_-]+)(?:Service|\\.)", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern DB_QUERY_PATTERN = Pattern.compile(
+        "(SELECT|INSERT|UPDATE|DELETE)\\s+.*?(?:FROM|INTO)\\s+([A-Za-z0-9_]+)", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern RESPONSE_PATTERN = Pattern.compile(
+        "(?:Response|Received|Completed).*?(\\d+)\\s*ms", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern REQUEST_ID_PATTERN = Pattern.compile(
+        "(?:requestId|request-id|traceId|trace-id|correlationId)[=:\\s]+([a-zA-Z0-9-]+)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Analyze logs and build sequence events
+     */
+    public Map<String, List<SequenceEvent>> analyzeSequence(List<LogEntry> logEntries) {
+        Map<String, List<SequenceEvent>> sequencesByRequestId = new HashMap<>();
+        Map<String, SequenceEvent> pendingEvents = new HashMap<>();
+
+        for (int i = 0; i < logEntries.size(); i++) {
+            LogEntry entry = logEntries.get(i);
+            String line = entry.getFormattedLine();
+
+            // Extract request ID
+            String requestId = extractRequestId(line);
+            if (requestId == null) {
+                requestId = "unknown-" + (i / 10); // Group by chunks if no request ID
+            }
+
+            // Extract service name
+            String serviceName = extractServiceName(line);
+
+            // Check for HTTP calls
+            Matcher httpMatcher = HTTP_CALL_PATTERN.matcher(line);
+            if (httpMatcher.find()) {
+                SequenceEvent event = new SequenceEvent();
+                event.setRequestId(requestId);
+                event.setFromService(serviceName);
+                event.setToService(extractTargetService(httpMatcher.group(2)));
+                event.setOperation(httpMatcher.group(1) + " " + httpMatcher.group(2));
+                event.setStartTime(entry.getTimestamp());
+                event.setDurationMs(Long.parseLong(httpMatcher.group(3)));
+                event.setLogLine(line);
+                event.setLogLineNumber(i);
+
+                if (line.toUpperCase().contains("ERROR") || line.contains("500") || line.contains("404")) {
+                    event.setStatus("ERROR");
+                    event.setErrorMessage(extractErrorMessage(line));
+                } else {
+                    event.setStatus("SUCCESS");
+                }
+
+                addEvent(sequencesByRequestId, requestId, event);
+            }
+
+            // Check for service calls
+            Matcher serviceMatcher = SERVICE_CALL_PATTERN.matcher(line);
+            if (serviceMatcher.find()) {
+                String key = requestId + "-" + i;
+                SequenceEvent event = new SequenceEvent();
+                event.setRequestId(requestId);
+                event.setFromService(serviceName);
+                event.setToService(serviceMatcher.group(1) + "Service");
+                event.setOperation("Service Call");
+                event.setStartTime(entry.getTimestamp());
+                event.setLogLine(line);
+                event.setLogLineNumber(i);
+
+                pendingEvents.put(key, event);
+            }
+
+            // Check for database queries
+            Matcher dbMatcher = DB_QUERY_PATTERN.matcher(line);
+            if (dbMatcher.find()) {
+                SequenceEvent event = new SequenceEvent();
+                event.setRequestId(requestId);
+                event.setFromService(serviceName);
+                event.setToService("Database");
+                event.setOperation(dbMatcher.group(1) + " " + dbMatcher.group(2));
+                event.setStartTime(entry.getTimestamp());
+                event.setLogLine(line);
+                event.setLogLineNumber(i);
+
+                // Extract duration if available
+                Matcher durationMatcher = Pattern.compile("(\\d+)\\s*ms").matcher(line);
+                if (durationMatcher.find()) {
+                    event.setDurationMs(Long.parseLong(durationMatcher.group(1)));
+                } else {
+                    event.setDurationMs(0);
+                }
+
+                if (line.toUpperCase().contains("ERROR") || line.contains("FAILED")) {
+                    event.setStatus("ERROR");
+                    event.setErrorMessage(extractErrorMessage(line));
+                } else {
+                    event.setStatus("SUCCESS");
+                }
+
+                addEvent(sequencesByRequestId, requestId, event);
+            }
+
+            // Check for responses to complete pending events
+            Matcher responseMatcher = RESPONSE_PATTERN.matcher(line);
+            if (responseMatcher.find() && !pendingEvents.isEmpty()) {
+                // Try to find matching pending event
+                for (String key : new ArrayList<>(pendingEvents.keySet())) {
+                    if (key.startsWith(requestId)) {
+                        SequenceEvent event = pendingEvents.remove(key);
+                        event.setDurationMs(Long.parseLong(responseMatcher.group(1)));
+                        event.setEndTime(entry.getTimestamp());
+
+                        if (line.toUpperCase().contains("ERROR")) {
+                            event.setStatus("ERROR");
+                            event.setErrorMessage(extractErrorMessage(line));
+                        }
+
+                        addEvent(sequencesByRequestId, requestId, event);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Add any remaining pending events
+        for (SequenceEvent event : pendingEvents.values()) {
+            if (event.getDurationMs() == 0) {
+                event.setDurationMs(50); // Default duration
+            }
+            addEvent(sequencesByRequestId, event.getRequestId(), event);
+        }
+
+        return sequencesByRequestId;
+    }
+
+    private void addEvent(Map<String, List<SequenceEvent>> map, String requestId, SequenceEvent event) {
+        map.computeIfAbsent(requestId, k -> new ArrayList<>()).add(event);
+    }
+
+    private String extractRequestId(String line) {
+        Matcher matcher = REQUEST_ID_PATTERN.matcher(line);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    private String extractServiceName(String line) {
+        // Try to extract service name from log line
+        Pattern servicePattern = Pattern.compile("\\[([A-Za-z0-9_-]+Service)\\]");
+        Matcher matcher = servicePattern.matcher(line);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+
+        // Try package name
+        Pattern packagePattern = Pattern.compile("com\\.logviewer\\.([a-z]+)\\.");
+        matcher = packagePattern.matcher(line);
+        if (matcher.find()) {
+            return matcher.group(1) + "Service";
+        }
+
+        return "Application";
+    }
+
+    private String extractTargetService(String endpoint) {
+        // Extract service name from endpoint URL
+        String[] parts = endpoint.split("/");
+        for (String part : parts) {
+            if (!part.isEmpty() && part.matches("[a-zA-Z][a-zA-Z0-9_-]*")) {
+                return part + "Service";
+            }
+        }
+        return "ExternalService";
+    }
+
+    private String extractErrorMessage(String line) {
+        // Try to extract error message
+        if (line.contains(":")) {
+            String[] parts = line.split(":", 2);
+            if (parts.length > 1) {
+                String msg = parts[1].trim();
+                return msg.length() > 100 ? msg.substring(0, 100) + "..." : msg;
+            }
+        }
+        return "Error occurred";
+    }
+
+    /**
+     * Get all unique services from sequence events
+     */
+    public Set<String> extractServices(List<SequenceEvent> events) {
+        Set<String> services = new LinkedHashSet<>();
+        for (SequenceEvent event : events) {
+            if (event.getFromService() != null) services.add(event.getFromService());
+            if (event.getToService() != null) services.add(event.getToService());
+        }
+        return services;
+    }
+}
