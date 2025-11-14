@@ -1,261 +1,8 @@
 {
   "title": "Request Status Dashboard",
   "description": "Track request phases and adjustment types",
-  "widgets": [
-    {
-      "id": 1,
-      "definition": {
-        "title": "Pending",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:pending cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#c05621"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0,
-        "timeseries_background": {
-          "type": "area"
-        }
-      },
-      "layout": {
-        "x": 0,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 2,
-      "definition": {
-        "title": "In Progress",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:in-progress cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#2c5282"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 3,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 3,
-      "definition": {
-        "title": "Completed",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:completed cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#22543d"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 6,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 4,
-      "definition": {
-        "title": "Failed",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:failed cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#c53030"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 9,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 5,
-      "definition": {
-        "title": "Request Phase Details",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "list_stream",
-        "requests": [
-          {
-            "columns": [
-              {
-                "width": "auto",
-                "field": "@request_id"
-              },
-              {
-                "width": "auto",
-                "field": "@status"
-              },
-              {
-                "width": "auto",
-                "field": "@phase"
-              },
-              {
-                "width": "auto",
-                "field": "@adjustment_type"
-              }
-            ],
-            "query": {
-              "data_source": "logs_stream",
-              "query_string": "cob_date:$cob_date.value request_id:$request_id.value status:$status.value phase:$phase.value adjustment_type:$adjustment_type.value",
-              "indexes": [],
-              "storage": "hot"
-            },
-            "response_format": "event_list"
-          }
-        ],
-        "show_date_column": false,
-        "show_message_column": false
-      },
-      "layout": {
-        "x": 0,
-        "y": 2,
-        "width": 12,
-        "height": 6
-      }
-    }
-  ],
+  "layout_type": "free",
+  "is_read_only": false,
   "template_variables": [
     {
       "name": "cob_date",
@@ -283,27 +30,228 @@
     {
       "name": "phase",
       "prefix": "phase",
-      "available_values": [
-        "Phase 1: Initial Review",
-        "Phase 2: Validation",
-        "Phase 3: Processing",
-        "Phase 4: Finalized"
-      ],
+      "available_values": [],
       "default": "*"
     },
     {
       "name": "adjustment_type",
       "prefix": "adjustment_type",
-      "available_values": [
-        "Rate Adjustment",
-        "Type Adjustment",
-        "Manual Override"
-      ],
+      "available_values": [],
       "default": "*"
     }
   ],
-  "layout_type": "ordered",
-  "notify_list": [],
-  "reflow_type": "fixed",
-  "autogenerated": false
+  "widgets": [
+    {
+      "id": 0,
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 30,
+        "height": 15
+      },
+      "definition": {
+        "title": "Pending",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "response_format": "scalar",
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "search": {
+                  "query": "status:pending $cob_date $request_id"
+                }
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    },
+    {
+      "id": 1,
+      "layout": {
+        "x": 31,
+        "y": 0,
+        "width": 30,
+        "height": 15
+      },
+      "definition": {
+        "title": "In Progress",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "response_format": "scalar",
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "search": {
+                  "query": "status:in-progress $cob_date $request_id"
+                }
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    },
+    {
+      "id": 2,
+      "layout": {
+        "x": 62,
+        "y": 0,
+        "width": 30,
+        "height": 15
+      },
+      "definition": {
+        "title": "Completed",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "response_format": "scalar",
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "search": {
+                  "query": "status:completed $cob_date $request_id"
+                }
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    },
+    {
+      "id": 3,
+      "layout": {
+        "x": 93,
+        "y": 0,
+        "width": 30,
+        "height": 15
+      },
+      "definition": {
+        "title": "Failed",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "response_format": "scalar",
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "search": {
+                  "query": "status:failed $cob_date $request_id"
+                }
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    },
+    {
+      "id": 4,
+      "layout": {
+        "x": 0,
+        "y": 16,
+        "width": 123,
+        "height": 50
+      },
+      "definition": {
+        "title": "Request Phase Details",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "list_stream",
+        "requests": [
+          {
+            "columns": [
+              {
+                "width": "auto",
+                "field": "@request_id"
+              },
+              {
+                "width": "auto",
+                "field": "@status"
+              },
+              {
+                "width": "auto",
+                "field": "@phase"
+              },
+              {
+                "width": "auto",
+                "field": "@adjustment_type"
+              }
+            ],
+            "query": {
+              "data_source": "logs_stream",
+              "query_string": "$cob_date $request_id $status $phase $adjustment_type",
+              "indexes": []
+            },
+            "response_format": "event_list"
+          }
+        ]
+      }
+    }
+  ],
+  "notify_list": []
 }
