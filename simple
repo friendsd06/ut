@@ -1,309 +1,288 @@
-{
-  "title": "Request Status Dashboard",
-  "description": "Track request phases and adjustment types",
-  "widgets": [
-    {
-      "id": 1,
-      "definition": {
-        "title": "Pending",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:pending cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#c05621"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0,
-        "timeseries_background": {
-          "type": "area"
-        }
-      },
-      "layout": {
-        "x": 0,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 2,
-      "definition": {
-        "title": "In Progress",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:in-progress cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#2c5282"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 3,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 3,
-      "definition": {
-        "title": "Completed",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:completed cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#22543d"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 6,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 4,
-      "definition": {
-        "title": "Failed",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "search": {
-                  "query": "status:failed cob_date:$cob_date.value"
-                },
-                "indexes": [
-                  "*"
-                ],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": []
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "custom_text",
-                "custom_fg_color": "#c53030"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 9,
-        "y": 0,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 5,
-      "definition": {
-        "title": "Request Phase Details",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "list_stream",
-        "requests": [
-          {
-            "columns": [
-              {
-                "width": "auto",
-                "field": "@request_id"
-              },
-              {
-                "width": "auto",
-                "field": "@status"
-              },
-              {
-                "width": "auto",
-                "field": "@phase"
-              },
-              {
-                "width": "auto",
-                "field": "@adjustment_type"
-              }
-            ],
-            "query": {
-              "data_source": "logs_stream",
-              "query_string": "cob_date:$cob_date.value request_id:$request_id.value status:$status.value phase:$phase.value adjustment_type:$adjustment_type.value",
-              "indexes": [],
-              "storage": "hot"
-            },
-            "response_format": "event_list"
-          }
-        ],
-        "show_date_column": false,
-        "show_message_column": false
-      },
-      "layout": {
-        "x": 0,
-        "y": 2,
-        "width": 12,
-        "height": 6
-      }
-    }
-  ],
-  "template_variables": [
-    {
-      "name": "cob_date",
-      "prefix": "cob_date",
-      "available_values": [],
-      "default": "*"
-    },
-    {
-      "name": "request_id",
-      "prefix": "request_id",
-      "available_values": [],
-      "default": "*"
-    },
-    {
-      "name": "status",
-      "prefix": "status",
-      "available_values": [
-        "pending",
-        "in-progress",
-        "completed",
-        "failed"
-      ],
-      "default": "*"
-    },
-    {
-      "name": "phase",
-      "prefix": "phase",
-      "available_values": [
-        "Phase 1: Initial Review",
-        "Phase 2: Validation",
-        "Phase 3: Processing",
-        "Phase 4: Finalized"
-      ],
-      "default": "*"
-    },
-    {
-      "name": "adjustment_type",
-      "prefix": "adjustment_type",
-      "available_values": [
-        "Rate Adjustment",
-        "Type Adjustment",
-        "Manual Override"
-      ],
-      "default": "*"
-    }
-  ],
-  "layout_type": "ordered",
-  "notify_list": [],
-  "reflow_type": "fixed",
-  "autogenerated": false
-}
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Data Transformation Pipeline - CORRECTED VERSION
+# MAGIC # No aggregation - just filter and select based on specification
+
+# COMMAND ----------
+
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import DecimalType, TimestampType, StringType
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Configuration
+
+# COMMAND ----------
+
+# Source table names
+SOURCE_L_P = ""
+SOURCE_C = ""
+SOURCE_P = ""
+SOURCE_L_E = ""
+SOURCE_B = ""
+
+# Target table name
+TARGET_TABLE = ""
+
+# Balance type codes for funded exposure
+FUNDED_BALANCE_TYPE_CODES = [
+
+]
+
+# Balance type codes for unfunded exposure
+UNFUNDED_BALANCE_TYPE_CODES = [
+
+]
+
+# Legal entity IDs for filtering
+LEGAL_ENTITY_IDS = [
+
+]
+
+# COMMAND ----------
+
+# Optimize Spark settings
+spark.conf.set("spark.sql.shuffle.partitions", "200")
+spark.conf.set("spark.sql.adaptive.enabled", "true")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Read Source Tables
+
+# COMMAND ----------
+
+def read_p(spark):
+    """Read loan position with required columns"""
+    
+    df = spark.read.table(SOURCE_L_P)
+    
+    selected = df.select(
+
+    )
+    
+    return selected
+
+
+def read_c(spark):
+    """Read commitment data"""
+    
+    df = spark.read.table(SOURCE_C)
+    
+    selected = df.select(
+
+    )
+    
+    return selected
+
+
+def read_p(spark):
+    """Read party reference data"""
+    return spark.read.table(S_P)
+
+
+def read_l_e(spark):
+    """Read legal entity reference data"""
+    
+    df = spark.read.table(S_L_E)
+    
+    selected = df.select(
+        F.col("").alias(""),
+        F.col("").alias("")
+    )
+    
+    return selected
+
+
+def read_b(spark):
+    """Read balances with early filter"""
+    
+    df = spark.read.table(S_B)
+    
+    # Select required columns
+    selected = df.select(
+
+    )
+    
+    return selected
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Party Data Processing
+
+# COMMAND ----------
+
+def extract_(party_df):
+
+
+    party_flat = party_df.select(
+        F.col("").alias(""),
+        F.col("").alias(""),
+        F.explode_outer("").alias("")
+    )
+    
+
+    party_gesc = party_flat.filter(
+        F.col() == ""
+    )
+    
+
+    party_ucn = party_gesc.select(
+        "",
+        "",
+        F.col("alt_id.identifierValue").alias("")
+    )
+    
+
+    party_distinct = party_ucn.dropDuplicates([""])
+    
+    return party_distinct
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Balance Filtering - Funded Exposure
+
+# COMMAND ----------
+
+def get_funded_exposure(balances_df):
+    """
+    Filter balances for funded exposure based on conditions.
+    NO AGGREGATION - just filter and select amount.
+    """
+    
+    funded_df = balances_df.filter(
+      )
+    )
+    
+    # Select required columns
+    result = funded_df.select(
+        ).alias("")
+    )
+    
+    return result
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Balance Filtering - Unfunded Exposure
+
+# COMMAND ----------
+
+def get_unfunded_exposure(balances_df):
+    """
+    Filter balances for unfunded exposure based on conditions.
+    NO AGGREGATION - just filter and select amount.
+    """
+    
+    unfunded_df = balances_df.filter(
+       )
+    )
+    
+    # Select required columns
+    result = unfunded_df.select(
+
+    )
+    
+    return result
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Main Transformation
+
+# COMMAND ----------
+
+def build_target_dataset(loan_df, commitment_df, party_df, legal_entity_df, 
+                        funded_df, unfunded_df):
+    """
+    Join all datasets to build final target table.
+    """
+    
+    # Prepare loan columns
+    loan_base = loan_df.select(
+
+    )
+    
+    # Join with party data
+    result = loan_base.join(
+        F.broadcast(party_df),
+        loan_base[""] == party_df[""],
+        "left"
+    )
+    
+    # Join with legal entity
+    result = result.join(
+        F.broadcast(legal_entity_df),
+        result[""] == legal_entity_df[""],
+        "left"
+    )
+    
+    # Join with commitment
+    commit_data = commitment_df.select(
+        F.col("").alias(""),
+        F.col("").cast(TimestampType()).alias(""),
+        F.col("").alias("")
+    )
+    
+    result = result.join(
+        commit_data,
+        result[""] == commit_data[""],
+        "left"
+    )
+    
+    # Join with funded exposure
+    result = result.join(
+        funded_df,
+        result[""] == funded_df[""],
+        "left"
+    )
+    
+    # Join with unfunded exposure
+    result = result.join(
+        unfunded_df,
+        result[""] == unfunded_df[""],
+        "left"
+    )
+    
+    return result
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Select Final Columns
+
+# COMMAND ----------
+
+def select_target_columns(df):
+    """Select final target columns in correct order"""
+    
+    return df.select(
+
+    )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Execute Pipeline
+
+# COMMAND ----------
+
+def run_pipeline(spark):
+    """Execute complete transformation pipeline"""
+
+    
+    return final_df
+
+# COMMAND ----------
+
+# Execute the pipeline
+result_df = run_pipeline(spark)
+
+# COMMAND ----------
+
+# Verify results
+display(result_df.limit(20))
