@@ -1,817 +1,169 @@
-package com.logviewer.ui;
-
-import javafx.scene.control.ListCell;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-
-public class ColoredLogCell extends ListCell<String> {
-
-    // Static trace ID for highlighting across all cells
-    private static String highlightTraceId = null;
-
-    public static void setHighlightTraceId(String traceId) {
-        highlightTraceId = traceId;
-    }
-
-    public static String getHighlightTraceId() {
-        return highlightTraceId;
-    }
-
-    @Override
-    protected void updateItem(String item, boolean empty) {
-        super.updateItem(item, empty);
-
-        if (empty || item == null) {
-            setText(null);
-            setStyle("");
-        } else {
-            setText(item);
-            setFont(Font.font("Consolas", 11));
-
-            // Apply color based on log level and content type
-            String style = "";
-            String trimmedItem = item.trim();
-            String upperItem = item.toUpperCase();
-
-            // Check for trace ID highlighting first (highest priority)
-            boolean containsTraceId = highlightTraceId != null && !highlightTraceId.isEmpty() &&
-                                      item.contains(highlightTraceId);
-
-            if (containsTraceId) {
-                // Bright yellow/gold highlighting for trace ID matches
-                style = "-fx-background-color: #fff9c4; -fx-text-fill: #000000; -fx-font-weight: bold; -fx-border-color: #fbc02d; -fx-border-width: 0 0 0 5;";
-            } // Check for stack trace lines (starts with "at " or "Caused by:")
-            else if (isStackTraceLine(trimmedItem)) {
-                if (trimmedItem.startsWith("Caused by:") || trimmedItem.startsWith("caused by:")) {
-                    // Root cause - highlight in bold red
-                    style = "-fx-background-color: #ffe0e0; -fx-text-fill: #d32f2f; -fx-font-weight: bold; -fx-border-color: #e57373; -fx-border-width: 0 0 0 3;";
-                } else if (trimmedItem.startsWith("at ") || trimmedItem.startsWith("\tat ")) {
-                    // Stack trace line - light red/pink background
-                    style = "-fx-background-color: #fff5f5; -fx-text-fill: #c62828; -fx-border-color: #ffcdd2; -fx-border-width: 0 0 0 2;";
-                } else {
-                    // Exception class line (e.g., "java.lang.NullPointerException: ...")
-                    style = "-fx-background-color: #ffebee; -fx-text-fill: #b71c1c; -fx-font-weight: bold; -fx-border-color: #ef5350; -fx-border-width: 0 0 0 4;";
-                }
-            } else if (upperItem.contains("ERROR")) {
-                // Red background for errors
-                style = "-fx-background-color: #ffebee; -fx-text-fill: #c62828; -fx-font-weight: bold;";
-            } else if (upperItem.contains("WARN")) {
-                // Orange/yellow background for warnings
-                style = "-fx-background-color: #fff8e1; -fx-text-fill: #f57c00; -fx-font-weight: bold;";
-            } else if (upperItem.contains("INFO")) {
-                // Light blue background for info
-                style = "-fx-background-color: #e3f2fd; -fx-text-fill: #1565c0;";
-            } else if (upperItem.contains("DEBUG")) {
-                // Gray for debug
-                style = "-fx-background-color: #f5f5f5; -fx-text-fill: #757575;";
-            } else if (upperItem.contains("TRACE")) {
-                // Very light gray for trace
-                style = "-fx-background-color: #fafafa; -fx-text-fill: #9e9e9e;";
-            } else if (upperItem.contains("EXCEPTION") || upperItem.contains("FATAL")) {
-                // Dark red for exceptions/fatal
-                style = "-fx-background-color: #ffcdd2; -fx-text-fill: #b71c1c; -fx-font-weight: bold;";
-            } else {
-                // Default styling
-                style = "-fx-text-fill: #333333;";
-            }
-
-            setStyle(style);
-        }
-    }
-
-    /**
-     * Detects if a line is part of a Java stack trace
-     */
-    private boolean isStackTraceLine(String line) {
-        if (line == null || line.isEmpty()) {
-            return false;
-        }
-
-        // Stack trace patterns:
-        // - "at com.example.ClassName.methodName(FileName.java:123)"
-        // - "Caused by: java.lang.Exception: message"
-        // - Exception class names (e.g., "java.lang.NullPointerException: message")
-
-        return line.startsWith("at ") ||
-               line.startsWith("\tat ") ||
-               line.startsWith("Caused by:") ||
-               line.startsWith("caused by:") ||
-               (line.contains("Exception:") && (line.contains("java.") || line.contains("org.") || line.contains("com."))) ||
-               (line.contains("Exception ") && line.contains("at ")) ||
-               line.matches(".*Exception.*:.*") ||
-               line.contains("... ") && line.contains(" more");
-    }
+/* Main application styling */
+.root {
+    -fx-font-family: "Segoe UI", "Arial", sans-serif;
+    -fx-font-size: 13px;
 }
----------------------------------------------
 
-package com.logviewer.service;
-
-import com.logviewer.model.LogEntry;
-import com.logviewer.model.SQLQueryInfo;
-
-import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-/**
- * Extracts SQL queries from log entries
- */
-public class SQLQueryExtractor {
-
-    // Patterns to match SQL queries in logs
-    private static final Pattern SQL_PATTERN = Pattern.compile(
-        "(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\\s+.*?(?:FROM|INTO|TABLE|SET|WHERE|GROUP|ORDER|LIMIT|;|$)",
-        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
-    );
-
-    private static final Pattern DURATION_PATTERN = Pattern.compile("(\\d+)\\s*ms");
-    private static final Pattern ROW_COUNT_PATTERN = Pattern.compile("(\\d+)\\s*row");
-    private static final Pattern REQUEST_ID_PATTERN = Pattern.compile(
-        "(?:requestId|request-id|traceId)[=:\\s]+([a-zA-Z0-9-]+)",
-        Pattern.CASE_INSENSITIVE
-    );
-
-    /**
-     * Extract all SQL queries from log entries
-     */
-    public List<SQLQueryInfo> extractQueries(List<LogEntry> logEntries) {
-        List<SQLQueryInfo> queries = new ArrayList<>();
-
-        for (int i = 0; i < logEntries.size(); i++) {
-            LogEntry entry = logEntries.get(i);
-            String line = entry.getFormattedLine();
-
-            // Find SQL queries in the log line
-            Matcher sqlMatcher = SQL_PATTERN.matcher(line);
-
-            while (sqlMatcher.find()) {
-                String query = sqlMatcher.group().trim();
-
-                // Clean up query
-                query = cleanQuery(query);
-
-                if (query.length() > 10) { // Minimum query length
-                    SQLQueryInfo queryInfo = new SQLQueryInfo(query);
-                    queryInfo.setExecutionTime(entry.getTimestamp());
-                    queryInfo.setLogLine(line);
-                    queryInfo.setLineNumber(i + 1);
-
-                    // Extract additional info
-                    extractDuration(line, queryInfo);
-                    extractRequestId(line, queryInfo);
-                    extractStatus(line, queryInfo);
-                    extractRowCount(line, queryInfo);
-                    extractTableInfo(query, queryInfo);
-
-                    queries.add(queryInfo);
-                }
-            }
-        }
-
-        return queries;
-    }
-
-    private String cleanQuery(String query) {
-        // Remove trailing punctuation and whitespace
-        query = query.replaceAll("[;,]$", "").trim();
-
-        // Replace multiple spaces with single space
-        query = query.replaceAll("\\s+", " ");
-
-        // Remove newlines
-        query = query.replace("\n", " ").replace("\r", " ");
-
-        return query;
-    }
-
-    private void extractDuration(String line, SQLQueryInfo queryInfo) {
-        Matcher matcher = DURATION_PATTERN.matcher(line);
-        if (matcher.find()) {
-            try {
-                queryInfo.setDurationMs(Long.parseLong(matcher.group(1)));
-            } catch (NumberFormatException e) {
-                // Ignore
-            }
-        }
-    }
-
-    private void extractRequestId(String line, SQLQueryInfo queryInfo) {
-        Matcher matcher = REQUEST_ID_PATTERN.matcher(line);
-        if (matcher.find()) {
-            queryInfo.setRequestId(matcher.group(1));
-        }
-    }
-
-    private void extractStatus(String line, SQLQueryInfo queryInfo) {
-        String upperLine = line.toUpperCase();
-        if (upperLine.contains("ERROR") || upperLine.contains("FAILED")) {
-            queryInfo.setStatus("ERROR");
-        } else if (upperLine.contains("TIMEOUT")) {
-            queryInfo.setStatus("TIMEOUT");
-        } else if (upperLine.contains("SUCCESS") || upperLine.contains("COMPLETED")) {
-            queryInfo.setStatus("SUCCESS");
-        }
-    }
-
-    private void extractRowCount(String line, SQLQueryInfo queryInfo) {
-        Matcher matcher = ROW_COUNT_PATTERN.matcher(line);
-        if (matcher.find()) {
-            try {
-                queryInfo.setRowCount(Integer.parseInt(matcher.group(1)));
-            } catch (NumberFormatException e) {
-                // Ignore
-            }
-        }
-    }
-
-    private void extractTableInfo(String query, SQLQueryInfo queryInfo) {
-        String upperQuery = query.toUpperCase();
-
-        // Extract table name from FROM clause
-        Pattern fromPattern = Pattern.compile("FROM\\s+([a-zA-Z0-9_]+)", Pattern.CASE_INSENSITIVE);
-        Matcher fromMatcher = fromPattern.matcher(query);
-        if (fromMatcher.find()) {
-            queryInfo.setTable(fromMatcher.group(1));
-        }
-
-        // Extract table name from INTO clause
-        Pattern intoPattern = Pattern.compile("INTO\\s+([a-zA-Z0-9_]+)", Pattern.CASE_INSENSITIVE);
-        Matcher intoMatcher = intoPattern.matcher(query);
-        if (intoMatcher.find()) {
-            queryInfo.setTable(intoMatcher.group(1));
-        }
-
-        // Extract table name from UPDATE clause
-        Pattern updatePattern = Pattern.compile("UPDATE\\s+([a-zA-Z0-9_]+)", Pattern.CASE_INSENSITIVE);
-        Matcher updateMatcher = updatePattern.matcher(query);
-        if (updateMatcher.find()) {
-            queryInfo.setTable(updateMatcher.group(1));
-        }
-    }
-
-    /**
-     * Get query statistics
-     */
-    public Map<String, Object> getStatistics(List<SQLQueryInfo> queries) {
-        Map<String, Object> stats = new HashMap<>();
-
-        int totalQueries = queries.size();
-        int selectCount = 0;
-        int insertCount = 0;
-        int updateCount = 0;
-        int deleteCount = 0;
-        long totalDuration = 0;
-        int errorCount = 0;
-
-        for (SQLQueryInfo query : queries) {
-            switch (query.getQueryType()) {
-                case "SELECT": selectCount++; break;
-                case "INSERT": insertCount++; break;
-                case "UPDATE": updateCount++; break;
-                case "DELETE": deleteCount++; break;
-            }
-
-            if (query.getDurationMs() != null) {
-                totalDuration += query.getDurationMs();
-            }
-
-            if ("ERROR".equals(query.getStatus()) || "TIMEOUT".equals(query.getStatus())) {
-                errorCount++;
-            }
-        }
-
-        stats.put("totalQueries", totalQueries);
-        stats.put("selectCount", selectCount);
-        stats.put("insertCount", insertCount);
-        stats.put("updateCount", updateCount);
-        stats.put("deleteCount", deleteCount);
-        stats.put("totalDuration", totalDuration);
-        stats.put("avgDuration", totalQueries > 0 ? totalDuration / totalQueries : 0);
-        stats.put("errorCount", errorCount);
-
-        return stats;
-    }
+/* Button styling */
+.button {
+    -fx-background-color: #007bff;
+    -fx-text-fill: white;
+    -fx-padding: 5 15 5 15;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
 }
-------------------------------------------------------
 
-package com.logviewer.service;
-
-import com.logviewer.model.EnvironmentProfile;
-
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.*;
-import java.util.stream.Collectors;
-
-/**
- * Manages multiple environment profiles
- * Profiles are stored in ~/.logviewer/profiles/ directory
- */
-public class ProfileManager {
-
-    private static final String PROFILES_DIR = System.getProperty("user.home") +
-        File.separator + ".logviewer" + File.separator + "profiles";
-
-    /**
-     * Save a profile to disk
-     */
-    public void saveProfile(EnvironmentProfile profile) throws IOException {
-        ensureProfilesDirectoryExists();
-
-        String fileName = profile.getProfileId() + ".properties";
-        File file = new File(PROFILES_DIR, fileName);
-
-        Properties props = new Properties();
-        props.setProperty("profile.name", safeGet(profile.getProfileName()));
-        props.setProperty("aws.login.command", safeGet(profile.getAwsLoginCommand()));
-        props.setProperty("kubectl.context", safeGet(profile.getKubectlContext()));
-        props.setProperty("namespace", safeGet(profile.getNamespace()));
-        props.setProperty("default.pod.name", safeGet(profile.getDefaultPodName()));
-        props.setProperty("default.container.name", safeGet(profile.getDefaultContainerName()));
-        props.setProperty("tail.lines", String.valueOf(profile.getTailLines()));
-        props.setProperty("refresh.interval", String.valueOf(profile.getRefreshIntervalSeconds()));
-        props.setProperty("session.refresh.minutes", String.valueOf(profile.getSessionRefreshMinutes()));
-
-        try (OutputStream os = new FileOutputStream(file)) {
-            props.store(os, "Environment Profile: " + profile.getProfileName());
-        }
-    }
-
-    /**
-     * Load a profile from disk
-     */
-    public EnvironmentProfile loadProfile(String profileId) throws IOException {
-        String fileName = profileId + ".properties";
-        File file = new File(PROFILES_DIR, fileName);
-
-        if (!file.exists()) {
-            throw new IOException("Profile not found: " + profileId);
-        }
-
-        Properties props = new Properties();
-        try (InputStream is = new FileInputStream(file)) {
-            props.load(is);
-        }
-
-        EnvironmentProfile profile = new EnvironmentProfile();
-        profile.setProfileName(props.getProperty("profile.name", ""));
-        profile.setAwsLoginCommand(props.getProperty("aws.login.command", ""));
-        profile.setKubectlContext(props.getProperty("kubectl.context", ""));
-        profile.setNamespace(props.getProperty("namespace", "default"));
-        profile.setDefaultPodName(props.getProperty("default.pod.name", ""));
-        profile.setDefaultContainerName(props.getProperty("default.container.name", ""));
-        profile.setTailLines(Integer.parseInt(props.getProperty("tail.lines", "1000")));
-        profile.setRefreshIntervalSeconds(Integer.parseInt(props.getProperty("refresh.interval", "30")));
-        profile.setSessionRefreshMinutes(Integer.parseInt(props.getProperty("session.refresh.minutes", "20")));
-
-        return profile;
-    }
-
-    /**
-     * List all available profiles
-     */
-    public List<EnvironmentProfile> listProfiles() throws IOException {
-        ensureProfilesDirectoryExists();
-
-        File dir = new File(PROFILES_DIR);
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".properties"));
-
-        if (files == null || files.length == 0) {
-            return new ArrayList<>();
-        }
-
-        List<EnvironmentProfile> profiles = new ArrayList<>();
-        for (File file : files) {
-            try {
-                String profileId = file.getName().replace(".properties", "");
-                EnvironmentProfile profile = loadProfile(profileId);
-                profiles.add(profile);
-            } catch (IOException e) {
-                System.err.println("Failed to load profile: " + file.getName() + " - " + e.getMessage());
-            }
-        }
-
-        // Sort by profile name
-        profiles.sort(Comparator.comparing(EnvironmentProfile::getProfileName));
-
-        return profiles;
-    }
-
-    /**
-     * Delete a profile
-     */
-    public boolean deleteProfile(String profileId) {
-        String fileName = profileId + ".properties";
-        File file = new File(PROFILES_DIR, fileName);
-        return file.exists() && file.delete();
-    }
-
-    /**
-     * Check if a profile exists
-     */
-    public boolean profileExists(String profileId) {
-        String fileName = profileId + ".properties";
-        File file = new File(PROFILES_DIR, fileName);
-        return file.exists();
-    }
-
-    // Utility methods
-
-    private void ensureProfilesDirectoryExists() throws IOException {
-        Path dirPath = Paths.get(PROFILES_DIR);
-        if (!Files.exists(dirPath)) {
-            Files.createDirectories(dirPath);
-        }
-    }
-
-    private String safeGet(String value) {
-        return value != null ? value : "";
-    }
+.button:hover {
+    -fx-background-color: #0056b3;
 }
--------------------
 
-package com.logviewer.service;
-
-import com.logviewer.model.LogEntry;
-import javafx.concurrent.Task;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.stream.Collectors;
-
-/**
- * Fast search service using parallel streams for efficient searching
- * across large log datasets
- */
-public class LogSearchService extends Task<List<LogEntry>> {
-
-    private final List<LogEntry> allEntries;
-    private final String searchText;
-    private final boolean caseSensitive;
-    private final boolean includeError;
-    private final boolean includeWarn;
-    private final boolean includeInfo;
-    private final boolean includeDebug;
-    private final boolean includeTrace;
-    private final LocalDateTime dateFrom;
-    private final LocalDateTime dateTo;
-    private final String serviceFilter;
-
-    public LogSearchService(
-            List<LogEntry> allEntries,
-            String searchText,
-            boolean caseSensitive,
-            boolean includeError,
-            boolean includeWarn,
-            boolean includeInfo,
-            boolean includeDebug,
-            boolean includeTrace,
-            LocalDateTime dateFrom,
-            LocalDateTime dateTo,
-            String serviceFilter) {
-        this.allEntries = allEntries;
-        this.searchText = searchText;
-        this.caseSensitive = caseSensitive;
-        this.includeError = includeError;
-        this.includeWarn = includeWarn;
-        this.includeInfo = includeInfo;
-        this.includeDebug = includeDebug;
-        this.includeTrace = includeTrace;
-        this.dateFrom = dateFrom;
-        this.dateTo = dateTo;
-        this.serviceFilter = serviceFilter;
-    }
-
-    @Override
-    protected List<LogEntry> call() throws Exception {
-        updateMessage("Searching...");
-        updateProgress(-1, 1); // Indeterminate progress
-
-        // Use parallel stream for fast searching
-        List<LogEntry> results = allEntries.parallelStream()
-                .filter(entry -> {
-                    if (isCancelled()) {
-                        return false;
-                    }
-
-                    // Apply search text filter
-                    if (!entry.matches(searchText, caseSensitive)) {
-                        return false;
-                    }
-
-                    // Apply level and date filters
-                    return entry.matchesFilters(
-                            includeError, includeWarn, includeInfo, includeDebug, includeTrace,
-                            dateFrom, dateTo, serviceFilter
-                    );
-                })
-                .collect(Collectors.toList());
-
-        updateMessage(String.format("Found %,d matches", results.size()));
-        updateProgress(1, 1);
-
-        return results;
-    }
-
-    /**
-     * Builder class for easier construction of search queries
-     */
-    public static class Builder {
-        private List<LogEntry> allEntries;
-        private String searchText = "";
-        private boolean caseSensitive = false;
-        private boolean includeError = true;
-        private boolean includeWarn = true;
-        private boolean includeInfo = true;
-        private boolean includeDebug = true;
-        private boolean includeTrace = true;
-        private LocalDateTime dateFrom = null;
-        private LocalDateTime dateTo = null;
-        private String serviceFilter = "";
-
-        public Builder allEntries(List<LogEntry> allEntries) {
-            this.allEntries = allEntries;
-            return this;
-        }
-
-        public Builder searchText(String searchText) {
-            this.searchText = searchText;
-            return this;
-        }
-
-        public Builder caseSensitive(boolean caseSensitive) {
-            this.caseSensitive = caseSensitive;
-            return this;
-        }
-
-        public Builder includeError(boolean includeError) {
-            this.includeError = includeError;
-            return this;
-        }
-
-        public Builder includeWarn(boolean includeWarn) {
-            this.includeWarn = includeWarn;
-            return this;
-        }
-
-        public Builder includeInfo(boolean includeInfo) {
-            this.includeInfo = includeInfo;
-            return this;
-        }
-
-        public Builder includeDebug(boolean includeDebug) {
-            this.includeDebug = includeDebug;
-            return this;
-        }
-
-        public Builder includeTrace(boolean includeTrace) {
-            this.includeTrace = includeTrace;
-            return this;
-        }
-
-        public Builder dateFrom(LocalDateTime dateFrom) {
-            this.dateFrom = dateFrom;
-            return this;
-        }
-
-        public Builder dateTo(LocalDateTime dateTo) {
-            this.dateTo = dateTo;
-            return this;
-        }
-
-        public Builder serviceFilter(String serviceFilter) {
-            this.serviceFilter = serviceFilter;
-            return this;
-        }
-
-        public LogSearchService build() {
-            return new LogSearchService(
-                    allEntries, searchText, caseSensitive,
-                    includeError, includeWarn, includeInfo, includeDebug, includeTrace,
-                    dateFrom, dateTo, serviceFilter
-            );
-        }
-    }
+.button:pressed {
+    -fx-background-color: #004085;
 }
--------------------
 
-package com.logviewer.service;
+.button:disabled {
+    -fx-background-color: #6c757d;
+    -fx-opacity: 0.6;
+}
 
-import com.logviewer.model.LogEntry;
-import com.logviewer.model.SequenceEvent;
+/* TextField styling */
+.text-field {
+    -fx-background-color: white;
+    -fx-border-color: #ced4da;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-padding: 5;
+}
 
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+.text-field:focused {
+    -fx-border-color: #80bdff;
+    -fx-border-width: 2;
+}
 
-/**
- * Analyzes logs to build sequence diagrams showing service-to-service interactions
- */
-public class SequenceDiagramAnalyzer {
+/* ListView styling */
+.list-view {
+    -fx-background-color: white;
+    -fx-border-color: #ced4da;
+    -fx-border-radius: 4;
+}
 
-    // Patterns to extract service calls
-    private static final Pattern HTTP_CALL_PATTERN = Pattern.compile(
-        "(GET|POST|PUT|DELETE|PATCH)\\s+([^\\s]+).*?(\\d+)ms", Pattern.CASE_INSENSITIVE);
+.list-view .list-cell {
+    -fx-padding: 2 5 2 5;
+    -fx-background-color: transparent;
+}
 
-    private static final Pattern SERVICE_CALL_PATTERN = Pattern.compile(
-        "(?:Calling|Invoking|Requesting)\\s+([A-Za-z0-9_-]+)(?:Service|\\.)", Pattern.CASE_INSENSITIVE);
+.list-view .list-cell:even {
+    -fx-background-color: #f8f9fa;
+}
 
-    private static final Pattern DB_QUERY_PATTERN = Pattern.compile(
-        "(SELECT|INSERT|UPDATE|DELETE)\\s+.*?(?:FROM|INTO)\\s+([A-Za-z0-9_]+)", Pattern.CASE_INSENSITIVE);
+.list-view .list-cell:selected {
+    -fx-background-color: #007bff;
+    -fx-text-fill: white;
+}
 
-    private static final Pattern RESPONSE_PATTERN = Pattern.compile(
-        "(?:Response|Received|Completed).*?(\\d+)\\s*ms", Pattern.CASE_INSENSITIVE);
+.list-view .list-cell:filled:hover {
+    -fx-background-color: #e9ecef;
+}
 
-    private static final Pattern REQUEST_ID_PATTERN = Pattern.compile(
-        "(?:requestId|request-id|traceId|trace-id|correlationId)[=:\\s]+([a-zA-Z0-9-]+)", Pattern.CASE_INSENSITIVE);
+/* CheckBox styling */
+.check-box {
+    -fx-cursor: hand;
+}
 
-    /**
-     * Analyze logs and build sequence events
-     */
-    public Map<String, List<SequenceEvent>> analyzeSequence(List<LogEntry> logEntries) {
-        Map<String, List<SequenceEvent>> sequencesByRequestId = new HashMap<>();
-        Map<String, SequenceEvent> pendingEvents = new HashMap<>();
+.check-box .box {
+    -fx-background-color: white;
+    -fx-border-color: #ced4da;
+    -fx-border-radius: 3;
+}
 
-        for (int i = 0; i < logEntries.size(); i++) {
-            LogEntry entry = logEntries.get(i);
-            String line = entry.getFormattedLine();
+.check-box:selected .mark {
+    -fx-background-color: #007bff;
+}
 
-            // Extract request ID
-            String requestId = extractRequestId(line);
-            if (requestId == null) {
-                requestId = "unknown-" + (i / 10); // Group by chunks if no request ID
-            }
+/* DatePicker styling */
+.date-picker {
+    -fx-background-color: white;
+}
 
-            // Extract service name
-            String serviceName = extractServiceName(line);
+.date-picker .text-field {
+    -fx-background-color: white;
+    -fx-border-color: #ced4da;
+}
 
-            // Check for HTTP calls
-            Matcher httpMatcher = HTTP_CALL_PATTERN.matcher(line);
-            if (httpMatcher.find()) {
-                SequenceEvent event = new SequenceEvent();
-                event.setRequestId(requestId);
-                event.setFromService(serviceName);
-                event.setToService(extractTargetService(httpMatcher.group(2)));
-                event.setOperation(httpMatcher.group(1) + " " + httpMatcher.group(2));
-                event.setStartTime(entry.getTimestamp());
-                event.setDurationMs(Long.parseLong(httpMatcher.group(3)));
-                event.setLogLine(line);
-                event.setLogLineNumber(i);
+/* Label styling */
+.label {
+    -fx-text-fill: #212529;
+}
 
-                if (line.toUpperCase().contains("ERROR") || line.contains("500") || line.contains("404")) {
-                    event.setStatus("ERROR");
-                    event.setErrorMessage(extractErrorMessage(line));
-                } else {
-                    event.setStatus("SUCCESS");
-                }
+/* Separator styling */
+.separator {
+    -fx-background-color: #dee2e6;
+}
 
-                addEvent(sequencesByRequestId, requestId, event);
-            }
+/* SplitPane styling */
+.split-pane {
+    -fx-background-color: #f4f4f4;
+}
 
-            // Check for service calls
-            Matcher serviceMatcher = SERVICE_CALL_PATTERN.matcher(line);
-            if (serviceMatcher.find()) {
-                String key = requestId + "-" + i;
-                SequenceEvent event = new SequenceEvent();
-                event.setRequestId(requestId);
-                event.setFromService(serviceName);
-                event.setToService(serviceMatcher.group(1) + "Service");
-                event.setOperation("Service Call");
-                event.setStartTime(entry.getTimestamp());
-                event.setLogLine(line);
-                event.setLogLineNumber(i);
+.split-pane-divider {
+    -fx-background-color: #ced4da;
+    -fx-padding: 0 2 0 2;
+}
 
-                pendingEvents.put(key, event);
-            }
+/* ProgressBar styling */
+.progress-bar {
+    -fx-accent: #007bff;
+}
 
-            // Check for database queries
-            Matcher dbMatcher = DB_QUERY_PATTERN.matcher(line);
-            if (dbMatcher.find()) {
-                SequenceEvent event = new SequenceEvent();
-                event.setRequestId(requestId);
-                event.setFromService(serviceName);
-                event.setToService("Database");
-                event.setOperation(dbMatcher.group(1) + " " + dbMatcher.group(2));
-                event.setStartTime(entry.getTimestamp());
-                event.setLogLine(line);
-                event.setLogLineNumber(i);
+.progress-bar .track {
+    -fx-background-color: #e9ecef;
+}
 
-                // Extract duration if available
-                Matcher durationMatcher = Pattern.compile("(\\d+)\\s*ms").matcher(line);
-                if (durationMatcher.find()) {
-                    event.setDurationMs(Long.parseLong(durationMatcher.group(1)));
-                } else {
-                    event.setDurationMs(0);
-                }
+.progress-bar .bar {
+    -fx-background-color: #007bff;
+}
 
-                if (line.toUpperCase().contains("ERROR") || line.contains("FAILED")) {
-                    event.setStatus("ERROR");
-                    event.setErrorMessage(extractErrorMessage(line));
-                } else {
-                    event.setStatus("SUCCESS");
-                }
+/* Tooltip styling */
+.tooltip {
+    -fx-background-color: #212529;
+    -fx-text-fill: white;
+    -fx-font-size: 12px;
+    -fx-padding: 5;
+    -fx-background-radius: 4;
+}
 
-                addEvent(sequencesByRequestId, requestId, event);
-            }
+/* ScrollBar styling */
+.scroll-bar {
+    -fx-background-color: #f8f9fa;
+}
 
-            // Check for responses to complete pending events
-            Matcher responseMatcher = RESPONSE_PATTERN.matcher(line);
-            if (responseMatcher.find() && !pendingEvents.isEmpty()) {
-                // Try to find matching pending event
-                for (String key : new ArrayList<>(pendingEvents.keySet())) {
-                    if (key.startsWith(requestId)) {
-                        SequenceEvent event = pendingEvents.remove(key);
-                        event.setDurationMs(Long.parseLong(responseMatcher.group(1)));
-                        event.setEndTime(entry.getTimestamp());
+.scroll-bar .thumb {
+    -fx-background-color: #adb5bd;
+    -fx-background-radius: 5;
+}
 
-                        if (line.toUpperCase().contains("ERROR")) {
-                            event.setStatus("ERROR");
-                            event.setErrorMessage(extractErrorMessage(line));
-                        }
+.scroll-bar .thumb:hover {
+    -fx-background-color: #6c757d;
+}
 
-                        addEvent(sequencesByRequestId, requestId, event);
-                        break;
-                    }
-                }
-            }
-        }
+/* Custom log level colors */
+.log-error {
+    -fx-text-fill: #dc3545;
+    -fx-font-weight: bold;
+}
 
-        // Add any remaining pending events
-        for (SequenceEvent event : pendingEvents.values()) {
-            if (event.getDurationMs() == 0) {
-                event.setDurationMs(50); // Default duration
-            }
-            addEvent(sequencesByRequestId, event.getRequestId(), event);
-        }
+.log-warn {
+    -fx-text-fill: #ffc107;
+}
 
-        return sequencesByRequestId;
-    }
+.log-info {
+    -fx-text-fill: #212529;
+}
 
-    private void addEvent(Map<String, List<SequenceEvent>> map, String requestId, SequenceEvent event) {
-        map.computeIfAbsent(requestId, k -> new ArrayList<>()).add(event);
-    }
+.log-debug {
+    -fx-text-fill: #6c757d;
+}
 
-    private String extractRequestId(String line) {
-        Matcher matcher = REQUEST_ID_PATTERN.matcher(line);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-        return null;
-    }
-
-    private String extractServiceName(String line) {
-        // Try to extract service name from log line
-        Pattern servicePattern = Pattern.compile("\\[([A-Za-z0-9_-]+Service)\\]");
-        Matcher matcher = servicePattern.matcher(line);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-
-        // Try package name
-        Pattern packagePattern = Pattern.compile("com\\.logviewer\\.([a-z]+)\\.");
-        matcher = packagePattern.matcher(line);
-        if (matcher.find()) {
-            return matcher.group(1) + "Service";
-        }
-
-        return "Application";
-    }
-
-    private String extractTargetService(String endpoint) {
-        // Extract service name from endpoint URL
-        String[] parts = endpoint.split("/");
-        for (String part : parts) {
-            if (!part.isEmpty() && part.matches("[a-zA-Z][a-zA-Z0-9_-]*")) {
-                return part + "Service";
-            }
-        }
-        return "ExternalService";
-    }
-
-    private String extractErrorMessage(String line) {
-        // Try to extract error message
-        if (line.contains(":")) {
-            String[] parts = line.split(":", 2);
-            if (parts.length > 1) {
-                String msg = parts[1].trim();
-                return msg.length() > 100 ? msg.substring(0, 100) + "..." : msg;
-            }
-        }
-        return "Error occurred";
-    }
-
-    /**
-     * Get all unique services from sequence events
-     */
-    public Set<String> extractServices(List<SequenceEvent> events) {
-        Set<String> services = new LinkedHashSet<>();
-        for (SequenceEvent event : events) {
-            if (event.getFromService() != null) services.add(event.getFromService());
-            if (event.getToService() != null) services.add(event.getToService());
-        }
-        return services;
-    }
+.log-trace {
+    -fx-text-fill: #adb5bd;
 }
