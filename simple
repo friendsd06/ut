@@ -1,3 +1,5 @@
+styles.css
+
 /* Main application styling */
 .root {
     -fx-font-family: "Segoe UI", "Arial", sans-serif;
@@ -166,4 +168,1472 @@
 
 .log-trace {
     -fx-text-fill: #adb5bd;
+}
+
+--------------------------------------------------
+
+auto-refresh-view.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.logviewer.AutoRefreshController"
+      spacing="10" style="-fx-background-color: #f4f4f4;">
+    <padding>
+        <Insets top="10" right="10" bottom="10" left="10"/>
+    </padding>
+
+    <!-- Header -->
+    <HBox spacing="10" style="-fx-background-color: white; -fx-padding: 10;" alignment="CENTER_LEFT">
+        <Label text="Auto-Refresh Log Viewer" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label fx:id="statusLabel" text="Not Started" style="-fx-text-fill: #666;"/>
+    </HBox>
+
+    <!-- Profile Management Panel -->
+    <VBox spacing="10" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Environment Profiles" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+        <Separator/>
+
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label text="Select Profile:" style="-fx-min-width: 150px;"/>
+            <ComboBox fx:id="profileComboBox" promptText="Select an environment profile..." HBox.hgrow="ALWAYS"/>
+            <Button fx:id="newProfileButton" text="New" onAction="#onNewProfile"/>
+            <Button fx:id="saveProfileButton" text="Save" onAction="#onSaveProfile" style="-fx-base: #28a745;"/>
+            <Button fx:id="deleteProfileButton" text="Delete" onAction="#onDeleteProfile" style="-fx-base: #dc3545;"/>
+        </HBox>
+
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label text="Profile Name:" style="-fx-min-width: 150px;"/>
+            <TextField fx:id="profileNameField" promptText="e.g., DEV, STAGING, PROD" HBox.hgrow="ALWAYS"/>
+        </HBox>
+    </VBox>
+
+    <!-- Configuration Panel -->
+    <VBox spacing="10" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Configuration" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+        <Separator/>
+
+        <!-- AWS Login Section -->
+        <VBox spacing="5">
+            <Label text="AWS Authentication" style="-fx-font-weight: bold;"/>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="AWS Login Command:" style="-fx-min-width: 150px;"/>
+                <TextField fx:id="awsLoginCommandField"
+                          promptText="e.g., pcl aws login"
+                          HBox.hgrow="ALWAYS"/>
+                <Button fx:id="loginToAwsButton" text="Login to AWS" onAction="#onLoginToAws" style="-fx-base: #007bff;"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Session Refresh:" style="-fx-min-width: 150px;"/>
+                <CheckBox fx:id="autoRefreshSessionCheck" text="Auto re-login every"/>
+                <Spinner fx:id="sessionRefreshSpinner" prefWidth="80" editable="true"/>
+                <Label text="minutes (to keep session alive)"/>
+            </HBox>
+        </VBox>
+
+        <Separator/>
+
+        <!-- Kubernetes Configuration -->
+        <VBox spacing="5">
+            <Label text="Kubernetes Configuration" style="-fx-font-weight: bold;"/>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Kubectl Context:" style="-fx-min-width: 150px;"/>
+                <TextField fx:id="kubectlContextField"
+                          promptText="e.g., arn:aws:eks:us-east-1:123456:cluster/my-cluster"
+                          HBox.hgrow="ALWAYS"/>
+                <Button text="Get Contexts" onAction="#onGetContexts"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Namespace:" style="-fx-min-width: 150px;"/>
+                <TextField fx:id="namespaceField"
+                          text="default"
+                          promptText="e.g., default, production, staging"/>
+                <Button text="Get Namespaces" onAction="#onGetNamespaces"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Pod Name:" style="-fx-min-width: 150px;"/>
+                <TextField fx:id="podNameField"
+                          promptText="e.g., my-app-7d8f9c-xyz12"
+                          HBox.hgrow="ALWAYS"/>
+                <Button text="List Pods" onAction="#onListPods"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Container Name:" style="-fx-min-width: 150px;"/>
+                <TextField fx:id="containerNameField"
+                          promptText="Optional: Leave empty for single-container pods"/>
+            </HBox>
+        </VBox>
+
+        <Separator/>
+
+        <!-- Log Configuration -->
+        <VBox spacing="5">
+            <Label text="Log Configuration" style="-fx-font-weight: bold;"/>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Log Source:" style="-fx-min-width: 150px;"/>
+                <RadioButton fx:id="stdoutLogRadio" text="Container Logs (stdout/stderr)" selected="true">
+                    <toggleGroup>
+                        <ToggleGroup fx:id="logSourceGroup"/>
+                    </toggleGroup>
+                </RadioButton>
+                <RadioButton fx:id="fileLogRadio" text="Log File Path" toggleGroup="$logSourceGroup"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Log File Path:" style="-fx-min-width: 150px;"/>
+                <TextField fx:id="logPathField"
+                          promptText="/var/log/app/application.log (only if 'Log File Path' selected)"
+                          disable="true"
+                          HBox.hgrow="ALWAYS"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Tail Lines:" style="-fx-min-width: 150px;"/>
+                <Spinner fx:id="tailLinesSpinner"
+                        editable="true"
+                        prefWidth="120"
+                        initialValue="1000"
+                        min="100"
+                        max="50000"
+                        amountToStepBy="100"/>
+                <Label text="(number of recent lines to download)"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Refresh Interval:" style="-fx-min-width: 150px;"/>
+                <Spinner fx:id="refreshIntervalSpinner"
+                        editable="true"
+                        prefWidth="120"
+                        initialValue="30"
+                        min="5"
+                        max="600"
+                        amountToStepBy="5"/>
+                <Label text="seconds"/>
+            </HBox>
+        </VBox>
+
+        <Separator/>
+
+        <!-- Auto-Load to Main Window -->
+        <VBox spacing="5">
+            <Label text="Auto-Load to Main Window" style="-fx-font-weight: bold;"/>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <CheckBox fx:id="autoLoadToMainWindowCheck" text="Automatically load downloaded logs into main window"/>
+            </HBox>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Load into:" style="-fx-min-width: 150px;"/>
+                <RadioButton fx:id="loadToPane1Radio" text="Pane 1 (Left)" selected="true"/>
+                <RadioButton fx:id="loadToPane2Radio" text="Pane 2 (Right)"/>
+            </HBox>
+        </VBox>
+
+        <Separator/>
+
+        <!-- Control Buttons -->
+        <HBox spacing="10" alignment="CENTER">
+            <Button fx:id="startButton" text="Start Auto-Refresh" onAction="#onStart"
+                    style="-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold;"
+                    prefWidth="150"/>
+            <Button fx:id="stopButton" text="Stop" onAction="#onStop"
+                    disable="true"
+                    style="-fx-background-color: #dc3545; -fx-text-fill: white;"
+                    prefWidth="100"/>
+            <Button text="Download Once" onAction="#onDownloadOnce"
+                    prefWidth="150"/>
+            <Button text="Save Config" onAction="#onSaveConfig"/>
+            <Button text="Load Config" onAction="#onLoadConfig"/>
+        </HBox>
+
+        <!-- Progress and Status -->
+        <VBox spacing="5">
+            <Label fx:id="progressLabel" text="Status: Ready" style="-fx-font-size: 12px;"/>
+            <ProgressBar fx:id="progressBar" prefWidth="Infinity" visible="false"/>
+            <Label fx:id="lastUpdateLabel" text="Last Update: Never" style="-fx-font-size: 11px; -fx-text-fill: #666;"/>
+        </VBox>
+    </VBox>
+
+    <!-- Log Display Area -->
+    <VBox spacing="5" style="-fx-background-color: white; -fx-padding: 10;" VBox.vgrow="ALWAYS">
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label text="Downloaded Logs" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <TextField fx:id="searchField" promptText="Search in logs..." prefWidth="200"/>
+            <Button text="Search" onAction="#onSearch"/>
+            <Button text="Clear" onAction="#onClearSearch"/>
+            <Button text="Export" onAction="#onExport"/>
+        </HBox>
+
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <CheckBox fx:id="errorCheckBox" text="ERROR" selected="true"/>
+            <CheckBox fx:id="warnCheckBox" text="WARN" selected="true"/>
+            <CheckBox fx:id="infoCheckBox" text="INFO" selected="true"/>
+            <CheckBox fx:id="debugCheckBox" text="DEBUG" selected="true"/>
+            <CheckBox fx:id="traceCheckBox" text="TRACE" selected="true"/>
+            <Button text="Apply Filter" onAction="#onApplyFilter"/>
+        </HBox>
+
+        <Separator/>
+
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label fx:id="resultCountLabel" text="Lines: 0" style="-fx-font-size: 11px;"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label fx:id="currentFileLabel" text="File: None" style="-fx-font-size: 11px;"/>
+        </HBox>
+
+        <ListView fx:id="logListView" VBox.vgrow="ALWAYS"
+                 style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11px;"/>
+    </VBox>
+</VBox>
+
+---------------------------------------------------------------------------------------------------------------
+context-viewer.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.logviewer.ContextViewerController"
+      spacing="10" style="-fx-background-color: #f4f4f4;">
+    <padding>
+        <Insets top="10" right="10" bottom="10" left="10"/>
+    </padding>
+
+    <!-- Header -->
+    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Smart Context Viewer" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button text="Close" onAction="#onClose"/>
+    </HBox>
+
+    <!-- Selected Log Display -->
+    <VBox spacing="5" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label fx:id="selectedLogLabel" text="Selected Log Line" style="-fx-font-weight: bold;"/>
+        <TextArea fx:id="selectedLogArea"
+                 editable="false"
+                 wrapText="true"
+                 prefHeight="60"
+                 style="-fx-font-family: 'Consolas'; -fx-font-size: 11px; -fx-background-color: #fffacd;"/>
+    </VBox>
+
+    <!-- Extracted Identifiers -->
+    <GridPane hgap="10" vgap="5" style="-fx-background-color: white; -fx-padding: 10;">
+        <columnConstraints>
+            <ColumnConstraints hgrow="NEVER" minWidth="100"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+            <ColumnConstraints hgrow="NEVER" minWidth="100"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+        </columnConstraints>
+
+        <Label text="Request ID:" style="-fx-font-weight: bold;" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+        <Label fx:id="requestIdLabel" text="N/A" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+
+        <Label text="Thread ID:" style="-fx-font-weight: bold;" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+        <Label fx:id="threadIdLabel" text="N/A" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+
+        <Label text="User ID:" style="-fx-font-weight: bold;" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+        <Label fx:id="userIdLabel" text="N/A" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+        <Label text="Endpoint:" style="-fx-font-weight: bold;" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+        <Label fx:id="endpointLabel" text="N/A" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+    </GridPane>
+
+    <!-- Stats -->
+    <Label fx:id="statsLabel" text="Loading stats..." style="-fx-font-size: 11px; -fx-text-fill: #666;"/>
+
+    <!-- Main Content with Tabs -->
+    <SplitPane dividerPositions="0.7" VBox.vgrow="ALWAYS">
+        <!-- Left: Context Tabs -->
+        <TabPane fx:id="contextTabPane" style="-fx-background-color: white;">
+            <Tab text="By Request ID" closable="false">
+                <ListView fx:id="requestIdListView"
+                         style="-fx-font-family: 'Consolas'; -fx-font-size: 10px;"/>
+            </Tab>
+
+            <Tab text="By Thread" closable="false">
+                <ListView fx:id="threadListView"
+                         style="-fx-font-family: 'Consolas'; -fx-font-size: 10px;"/>
+            </Tab>
+
+            <Tab text="Time Window" closable="false">
+                <ListView fx:id="timeWindowListView"
+                         style="-fx-font-family: 'Consolas'; -fx-font-size: 10px;"/>
+            </Tab>
+
+            <Tab text="Related Errors" closable="false">
+                <ListView fx:id="errorsListView"
+                         style="-fx-font-family: 'Consolas'; -fx-font-size: 10px;"/>
+            </Tab>
+
+            <Tab text="Impact Analysis" closable="false">
+                <ListView fx:id="impactListView"
+                         style="-fx-font-family: 'Consolas'; -fx-font-size: 10px;"/>
+            </Tab>
+        </TabPane>
+
+        <!-- Right: Key Data and Timeline -->
+        <VBox spacing="10" style="-fx-background-color: white; -fx-padding: 10;">
+            <!-- Key Data -->
+            <VBox spacing="5" VBox.vgrow="NEVER">
+                <Label text="Key Data Extracted" style="-fx-font-weight: bold;"/>
+                <TextArea fx:id="keyDataArea"
+                         editable="false"
+                         wrapText="true"
+                         prefHeight="100"
+                         style="-fx-font-family: 'Consolas'; -fx-font-size: 10px;"/>
+            </VBox>
+
+            <Separator/>
+
+            <!-- Timeline -->
+            <ScrollPane VBox.vgrow="ALWAYS" fitToWidth="true">
+                <VBox fx:id="timelineBox" spacing="2" style="-fx-padding: 5;"/>
+            </ScrollPane>
+        </VBox>
+    </SplitPane>
+
+    <!-- Help Text -->
+    <HBox spacing="10" style="-fx-background-color: #e9ecef; -fx-padding: 5;">
+        <Label text="💡 Right-click any log line to view its full context. All related logs, errors, and impact are shown automatically."
+               style="-fx-font-size: 11px;"/>
+    </HBox>
+</VBox>
+
+
+------------------------------------------------------------------------------------------
+correlation-view.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.logviewer.CorrelationController"
+      spacing="10" style="-fx-background-color: #f4f4f4;">
+    <padding>
+        <Insets top="10" right="10" bottom="10" left="10"/>
+    </padding>
+
+    <!-- Header -->
+    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Correlation Analysis" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button fx:id="analyzeButton" text="Analyze Correlations" onAction="#onAnalyze"/>
+        <Button fx:id="clearButton" text="Clear" onAction="#onClear"/>
+    </HBox>
+
+    <!-- Search by ID -->
+    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Quick Search ID:"/>
+        <TextField fx:id="searchIdField" promptText="Enter ID to search..." HBox.hgrow="ALWAYS"/>
+        <Button text="Find" onAction="#onSearchId"/>
+    </HBox>
+
+    <!-- Statistics -->
+    <HBox spacing="20" style="-fx-background-color: white; -fx-padding: 10;">
+        <VBox spacing="5">
+            <Label text="Total Correlations:" style="-fx-font-size: 11px;"/>
+            <Label fx:id="totalCorrelationsLabel" text="0" style="-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: #007bff;"/>
+        </VBox>
+        <Separator orientation="VERTICAL"/>
+        <VBox spacing="5">
+            <Label text="Request IDs:" style="-fx-font-size: 11px;"/>
+            <Label fx:id="requestIdCountLabel" text="0" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5">
+            <Label text="Transaction IDs:" style="-fx-font-size: 11px;"/>
+            <Label fx:id="transactionIdCountLabel" text="0" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5">
+            <Label text="Session IDs:" style="-fx-font-size: 11px;"/>
+            <Label fx:id="sessionIdCountLabel" text="0" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        </VBox>
+        <VBox spacing="5">
+            <Label text="User IDs:" style="-fx-font-size: 11px;"/>
+            <Label fx:id="userIdCountLabel" text="0" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        </VBox>
+    </HBox>
+
+    <!-- Correlation List -->
+    <VBox VBox.vgrow="ALWAYS" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Correlated Entries (showing entries found in BOTH panes):" style="-fx-font-weight: bold; -fx-padding: 0 0 5 0;"/>
+
+        <ListView fx:id="correlationListView" VBox.vgrow="ALWAYS"
+                 style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 12px;"/>
+    </VBox>
+
+    <!-- Details Panel -->
+    <SplitPane fx:id="detailsPane" orientation="HORIZONTAL" VBox.vgrow="ALWAYS">
+        <!-- Left: Pane 1 Entries -->
+        <VBox style="-fx-background-color: white; -fx-padding: 10;">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Pane 1 Entries" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="pane1CountLabel" text="0 entries" style="-fx-font-size: 11px;"/>
+            </HBox>
+            <Separator/>
+            <ListView fx:id="pane1EntriesView" VBox.vgrow="ALWAYS"
+                     style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11px;"/>
+        </VBox>
+
+        <!-- Right: Pane 2 Entries -->
+        <VBox style="-fx-background-color: white; -fx-padding: 10;">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Pane 2 Entries" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="pane2CountLabel" text="0 entries" style="-fx-font-size: 11px;"/>
+            </HBox>
+            <Separator/>
+            <ListView fx:id="pane2EntriesView" VBox.vgrow="ALWAYS"
+                     style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11px;"/>
+        </VBox>
+    </SplitPane>
+
+    <!-- Status Bar -->
+    <HBox spacing="10" style="-fx-background-color: #e9ecef; -fx-padding: 5;">
+        <Label fx:id="statusLabel" text="Ready"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <ProgressBar fx:id="progressBar" prefWidth="200" visible="false"/>
+    </HBox>
+</VBox>
+-------------------------------------------------------------------------------------------------------
+
+main-view.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.logviewer.MainController"
+      spacing="10" style="-fx-background-color: #f4f4f4;">
+    <padding>
+        <Insets top="10" right="10" bottom="10" left="10"/>
+    </padding>
+
+    <!-- Toolbar -->
+    <HBox spacing="10" style="-fx-background-color: white; -fx-padding: 10;" alignment="CENTER_LEFT">
+        <Label text="Log Viewer" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        <Separator orientation="VERTICAL"/>
+        <Label text="Trace ID:"/>
+        <TextField fx:id="traceIdField" promptText="Enter Request/Trace ID..." prefWidth="200"/>
+        <Button fx:id="highlightTraceButton" text="Highlight" onAction="#onHighlightTrace" style="-fx-background-color: #17a2b8; -fx-text-fill: white;"/>
+        <Button fx:id="clearTraceButton" text="Clear" onAction="#onClearTrace"/>
+        <Separator orientation="VERTICAL"/>
+        <CheckBox fx:id="syncScrollCheckbox" text="Sync Scroll by Time"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label text="Theme:"/>
+        <ComboBox fx:id="themeSelector" prefWidth="120"/>
+        <Button text="Sequence Diagram" onAction="#onOpenSequenceDiagram"
+                style="-fx-background-color: #6f42c1; -fx-text-fill: white;"/>
+        <Button text="Auto-Refresh Logs" onAction="#onOpenAutoRefresh"
+                style="-fx-background-color: #007bff; -fx-text-fill: white;"/>
+        <Button fx:id="correlationButton" text="Correlation Analysis" onAction="#onOpenCorrelation"
+                style="-fx-background-color: #28a745; -fx-text-fill: white;"/>
+        <Button text="SQL Query Analyzer" onAction="#onOpenSQLAnalyzer"
+                style="-fx-background-color: #e74c3c; -fx-text-fill: white;"/>
+        <Button text="Multi-Env Monitor" onAction="#onOpenMultiEnvMonitor"
+                style="-fx-background-color: #fd7e14; -fx-text-fill: white; -fx-font-weight: bold;"/>
+        <Button text="Help" onAction="#onHelp"/>
+    </HBox>
+
+    <!-- Main Content: Dual Pane -->
+    <SplitPane fx:id="splitPane" dividerPositions="0.5" VBox.vgrow="ALWAYS">
+
+        <!-- Left Log Pane -->
+        <VBox spacing="5" style="-fx-background-color: white; -fx-padding: 5;">
+
+            <!-- Left Panel Header -->
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Log Pane 1" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                <Button fx:id="loadButton1" text="Load Log File" onAction="#onLoadLog1"/>
+                <Label fx:id="fileName1" text="No file loaded" style="-fx-text-fill: #666;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="status1" text="Ready" style="-fx-text-fill: #28a745;"/>
+            </HBox>
+
+            <Separator/>
+
+            <!-- Search and Filter Controls for Left Pane -->
+            <VBox spacing="5">
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Search:" style="-fx-min-width: 60px;"/>
+                    <TextField fx:id="searchField1" promptText="Enter search text..." HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="searchButton1" text="Search" onAction="#onSearch1"/>
+                    <Button fx:id="clearSearch1" text="Clear" onAction="#onClearSearch1"/>
+                </HBox>
+
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Level:" style="-fx-min-width: 60px;"/>
+                    <CheckBox fx:id="errorCheck1" text="ERROR" selected="true"/>
+                    <CheckBox fx:id="warnCheck1" text="WARN" selected="true"/>
+                    <CheckBox fx:id="infoCheck1" text="INFO" selected="true"/>
+                    <CheckBox fx:id="debugCheck1" text="DEBUG" selected="true"/>
+                    <CheckBox fx:id="traceCheck1" text="TRACE" selected="true"/>
+                </HBox>
+
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Date From:" style="-fx-min-width: 60px;"/>
+                    <DatePicker fx:id="dateFrom1" promptText="Start date"/>
+                    <Label text="To:"/>
+                    <DatePicker fx:id="dateTo1" promptText="End date"/>
+                    <Button text="Apply Filters" onAction="#onApplyFilter1"/>
+                    <Button text="Reset" onAction="#onResetFilter1"/>
+                </HBox>
+
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Service:" style="-fx-min-width: 60px;"/>
+                    <TextField fx:id="serviceFilter1" promptText="Service name filter..." HBox.hgrow="ALWAYS"/>
+                </HBox>
+            </VBox>
+
+            <Separator/>
+
+            <!-- Log Display Area for Left Pane -->
+            <VBox VBox.vgrow="ALWAYS">
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label fx:id="resultCount1" text="Lines: 0" style="-fx-font-size: 11px;"/>
+                    <Label fx:id="errorCount1" text="" style="-fx-font-size: 11px; -fx-text-fill: #dc3545;"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="prevError1" text="↑ Prev Error" onAction="#onPrevError1" style="-fx-font-size: 10px;"/>
+                    <Button fx:id="nextError1" text="Next Error ↓" onAction="#onNextError1" style="-fx-font-size: 10px;"/>
+                    <Label fx:id="fileSize1" text="Size: 0 MB" style="-fx-font-size: 11px;"/>
+                </HBox>
+                <ListView fx:id="logListView1" VBox.vgrow="ALWAYS"
+                         style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11px;"/>
+            </VBox>
+        </VBox>
+
+        <!-- Right Log Pane -->
+        <VBox spacing="5" style="-fx-background-color: white; -fx-padding: 5;">
+
+            <!-- Right Panel Header -->
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Log Pane 2" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                <Button fx:id="loadButton2" text="Load Log File" onAction="#onLoadLog2"/>
+                <Label fx:id="fileName2" text="No file loaded" style="-fx-text-fill: #666;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="status2" text="Ready" style="-fx-text-fill: #28a745;"/>
+            </HBox>
+
+            <Separator/>
+
+            <!-- Search and Filter Controls for Right Pane -->
+            <VBox spacing="5">
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Search:" style="-fx-min-width: 60px;"/>
+                    <TextField fx:id="searchField2" promptText="Enter search text..." HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="searchButton2" text="Search" onAction="#onSearch2"/>
+                    <Button fx:id="clearSearch2" text="Clear" onAction="#onClearSearch2"/>
+                </HBox>
+
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Level:" style="-fx-min-width: 60px;"/>
+                    <CheckBox fx:id="errorCheck2" text="ERROR" selected="true"/>
+                    <CheckBox fx:id="warnCheck2" text="WARN" selected="true"/>
+                    <CheckBox fx:id="infoCheck2" text="INFO" selected="true"/>
+                    <CheckBox fx:id="debugCheck2" text="DEBUG" selected="true"/>
+                    <CheckBox fx:id="traceCheck2" text="TRACE" selected="true"/>
+                </HBox>
+
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Date From:" style="-fx-min-width: 60px;"/>
+                    <DatePicker fx:id="dateFrom2" promptText="Start date"/>
+                    <Label text="To:"/>
+                    <DatePicker fx:id="dateTo2" promptText="End date"/>
+                    <Button text="Apply Filters" onAction="#onApplyFilter2"/>
+                    <Button text="Reset" onAction="#onResetFilter2"/>
+                </HBox>
+
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Service:" style="-fx-min-width: 60px;"/>
+                    <TextField fx:id="serviceFilter2" promptText="Service name filter..." HBox.hgrow="ALWAYS"/>
+                </HBox>
+            </VBox>
+
+            <Separator/>
+
+            <!-- Log Display Area for Right Pane -->
+            <VBox VBox.vgrow="ALWAYS">
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label fx:id="resultCount2" text="Lines: 0" style="-fx-font-size: 11px;"/>
+                    <Label fx:id="errorCount2" text="" style="-fx-font-size: 11px; -fx-text-fill: #dc3545;"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="prevError2" text="↑ Prev Error" onAction="#onPrevError2" style="-fx-font-size: 10px;"/>
+                    <Button fx:id="nextError2" text="Next Error ↓" onAction="#onNextError2" style="-fx-font-size: 10px;"/>
+                    <Label fx:id="fileSize2" text="Size: 0 MB" style="-fx-font-size: 11px;"/>
+                </HBox>
+                <ListView fx:id="logListView2" VBox.vgrow="ALWAYS"
+                         style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 11px;"/>
+            </VBox>
+        </VBox>
+    </SplitPane>
+
+    <!-- Status Bar -->
+    <HBox spacing="10" style="-fx-background-color: #e9ecef; -fx-padding: 5;">
+        <Label fx:id="globalStatus" text="Ready to load log files"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <ProgressBar fx:id="progressBar" prefWidth="200" visible="false"/>
+    </HBox>
+</VBox>
+--------------------------------------------------------------------------------------------------------------------------
+multi-env-monitor.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.logviewer.MultiEnvMonitorController"
+            prefWidth="1800" prefHeight="1000">
+
+    <!-- Top: Global Controls -->
+    <top>
+        <VBox style="-fx-background-color: #2c3e50; -fx-padding: 15;">
+            <Label text="Multi-Environment Monitor" textFill="white">
+                <font>
+                    <Font name="System Bold" size="20"/>
+                </font>
+            </Label>
+            <Label text="Monitor 4 environments in parallel with real-time updates" textFill="#ecf0f1">
+                <font>
+                    <Font size="12"/>
+                </font>
+                <VBox.margin>
+                    <Insets top="5"/>
+                </VBox.margin>
+            </Label>
+
+            <!-- Global Search -->
+            <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-padding: 10 0 0 0;">
+                <Label text="Search Trace ID Across All Environments:" textFill="white" style="-fx-font-weight: bold;"/>
+                <TextField fx:id="globalTraceId" promptText="Enter Trace/Request ID..." prefWidth="300"/>
+                <Button fx:id="globalSearchButton" text="Search All" onAction="#onGlobalSearch"
+                        style="-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold;"/>
+                <CheckBox fx:id="syncScrollCheckbox" text="Sync Scroll" textFill="white"/>
+            </HBox>
+        </VBox>
+    </top>
+
+    <!-- Center: Tabs for Each Environment -->
+    <center>
+        <TabPane fx:id="environmentTabs" tabClosingPolicy="UNAVAILABLE">
+
+            <!-- Tab 1: Development -->
+            <Tab fx:id="tab1" text="Development" style="-fx-background-color: #17a2b8;">
+                <VBox spacing="10" style="-fx-padding: 10;">
+                    <!-- Header -->
+                    <HBox spacing="15" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+                        <Label fx:id="env1Name" text="Development" style="-fx-font-weight: bold; -fx-font-size: 16;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env1Status" text="Not Connected" style="-fx-text-fill: #6c757d;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env1Stats" text="Lines: 0 | Errors: 0 | Warnings: 0" style="-fx-font-size: 11;"/>
+                    </HBox>
+
+                    <!-- Controls -->
+                    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: #f8f9fa; -fx-padding: 10;">
+                        <Button fx:id="env1LoadButton" text="Load Log File" onAction="#onLoadEnv1"
+                                style="-fx-background-color: #17a2b8; -fx-text-fill: white;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <CheckBox fx:id="env1AutoRefresh" text="Auto-Refresh"/>
+                        <Label text="Interval (sec):"/>
+                        <TextField fx:id="env1RefreshInterval" prefWidth="60" promptText="5"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label text="Search:"/>
+                        <TextField fx:id="env1SearchField" promptText="Filter logs..." prefWidth="200"/>
+                        <Button fx:id="env1PrevError" text="↑ Prev Error" onAction="#onEnv1PrevError" style="-fx-font-size: 10;"/>
+                        <Button fx:id="env1NextError" text="Next Error ↓" onAction="#onEnv1NextError" style="-fx-font-size: 10;"/>
+                    </HBox>
+
+                    <!-- Log Viewer -->
+                    <ListView fx:id="env1ListView" VBox.vgrow="ALWAYS"
+                              style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 10px;"/>
+                </VBox>
+            </Tab>
+
+            <!-- Tab 2: Staging -->
+            <Tab fx:id="tab2" text="Staging" style="-fx-background-color: #ffc107;">
+                <VBox spacing="10" style="-fx-padding: 10;">
+                    <HBox spacing="15" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+                        <Label fx:id="env2Name" text="Staging" style="-fx-font-weight: bold; -fx-font-size: 16;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env2Status" text="Not Connected" style="-fx-text-fill: #6c757d;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env2Stats" text="Lines: 0 | Errors: 0 | Warnings: 0" style="-fx-font-size: 11;"/>
+                    </HBox>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: #f8f9fa; -fx-padding: 10;">
+                        <Button fx:id="env2LoadButton" text="Load Log File" onAction="#onLoadEnv2"
+                                style="-fx-background-color: #ffc107; -fx-text-fill: black;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <CheckBox fx:id="env2AutoRefresh" text="Auto-Refresh"/>
+                        <Label text="Interval (sec):"/>
+                        <TextField fx:id="env2RefreshInterval" prefWidth="60" promptText="5"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label text="Search:"/>
+                        <TextField fx:id="env2SearchField" promptText="Filter logs..." prefWidth="200"/>
+                        <Button fx:id="env2PrevError" text="↑ Prev Error" onAction="#onEnv2PrevError" style="-fx-font-size: 10;"/>
+                        <Button fx:id="env2NextError" text="Next Error ↓" onAction="#onEnv2NextError" style="-fx-font-size: 10;"/>
+                    </HBox>
+
+                    <ListView fx:id="env2ListView" VBox.vgrow="ALWAYS"
+                              style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 10px;"/>
+                </VBox>
+            </Tab>
+
+            <!-- Tab 3: Production -->
+            <Tab fx:id="tab3" text="Production" style="-fx-background-color: #dc3545;">
+                <VBox spacing="10" style="-fx-padding: 10;">
+                    <HBox spacing="15" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+                        <Label fx:id="env3Name" text="Production" style="-fx-font-weight: bold; -fx-font-size: 16;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env3Status" text="Not Connected" style="-fx-text-fill: #6c757d;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env3Stats" text="Lines: 0 | Errors: 0 | Warnings: 0" style="-fx-font-size: 11;"/>
+                    </HBox>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: #f8f9fa; -fx-padding: 10;">
+                        <Button fx:id="env3LoadButton" text="Load Log File" onAction="#onLoadEnv3"
+                                style="-fx-background-color: #dc3545; -fx-text-fill: white;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <CheckBox fx:id="env3AutoRefresh" text="Auto-Refresh"/>
+                        <Label text="Interval (sec):"/>
+                        <TextField fx:id="env3RefreshInterval" prefWidth="60" promptText="5"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label text="Search:"/>
+                        <TextField fx:id="env3SearchField" promptText="Filter logs..." prefWidth="200"/>
+                        <Button fx:id="env3PrevError" text="↑ Prev Error" onAction="#onEnv3PrevError" style="-fx-font-size: 10;"/>
+                        <Button fx:id="env3NextError" text="Next Error ↓" onAction="#onEnv3NextError" style="-fx-font-size: 10;"/>
+                    </HBox>
+
+                    <ListView fx:id="env3ListView" VBox.vgrow="ALWAYS"
+                              style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 10px;"/>
+                </VBox>
+            </Tab>
+
+            <!-- Tab 4: DR/Backup -->
+            <Tab fx:id="tab4" text="DR/Backup" style="-fx-background-color: #6c757d;">
+                <VBox spacing="10" style="-fx-padding: 10;">
+                    <HBox spacing="15" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+                        <Label fx:id="env4Name" text="DR/Backup" style="-fx-font-weight: bold; -fx-font-size: 16;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env4Status" text="Not Connected" style="-fx-text-fill: #6c757d;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label fx:id="env4Stats" text="Lines: 0 | Errors: 0 | Warnings: 0" style="-fx-font-size: 11;"/>
+                    </HBox>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: #f8f9fa; -fx-padding: 10;">
+                        <Button fx:id="env4LoadButton" text="Load Log File" onAction="#onLoadEnv4"
+                                style="-fx-background-color: #6c757d; -fx-text-fill: white;"/>
+                        <Separator orientation="VERTICAL"/>
+                        <CheckBox fx:id="env4AutoRefresh" text="Auto-Refresh"/>
+                        <Label text="Interval (sec):"/>
+                        <TextField fx:id="env4RefreshInterval" prefWidth="60" promptText="5"/>
+                        <Separator orientation="VERTICAL"/>
+                        <Label text="Search:"/>
+                        <TextField fx:id="env4SearchField" promptText="Filter logs..." prefWidth="200"/>
+                        <Button fx:id="env4PrevError" text="↑ Prev Error" onAction="#onEnv4PrevError" style="-fx-font-size: 10;"/>
+                        <Button fx:id="env4NextError" text="Next Error ↓" onAction="#onEnv4NextError" style="-fx-font-size: 10;"/>
+                    </HBox>
+
+                    <ListView fx:id="env4ListView" VBox.vgrow="ALWAYS"
+                              style="-fx-font-family: 'Consolas', 'Monaco', monospace; -fx-font-size: 10px;"/>
+                </VBox>
+            </Tab>
+
+        </TabPane>
+    </center>
+
+    <!-- Bottom: Help -->
+    <bottom>
+        <HBox style="-fx-background-color: #ecf0f1; -fx-padding: 10;" spacing="20">
+            <Label text="💡 Tips: Load different log files in each tab. Use 'Search All' to find the same Trace ID across all environments. Enable Auto-Refresh for real-time monitoring."
+                   wrapText="true" style="-fx-font-size: 11; -fx-text-fill: #7f8c8d;"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>
+-----------------------------------------------------------------------------------------------------------
+
+sequence-diagram-view.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.canvas.Canvas?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.logviewer.SequenceDiagramController"
+      spacing="10" style="-fx-background-color: #f4f4f4;">
+    <padding>
+        <Insets top="10" right="10" bottom="10" left="10"/>
+    </padding>
+
+    <!-- Header -->
+    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: white; -fx-padding: 10;">
+        <Label text="Log Flow Sequence Diagram" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label text="Request ID:"/>
+        <ComboBox fx:id="requestIdSelector" prefWidth="250" promptText="Select Request ID..."/>
+        <Button text="Refresh" onAction="#onRefresh" style="-fx-background-color: #007bff; -fx-text-fill: white;"/>
+        <Button text="Export" onAction="#onExport" style="-fx-background-color: #28a745; -fx-text-fill: white;"/>
+    </HBox>
+
+    <!-- Stats Label -->
+    <Label fx:id="statsLabel" text="No data" style="-fx-font-size: 12px; -fx-text-fill: #666;"/>
+
+    <!-- Main Content -->
+    <SplitPane dividerPositions="0.7" VBox.vgrow="ALWAYS">
+        <!-- Sequence Diagram Canvas -->
+        <ScrollPane fx:id="canvasScrollPane" style="-fx-background-color: white;">
+            <Canvas fx:id="sequenceCanvas" width="800" height="600"/>
+        </ScrollPane>
+
+        <!-- Event Details Panel -->
+        <VBox spacing="5" style="-fx-background-color: white; -fx-padding: 10;">
+            <Label text="Event Details" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+            <Separator/>
+            <TextArea fx:id="eventDetailsArea"
+                     promptText="Click on any event in the diagram to see details..."
+                     editable="false"
+                     wrapText="true"
+                     VBox.vgrow="ALWAYS"
+                     style="-fx-font-family: 'Consolas', 'Courier New', monospace; -fx-font-size: 11px;"/>
+        </VBox>
+    </SplitPane>
+
+    <!-- Help Text -->
+    <HBox spacing="10" style="-fx-background-color: #e9ecef; -fx-padding: 5;">
+        <Label text="💡 Click on events in the diagram to see full details. Green = Success, Red = Error."
+               style="-fx-font-size: 11px;"/>
+    </HBox>
+</VBox>
+-----------------------------------------------------------------------------------------------------
+
+sql-query-analyzer.fxml
+
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.logviewer.SQLQueryAnalyzerController"
+            prefWidth="1600" prefHeight="1000">
+
+    <!-- Top: Title and Statistics -->
+    <top>
+        <VBox style="-fx-background-color: #2c3e50; -fx-padding: 15;">
+            <Label text="SQL Query Analyzer" textFill="white">
+                <font>
+                    <Font name="System Bold" size="20"/>
+                </font>
+            </Label>
+            <Label fx:id="statsLabel" textFill="#ecf0f1" wrapText="true">
+                <font>
+                    <Font size="12"/>
+                </font>
+                <VBox.margin>
+                    <Insets top="5"/>
+                </VBox.margin>
+            </Label>
+        </VBox>
+    </top>
+
+    <!-- Center: Main Content -->
+    <center>
+        <SplitPane dividerPositions="0.5" orientation="VERTICAL">
+            <!-- Top Half: Query List and Details -->
+            <SplitPane dividerPositions="0.6">
+                <!-- Left: Query Table -->
+                <VBox>
+                    <Label text="SQL Queries in Execution Sequence" style="-fx-font-weight: bold; -fx-font-size: 14; -fx-padding: 10;">
+                        <VBox.margin>
+                            <Insets bottom="5"/>
+                        </VBox.margin>
+                    </Label>
+
+                    <TableView fx:id="queryTableView" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="lineNumberColumn" text="Line" prefWidth="60" minWidth="50"/>
+                            <TableColumn fx:id="queryTypeColumn" text="Type" prefWidth="80" minWidth="70"/>
+                            <TableColumn fx:id="queryPreviewColumn" text="Query Preview" prefWidth="400" minWidth="200"/>
+                            <TableColumn fx:id="durationColumn" text="Duration (ms)" prefWidth="100" minWidth="90"/>
+                            <TableColumn fx:id="statusColumn" text="Status" prefWidth="100" minWidth="80"/>
+                            <TableColumn fx:id="timeColumn" text="Execution Time" prefWidth="120" minWidth="100"/>
+                        </columns>
+                        <columnResizePolicy>
+                            <TableView fx:constant="CONSTRAINED_RESIZE_POLICY"/>
+                        </columnResizePolicy>
+                    </TableView>
+                </VBox>
+
+                <!-- Right: Query Details -->
+                <VBox spacing="10" style="-fx-padding: 10;">
+                    <Label fx:id="selectedQueryLabel" text="Select a query to view details"
+                           style="-fx-font-weight: bold; -fx-font-size: 14;"/>
+
+                    <Separator/>
+
+                    <!-- Full Query -->
+                    <VBox spacing="5">
+                        <Label text="Full SQL Query:" style="-fx-font-weight: bold;"/>
+                        <TextArea fx:id="queryDetailsArea" prefHeight="120" wrapText="true" editable="false"
+                                  style="-fx-font-family: 'Courier New'; -fx-font-size: 12;"/>
+                    </VBox>
+
+                    <!-- Execution Details -->
+                    <VBox spacing="5">
+                        <Label text="Execution Details:" style="-fx-font-weight: bold;"/>
+                        <TextArea fx:id="executionDetailsArea" prefHeight="100" editable="false"
+                                  style="-fx-font-family: 'Courier New'; -fx-font-size: 11;"/>
+                    </VBox>
+
+                    <!-- Original Log Line -->
+                    <VBox spacing="5">
+                        <Label text="Original Log Line:" style="-fx-font-weight: bold;"/>
+                        <TextArea fx:id="logLineArea" prefHeight="60" wrapText="true" editable="false"
+                                  style="-fx-font-family: 'Courier New'; -fx-font-size: 11;"/>
+                    </VBox>
+
+                    <!-- Action Buttons -->
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Button fx:id="copyQueryButton" text="Copy Query to Clipboard" onAction="#onCopyQuery"
+                                style="-fx-background-color: #3498db; -fx-text-fill: white; -fx-font-weight: bold;"/>
+                        <Button text="Refresh" onAction="#onRefresh"
+                                style="-fx-background-color: #95a5a6; -fx-text-fill: white;"/>
+                    </HBox>
+                </VBox>
+            </SplitPane>
+
+            <!-- Bottom Half: Databricks Execution -->
+            <VBox spacing="10" style="-fx-padding: 10;">
+                <Label text="Execute Query on Databricks" style="-fx-font-weight: bold; -fx-font-size: 14;"/>
+
+                <!-- Databricks Configuration -->
+                <GridPane hgap="10" vgap="8">
+                    <columnConstraints>
+                        <ColumnConstraints hgrow="NEVER" minWidth="120"/>
+                        <ColumnConstraints hgrow="ALWAYS" minWidth="300"/>
+                    </columnConstraints>
+
+                    <Label text="Databricks Host:" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                    <TextField fx:id="databricksHostField" promptText="e.g., adb-1234567890123456.7.azuredatabricks.net"
+                               GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+
+                    <Label text="Access Token:" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                    <PasswordField fx:id="databricksTokenField" promptText="Your Databricks personal access token"
+                                   GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+                    <Label text="SQL HTTP Path:" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                    <TextField fx:id="databricksPathField" promptText="e.g., /sql/1.0/warehouses/abc123def456"
+                               GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                </GridPane>
+
+                <!-- Execution Controls -->
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Button fx:id="executeButton" text="Execute Query on Databricks" onAction="#onExecuteQuery"
+                            style="-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14; -fx-padding: 10 20;"/>
+                    <Button fx:id="exportResultsButton" text="Export Results to CSV" onAction="#onExportResults"
+                            style="-fx-background-color: #e67e22; -fx-text-fill: white; -fx-font-weight: bold;"/>
+                    <ProgressBar fx:id="executionProgressBar" prefWidth="200" visible="false"/>
+                    <Label fx:id="resultsStatusLabel" text="Ready to execute"/>
+                </HBox>
+
+                <Separator/>
+
+                <!-- Results Table (with virtual scrolling) -->
+                <VBox spacing="5" VBox.vgrow="ALWAYS">
+                    <Label text="Query Results:" style="-fx-font-weight: bold;"/>
+                    <TableView fx:id="resultsTableView" VBox.vgrow="ALWAYS">
+                        <!-- Columns will be added dynamically based on query results -->
+                        <placeholder>
+                            <Label text="Execute a query to see results here"
+                                   style="-fx-font-size: 14; -fx-text-fill: #7f8c8d;"/>
+                        </placeholder>
+                    </TableView>
+                    <Label text="Virtual scrolling enabled - supports millions of rows"
+                           style="-fx-font-size: 10; -fx-text-fill: #95a5a6; -fx-font-style: italic;"/>
+                </VBox>
+            </VBox>
+        </SplitPane>
+    </center>
+
+    <!-- Bottom: Help Text -->
+    <bottom>
+        <HBox style="-fx-background-color: #ecf0f1; -fx-padding: 10;" spacing="20">
+            <Label text="Tips: Select any query from the list to see details. Click 'Copy Query' to copy SQL to clipboard. Configure Databricks connection to execute queries directly."
+                   wrapText="true" style="-fx-font-size: 11; -fx-text-fill: #7f8c8d;"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>
+---------------------------------------------------------------
+blue-theme.css
+
+/* Blue Theme */
+.root {
+    -fx-base: #E3F2FD;
+    -fx-background: #BBDEFB;
+    -fx-control-inner-background: #E3F2FD;
+    -fx-accent: #1976D2;
+}
+
+/* Background colors */
+VBox, HBox, SplitPane {
+    -fx-background-color: #E3F2FD;
+}
+
+/* Text colors */
+.label {
+    -fx-text-fill: #0D47A1;
+}
+
+/* Text fields and inputs */
+.text-field, .text-area, .password-field {
+    -fx-background-color: white;
+    -fx-text-fill: #0D47A1;
+    -fx-border-color: #64B5F6;
+}
+
+.text-field:focused, .text-area:focused, .password-field:focused {
+    -fx-border-color: #1976D2;
+    -fx-border-width: 2px;
+}
+
+/* Buttons */
+.button {
+    -fx-background-color: #2196F3;
+    -fx-text-fill: white;
+}
+
+.button:hover {
+    -fx-background-color: #1976D2;
+}
+
+.button:pressed {
+    -fx-background-color: #0D47A1;
+}
+
+/* List views */
+.list-view {
+    -fx-background-color: white;
+    -fx-control-inner-background: white;
+}
+
+.list-cell {
+    -fx-background-color: white;
+    -fx-text-fill: #0D47A1;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #64B5F6;
+    -fx-text-fill: #0D47A1;
+}
+
+.list-cell:filled:hover {
+    -fx-background-color: #BBDEFB;
+}
+
+/* ComboBox */
+.combo-box {
+    -fx-background-color: white;
+    -fx-border-color: #64B5F6;
+}
+
+/* CheckBox */
+.check-box {
+    -fx-text-fill: #0D47A1;
+}
+
+.check-box .box {
+    -fx-background-color: white;
+    -fx-border-color: #2196F3;
+}
+
+/* RadioButton */
+.radio-button {
+    -fx-text-fill: #0D47A1;
+}
+
+/* Progress bar */
+.progress-bar .bar {
+    -fx-background-color: #2196F3;
+}
+
+/* Separator */
+.separator .line {
+    -fx-border-color: #64B5F6;
+}
+-----------------------------------------------------------
+
+dark-theme.css
+
+/* Dark Theme */
+.root {
+    -fx-base: #2b2b2b;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #3c3f41;
+    -fx-accent: #4A9EFF;
+}
+
+/* Background colors */
+VBox, HBox, SplitPane {
+    -fx-background-color: #2b2b2b;
+}
+
+/* Text colors */
+.label {
+    -fx-text-fill: #d4d4d4;
+}
+
+/* Text fields and inputs */
+.text-field, .text-area, .password-field {
+    -fx-background-color: #3c3f41;
+    -fx-text-fill: #d4d4d4;
+    -fx-prompt-text-fill: #808080;
+    -fx-border-color: #555555;
+}
+
+.text-field:focused, .text-area:focused, .password-field:focused {
+    -fx-border-color: #4A9EFF;
+}
+
+/* Buttons */
+.button {
+    -fx-background-color: #3c3f41;
+    -fx-text-fill: #d4d4d4;
+    -fx-border-color: #555555;
+}
+
+.button:hover {
+    -fx-background-color: #4c4f51;
+}
+
+.button:pressed {
+    -fx-background-color: #2c2f31;
+}
+
+/* List views */
+.list-view {
+    -fx-background-color: #2b2b2b;
+    -fx-control-inner-background: #2b2b2b;
+}
+
+.list-cell {
+    -fx-background-color: #2b2b2b;
+    -fx-text-fill: #d4d4d4;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #214283;
+    -fx-text-fill: white;
+}
+
+.list-cell:filled:hover {
+    -fx-background-color: #3c3f41;
+}
+
+/* ComboBox */
+.combo-box {
+    -fx-background-color: #3c3f41;
+}
+
+.combo-box .list-cell {
+    -fx-background-color: #3c3f41;
+    -fx-text-fill: #d4d4d4;
+}
+
+/* CheckBox */
+.check-box {
+    -fx-text-fill: #d4d4d4;
+}
+
+.check-box .box {
+    -fx-background-color: #3c3f41;
+    -fx-border-color: #555555;
+}
+
+/* RadioButton */
+.radio-button {
+    -fx-text-fill: #d4d4d4;
+}
+
+/* Spinner */
+.spinner {
+    -fx-background-color: #3c3f41;
+}
+
+.spinner .text-field {
+    -fx-background-color: #3c3f41;
+    -fx-text-fill: #d4d4d4;
+}
+
+/* Progress bar */
+.progress-bar {
+    -fx-background-color: #3c3f41;
+}
+
+.progress-bar .bar {
+    -fx-background-color: #4A9EFF;
+}
+
+/* Separator */
+.separator .line {
+    -fx-border-color: #555555;
+}
+
+/* ScrollBar */
+.scroll-bar {
+    -fx-background-color: #2b2b2b;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #555555;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #666666;
+}
+
+/* DatePicker */
+.date-picker {
+    -fx-background-color: #3c3f41;
+}
+
+.date-picker-popup {
+    -fx-background-color: #2b2b2b;
+}
+========================================================================================================
+green-theme.css
+
+/* Green/Nature Theme */
+.root {
+    -fx-base: #E8F5E9;
+    -fx-background: #C8E6C9;
+    -fx-control-inner-background: #E8F5E9;
+    -fx-accent: #388E3C;
+}
+
+/* Background colors */
+VBox, HBox, SplitPane {
+    -fx-background-color: #E8F5E9;
+}
+
+/* Text colors */
+.label {
+    -fx-text-fill: #1B5E20;
+}
+
+/* Text fields and inputs */
+.text-field, .text-area, .password-field {
+    -fx-background-color: white;
+    -fx-text-fill: #1B5E20;
+    -fx-border-color: #81C784;
+}
+
+.text-field:focused, .text-area:focused, .password-field:focused {
+    -fx-border-color: #388E3C;
+    -fx-border-width: 2px;
+}
+
+/* Buttons */
+.button {
+    -fx-background-color: #4CAF50;
+    -fx-text-fill: white;
+}
+
+.button:hover {
+    -fx-background-color: #388E3C;
+}
+
+.button:pressed {
+    -fx-background-color: #2E7D32;
+}
+
+/* List views */
+.list-view {
+    -fx-background-color: white;
+    -fx-control-inner-background: white;
+}
+
+.list-cell {
+    -fx-background-color: white;
+    -fx-text-fill: #1B5E20;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #81C784;
+    -fx-text-fill: #1B5E20;
+}
+
+.list-cell:filled:hover {
+    -fx-background-color: #C8E6C9;
+}
+
+/* ComboBox */
+.combo-box {
+    -fx-background-color: white;
+    -fx-border-color: #81C784;
+}
+
+/* CheckBox */
+.check-box {
+    -fx-text-fill: #1B5E20;
+}
+
+.check-box .box {
+    -fx-background-color: white;
+    -fx-border-color: #4CAF50;
+}
+
+/* RadioButton */
+.radio-button {
+    -fx-text-fill: #1B5E20;
+}
+
+/* Progress bar */
+.progress-bar .bar {
+    -fx-background-color: #4CAF50;
+}
+
+/* Separator */
+.separator .line {
+    -fx-border-color: #81C784;
+}
+=========================================================================
+light-theme.css
+
+/* Light Theme (Default) */
+.root {
+    -fx-base: #f4f4f4;
+    -fx-background: white;
+    -fx-control-inner-background: white;
+    -fx-accent: #0078d4;
+}
+
+/* Background colors */
+VBox, HBox, SplitPane {
+    -fx-background-color: #f4f4f4;
+}
+
+/* Text colors */
+.label {
+    -fx-text-fill: #333333;
+}
+
+/* Text fields and inputs */
+.text-field, .text-area, .password-field {
+    -fx-background-color: white;
+    -fx-text-fill: #333333;
+    -fx-border-color: #cccccc;
+}
+
+.text-field:focused, .text-area:focused, .password-field:focused {
+    -fx-border-color: #0078d4;
+    -fx-border-width: 2px;
+}
+
+/* Buttons */
+.button {
+    -fx-background-color: #e1e1e1;
+    -fx-text-fill: #333333;
+}
+
+.button:hover {
+    -fx-background-color: #d1d1d1;
+}
+
+.button:pressed {
+    -fx-background-color: #c1c1c1;
+}
+
+/* List views */
+.list-view {
+    -fx-background-color: white;
+    -fx-control-inner-background: white;
+}
+
+.list-cell {
+    -fx-background-color: white;
+    -fx-text-fill: #333333;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #0078d4;
+    -fx-text-fill: white;
+}
+
+.list-cell:filled:hover {
+    -fx-background-color: #f0f0f0;
+}
+
+/* ComboBox */
+.combo-box {
+    -fx-background-color: white;
+    -fx-border-color: #cccccc;
+}
+
+/* CheckBox */
+.check-box {
+    -fx-text-fill: #333333;
+}
+
+.check-box .box {
+    -fx-background-color: white;
+    -fx-border-color: #999999;
+}
+
+/* RadioButton */
+.radio-button {
+    -fx-text-fill: #333333;
+}
+
+/* Progress bar */
+.progress-bar .bar {
+    -fx-background-color: #0078d4;
+}
+
+/* Separator */
+.separator .line {
+    -fx-border-color: #cccccc;
 }
