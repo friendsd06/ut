@@ -1,13 +1,12 @@
 {
-  "title": "🚀 frmWService - Executive Command Center",
-  "description": "Real-time Request Processing Intelligence Dashboard",
+  "title": "frmWService - Request Status Dashboard",
+  "description": "Real-time Request Processing Dashboard",
   "widgets": [
     {
-      "id": 1,
       "definition": {
         "type": "note",
-        "content": "# 🎯 Request Processing Command Center\n### Real-Time Operational Intelligence | Service: **frmWService**\n\n`Live Monitoring` `Auto-Refresh` `Enterprise Grade`",
-        "background_color": "vivid_purple",
+        "content": "# 🎯 Request Processing Dashboard\n**Service:** frmWService | **Status:** Live",
+        "background_color": "purple",
         "font_size": "14",
         "text_align": "center",
         "vertical_align": "center",
@@ -22,45 +21,6 @@
       }
     },
     {
-      "id": 100,
-      "definition": {
-        "type": "note",
-        "content": "## 📊 Action Metrics",
-        "background_color": "gray",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 1,
-        "width": 6,
-        "height": 1
-      }
-    },
-    {
-      "id": 101,
-      "definition": {
-        "type": "note",
-        "content": "## 🔔 Status Metrics",
-        "background_color": "gray",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 6,
-        "y": 1,
-        "width": 6,
-        "height": 1
-      }
-    },
-    {
-      "id": 2,
       "definition": {
         "title": "🚀 STARTING",
         "title_size": "16",
@@ -90,41 +50,24 @@
             "response_format": "scalar",
             "conditional_formats": [
               {
-                "comparator": ">",
-                "value": 100,
-                "palette": "white_on_blue"
-              },
-              {
-                "comparator": ">",
-                "value": 50,
-                "palette": "blue_on_white"
-              },
-              {
                 "comparator": ">=",
                 "value": 0,
-                "palette": "white_on_gray"
+                "palette": "white_on_blue"
               }
             ]
           }
         ],
         "autoscale": true,
-        "precision": 0,
-        "timeseries_background": {
-          "type": "area",
-          "yaxis": {
-            "include_zero": true
-          }
-        }
+        "precision": 0
       },
       "layout": {
         "x": 0,
-        "y": 2,
+        "y": 1,
         "width": 3,
         "height": 2
       }
     },
     {
-      "id": 3,
       "definition": {
         "title": "✅ ENDING",
         "title_size": "16",
@@ -154,41 +97,24 @@
             "response_format": "scalar",
             "conditional_formats": [
               {
-                "comparator": ">",
-                "value": 100,
-                "palette": "white_on_green"
-              },
-              {
-                "comparator": ">",
-                "value": 50,
-                "palette": "green_on_white"
-              },
-              {
                 "comparator": ">=",
                 "value": 0,
-                "palette": "white_on_gray"
+                "palette": "white_on_green"
               }
             ]
           }
         ],
         "autoscale": true,
-        "precision": 0,
-        "timeseries_background": {
-          "type": "area",
-          "yaxis": {
-            "include_zero": true
-          }
-        }
+        "precision": 0
       },
       "layout": {
         "x": 3,
-        "y": 2,
+        "y": 1,
         "width": 3,
         "height": 2
       }
     },
     {
-      "id": 4,
       "definition": {
         "title": "ℹ️ INFO",
         "title_size": "16",
@@ -218,41 +144,24 @@
             "response_format": "scalar",
             "conditional_formats": [
               {
-                "comparator": ">",
-                "value": 100,
-                "palette": "white_on_yellow"
-              },
-              {
-                "comparator": ">",
-                "value": 50,
-                "palette": "yellow_on_white"
-              },
-              {
                 "comparator": ">=",
                 "value": 0,
-                "palette": "white_on_gray"
+                "palette": "white_on_yellow"
               }
             ]
           }
         ],
         "autoscale": true,
-        "precision": 0,
-        "timeseries_background": {
-          "type": "area",
-          "yaxis": {
-            "include_zero": true
-          }
-        }
+        "precision": 0
       },
       "layout": {
         "x": 6,
-        "y": 2,
+        "y": 1,
         "width": 3,
         "height": 2
       }
     },
     {
-      "id": 5,
       "definition": {
         "title": "🔴 ERROR",
         "title_size": "16",
@@ -283,13 +192,8 @@
             "conditional_formats": [
               {
                 "comparator": ">",
-                "value": 10,
-                "palette": "white_on_red"
-              },
-              {
-                "comparator": ">",
                 "value": 0,
-                "palette": "red_on_white"
+                "palette": "white_on_red"
               },
               {
                 "comparator": ">=",
@@ -300,59 +204,33 @@
           }
         ],
         "autoscale": true,
-        "precision": 0,
-        "timeseries_background": {
-          "type": "area",
-          "yaxis": {
-            "include_zero": true
-          }
-        }
+        "precision": 0
       },
       "layout": {
         "x": 9,
-        "y": 2,
+        "y": 1,
         "width": 3,
         "height": 2
       }
     },
     {
-      "id": 200,
       "definition": {
-        "type": "note",
-        "content": "## 📈 Trend Analysis",
-        "background_color": "gray",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 4,
-        "width": 12,
-        "height": 1
-      }
-    },
-    {
-      "id": 6,
-      "definition": {
-        "title": "📊 Action Trend Over Time",
+        "title": "📊 Action Trend",
         "title_size": "16",
         "title_align": "left",
         "show_legend": true,
-        "legend_layout": "horizontal",
+        "legend_layout": "auto",
         "legend_columns": ["avg", "sum", "value"],
         "type": "timeseries",
         "requests": [
           {
             "formulas": [
               {
-                "alias": "🚀 Starting",
+                "alias": "Starting",
                 "formula": "query1"
               },
               {
-                "alias": "✅ Ending",
+                "alias": "Ending",
                 "formula": "query2"
               }
             ],
@@ -384,45 +262,39 @@
             ],
             "response_format": "timeseries",
             "style": {
-              "palette": "cool",
+              "palette": "dog_classic",
               "line_type": "solid",
-              "line_width": "thick"
+              "line_width": "normal"
             },
             "display_type": "line"
           }
-        ],
-        "yaxis": {
-          "include_zero": true,
-          "scale": "linear"
-        },
-        "markers": []
+        ]
       },
       "layout": {
         "x": 0,
-        "y": 5,
+        "y": 3,
         "width": 6,
         "height": 3
       }
     },
     {
-      "id": 7,
       "definition": {
-        "title": "🔔 Status Trend Over Time",
+        "title": "🔔 Status Trend",
         "title_size": "16",
         "title_align": "left",
         "show_legend": true,
-        "legend_layout": "horizontal",
+        "legend_layout": "auto",
         "legend_columns": ["avg", "sum", "value"],
         "type": "timeseries",
         "requests": [
           {
             "formulas": [
               {
-                "alias": "ℹ️ INFO",
+                "alias": "INFO",
                 "formula": "query1"
               },
               {
-                "alias": "🔴 ERROR",
+                "alias": "ERROR",
                 "formula": "query2"
               }
             ],
@@ -456,50 +328,25 @@
             "style": {
               "palette": "warm",
               "line_type": "solid",
-              "line_width": "thick"
+              "line_width": "normal"
             },
             "display_type": "bars"
           }
-        ],
-        "yaxis": {
-          "include_zero": true,
-          "scale": "linear"
-        },
-        "markers": []
+        ]
       },
       "layout": {
         "x": 6,
-        "y": 5,
+        "y": 3,
         "width": 6,
         "height": 3
       }
     },
     {
-      "id": 300,
       "definition": {
-        "type": "note",
-        "content": "## 🎯 Distribution Analysis",
-        "background_color": "gray",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 8,
-        "width": 12,
-        "height": 1
-      }
-    },
-    {
-      "id": 8,
-      "definition": {
-        "title": "📍 Requests by Phase",
+        "title": "📍 By Phase",
         "title_size": "16",
         "title_align": "left",
-        "type": "sunburst",
+        "type": "toplist",
         "requests": [
           {
             "formulas": [
@@ -534,29 +381,23 @@
                 }
               }
             ],
-            "response_format": "scalar",
-            "style": {}
+            "response_format": "scalar"
           }
-        ],
-        "hide_total": false,
-        "legend": {
-          "type": "automatic"
-        }
+        ]
       },
       "layout": {
         "x": 0,
-        "y": 9,
+        "y": 6,
         "width": 4,
         "height": 3
       }
     },
     {
-      "id": 9,
       "definition": {
-        "title": "⚙️ Requests by Adjustment Type",
+        "title": "⚙️ By Adjustment Type",
         "title_size": "16",
         "title_align": "left",
-        "type": "sunburst",
+        "type": "toplist",
         "requests": [
           {
             "formulas": [
@@ -591,29 +432,23 @@
                 }
               }
             ],
-            "response_format": "scalar",
-            "style": {}
+            "response_format": "scalar"
           }
-        ],
-        "hide_total": false,
-        "legend": {
-          "type": "automatic"
-        }
+        ]
       },
       "layout": {
         "x": 4,
-        "y": 9,
+        "y": 6,
         "width": 4,
         "height": 3
       }
     },
     {
-      "id": 10,
       "definition": {
-        "title": "📊 Action vs Status Matrix",
+        "title": "📊 By Action",
         "title_size": "16",
         "title_align": "left",
-        "type": "treemap",
+        "type": "toplist",
         "requests": [
           {
             "formulas": [
@@ -641,14 +476,6 @@
                       "aggregation": "count",
                       "order": "desc"
                     }
-                  },
-                  {
-                    "facet": "@status",
-                    "limit": 10,
-                    "sort": {
-                      "aggregation": "count",
-                      "order": "desc"
-                    }
                   }
                 ],
                 "search": {
@@ -656,71 +483,20 @@
                 }
               }
             ],
-            "response_format": "scalar",
-            "style": {}
+            "response_format": "scalar"
           }
         ]
       },
       "layout": {
         "x": 8,
-        "y": 9,
+        "y": 6,
         "width": 4,
         "height": 3
       }
     },
     {
-      "id": 400,
       "definition": {
-        "type": "note",
-        "content": "## 📋 Live Request Stream",
-        "background_color": "gray",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 12,
-        "width": 12,
-        "height": 1
-      }
-    },
-    {
-      "id": 11,
-      "definition": {
-        "title": "🔴 Recent Errors (Immediate Attention Required)",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "log_stream",
-        "indexes": [],
-        "query": "service:frmWService @status:ERROR $action $phase $adjustment_type",
-        "sort": {
-          "column": "time",
-          "order": "desc"
-        },
-        "columns": [
-          "@request_id",
-          "@action",
-          "@phase",
-          "@adjustment_type"
-        ],
-        "show_date_column": true,
-        "show_message_column": false,
-        "message_display": "inline"
-      },
-      "layout": {
-        "x": 0,
-        "y": 13,
-        "width": 12,
-        "height": 3
-      }
-    },
-    {
-      "id": 12,
-      "definition": {
-        "title": "📜 All Request Details (Live Feed)",
+        "title": "📜 Request Details (Live)",
         "title_size": "16",
         "title_align": "left",
         "type": "log_stream",
@@ -743,28 +519,9 @@
       },
       "layout": {
         "x": 0,
-        "y": 16,
+        "y": 9,
         "width": 12,
         "height": 4
-      }
-    },
-    {
-      "id": 500,
-      "definition": {
-        "type": "note",
-        "content": "---\n**Dashboard Version:** 2.0 | **Last Updated:** Auto-Refresh | **Owner:** Platform Engineering Team\n\n🔒 *Confidential - Internal Use Only*",
-        "background_color": "gray",
-        "font_size": "12",
-        "text_align": "center",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 20,
-        "width": 12,
-        "height": 1
       }
     }
   ],
