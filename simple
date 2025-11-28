@@ -1,15 +1,15 @@
 {
-  "title": "frmWService - Request Status Dashboard",
-  "description": "Dashboard for demo pipeline - Track request actions and status",
+  "title": "🚀 frmWService - Executive Command Center",
+  "description": "Real-time Request Processing Intelligence Dashboard",
   "widgets": [
     {
       "id": 1,
       "definition": {
         "type": "note",
-        "content": "# 📊 Request Status Dashboard\n**Service:** frmWService",
-        "background_color": "purple",
-        "font_size": "16",
-        "text_align": "left",
+        "content": "# 🎯 Request Processing Command Center\n### Real-Time Operational Intelligence | Service: **frmWService**\n\n`Live Monitoring` `Auto-Refresh` `Enterprise Grade`",
+        "background_color": "vivid_purple",
+        "font_size": "14",
+        "text_align": "center",
         "vertical_align": "center",
         "show_tick": false,
         "has_padding": true
@@ -22,11 +22,49 @@
       }
     },
     {
+      "id": 100,
+      "definition": {
+        "type": "note",
+        "content": "## 📊 Action Metrics",
+        "background_color": "gray",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 1,
+        "width": 6,
+        "height": 1
+      }
+    },
+    {
+      "id": 101,
+      "definition": {
+        "type": "note",
+        "content": "## 🔔 Status Metrics",
+        "background_color": "gray",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 6,
+        "y": 1,
+        "width": 6,
+        "height": 1
+      }
+    },
+    {
       "id": 2,
       "definition": {
-        "title": "STARTING",
+        "title": "🚀 STARTING",
         "title_size": "16",
-        "title_align": "left",
+        "title_align": "center",
         "type": "query_value",
         "requests": [
           {
@@ -40,7 +78,7 @@
                 },
                 "group_by": [],
                 "search": {
-                  "query": "service:frmWService @action:Starting"
+                  "query": "service:frmWService @action:Starting $status $phase $adjustment_type"
                 }
               }
             ],
@@ -52,19 +90,35 @@
             "response_format": "scalar",
             "conditional_formats": [
               {
+                "comparator": ">",
+                "value": 100,
+                "palette": "white_on_blue"
+              },
+              {
+                "comparator": ">",
+                "value": 50,
+                "palette": "blue_on_white"
+              },
+              {
                 "comparator": ">=",
                 "value": 0,
-                "palette": "white_on_blue"
+                "palette": "white_on_gray"
               }
             ]
           }
         ],
         "autoscale": true,
-        "precision": 0
+        "precision": 0,
+        "timeseries_background": {
+          "type": "area",
+          "yaxis": {
+            "include_zero": true
+          }
+        }
       },
       "layout": {
         "x": 0,
-        "y": 1,
+        "y": 2,
         "width": 3,
         "height": 2
       }
@@ -72,9 +126,9 @@
     {
       "id": 3,
       "definition": {
-        "title": "ENDING",
+        "title": "✅ ENDING",
         "title_size": "16",
-        "title_align": "left",
+        "title_align": "center",
         "type": "query_value",
         "requests": [
           {
@@ -88,7 +142,7 @@
                 },
                 "group_by": [],
                 "search": {
-                  "query": "service:frmWService @action:Ending"
+                  "query": "service:frmWService @action:Ending $status $phase $adjustment_type"
                 }
               }
             ],
@@ -99,6 +153,144 @@
             ],
             "response_format": "scalar",
             "conditional_formats": [
+              {
+                "comparator": ">",
+                "value": 100,
+                "palette": "white_on_green"
+              },
+              {
+                "comparator": ">",
+                "value": 50,
+                "palette": "green_on_white"
+              },
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "white_on_gray"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "timeseries_background": {
+          "type": "area",
+          "yaxis": {
+            "include_zero": true
+          }
+        }
+      },
+      "layout": {
+        "x": 3,
+        "y": 2,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 4,
+      "definition": {
+        "title": "ℹ️ INFO",
+        "title_size": "16",
+        "title_align": "center",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [],
+                "search": {
+                  "query": "service:frmWService @status:INFO $action $phase $adjustment_type"
+                }
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">",
+                "value": 100,
+                "palette": "white_on_yellow"
+              },
+              {
+                "comparator": ">",
+                "value": 50,
+                "palette": "yellow_on_white"
+              },
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "white_on_gray"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "timeseries_background": {
+          "type": "area",
+          "yaxis": {
+            "include_zero": true
+          }
+        }
+      },
+      "layout": {
+        "x": 6,
+        "y": 2,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 5,
+      "definition": {
+        "title": "🔴 ERROR",
+        "title_size": "16",
+        "title_align": "center",
+        "type": "query_value",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [],
+                "search": {
+                  "query": "service:frmWService @status:ERROR $action $phase $adjustment_type"
+                }
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">",
+                "value": 10,
+                "palette": "white_on_red"
+              },
+              {
+                "comparator": ">",
+                "value": 0,
+                "palette": "red_on_white"
+              },
               {
                 "comparator": ">=",
                 "value": 0,
@@ -108,120 +300,432 @@
           }
         ],
         "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 3,
-        "y": 1,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 4,
-      "definition": {
-        "title": "INFO",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "indexes": ["*"],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": [],
-                "search": {
-                  "query": "service:frmWService @status:INFO"
-                }
-              }
-            ],
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "white_on_yellow"
-              }
-            ]
+        "precision": 0,
+        "timeseries_background": {
+          "type": "area",
+          "yaxis": {
+            "include_zero": true
           }
-        ],
-        "autoscale": true,
-        "precision": 0
-      },
-      "layout": {
-        "x": 6,
-        "y": 1,
-        "width": 3,
-        "height": 2
-      }
-    },
-    {
-      "id": 5,
-      "definition": {
-        "title": "ERROR",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "query_value",
-        "requests": [
-          {
-            "queries": [
-              {
-                "data_source": "logs",
-                "name": "query1",
-                "indexes": ["*"],
-                "compute": {
-                  "aggregation": "count"
-                },
-                "group_by": [],
-                "search": {
-                  "query": "service:frmWService @status:ERROR"
-                }
-              }
-            ],
-            "formulas": [
-              {
-                "formula": "query1"
-              }
-            ],
-            "response_format": "scalar",
-            "conditional_formats": [
-              {
-                "comparator": ">=",
-                "value": 0,
-                "palette": "white_on_red"
-              }
-            ]
-          }
-        ],
-        "autoscale": true,
-        "precision": 0
+        }
       },
       "layout": {
         "x": 9,
-        "y": 1,
+        "y": 2,
         "width": 3,
         "height": 2
+      }
+    },
+    {
+      "id": 200,
+      "definition": {
+        "type": "note",
+        "content": "## 📈 Trend Analysis",
+        "background_color": "gray",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 4,
+        "width": 12,
+        "height": 1
       }
     },
     {
       "id": 6,
       "definition": {
-        "title": "Request Details",
+        "title": "📊 Action Trend Over Time",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true,
+        "legend_layout": "horizontal",
+        "legend_columns": ["avg", "sum", "value"],
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "alias": "🚀 Starting",
+                "formula": "query1"
+              },
+              {
+                "alias": "✅ Ending",
+                "formula": "query2"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [],
+                "search": {
+                  "query": "service:frmWService @action:Starting $status $phase $adjustment_type"
+                }
+              },
+              {
+                "data_source": "logs",
+                "name": "query2",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [],
+                "search": {
+                  "query": "service:frmWService @action:Ending $status $phase $adjustment_type"
+                }
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "cool",
+              "line_type": "solid",
+              "line_width": "thick"
+            },
+            "display_type": "line"
+          }
+        ],
+        "yaxis": {
+          "include_zero": true,
+          "scale": "linear"
+        },
+        "markers": []
+      },
+      "layout": {
+        "x": 0,
+        "y": 5,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "id": 7,
+      "definition": {
+        "title": "🔔 Status Trend Over Time",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true,
+        "legend_layout": "horizontal",
+        "legend_columns": ["avg", "sum", "value"],
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "alias": "ℹ️ INFO",
+                "formula": "query1"
+              },
+              {
+                "alias": "🔴 ERROR",
+                "formula": "query2"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [],
+                "search": {
+                  "query": "service:frmWService @status:INFO $action $phase $adjustment_type"
+                }
+              },
+              {
+                "data_source": "logs",
+                "name": "query2",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [],
+                "search": {
+                  "query": "service:frmWService @status:ERROR $action $phase $adjustment_type"
+                }
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "warm",
+              "line_type": "solid",
+              "line_width": "thick"
+            },
+            "display_type": "bars"
+          }
+        ],
+        "yaxis": {
+          "include_zero": true,
+          "scale": "linear"
+        },
+        "markers": []
+      },
+      "layout": {
+        "x": 6,
+        "y": 5,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "id": 300,
+      "definition": {
+        "type": "note",
+        "content": "## 🎯 Distribution Analysis",
+        "background_color": "gray",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 8,
+        "width": 12,
+        "height": 1
+      }
+    },
+    {
+      "id": 8,
+      "definition": {
+        "title": "📍 Requests by Phase",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "sunburst",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "limit": {
+                  "count": 10,
+                  "order": "desc"
+                }
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [
+                  {
+                    "facet": "@phase",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  }
+                ],
+                "search": {
+                  "query": "service:frmWService $action $status $phase $adjustment_type"
+                }
+              }
+            ],
+            "response_format": "scalar",
+            "style": {}
+          }
+        ],
+        "hide_total": false,
+        "legend": {
+          "type": "automatic"
+        }
+      },
+      "layout": {
+        "x": 0,
+        "y": 9,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 9,
+      "definition": {
+        "title": "⚙️ Requests by Adjustment Type",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "sunburst",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "limit": {
+                  "count": 10,
+                  "order": "desc"
+                }
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [
+                  {
+                    "facet": "@adjustment_type",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  }
+                ],
+                "search": {
+                  "query": "service:frmWService $action $status $phase $adjustment_type"
+                }
+              }
+            ],
+            "response_format": "scalar",
+            "style": {}
+          }
+        ],
+        "hide_total": false,
+        "legend": {
+          "type": "automatic"
+        }
+      },
+      "layout": {
+        "x": 4,
+        "y": 9,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 10,
+      "definition": {
+        "title": "📊 Action vs Status Matrix",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "treemap",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "limit": {
+                  "count": 10,
+                  "order": "desc"
+                }
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [
+                  {
+                    "facet": "@action",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  },
+                  {
+                    "facet": "@status",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  }
+                ],
+                "search": {
+                  "query": "service:frmWService $action $status $phase $adjustment_type"
+                }
+              }
+            ],
+            "response_format": "scalar",
+            "style": {}
+          }
+        ]
+      },
+      "layout": {
+        "x": 8,
+        "y": 9,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": 400,
+      "definition": {
+        "type": "note",
+        "content": "## 📋 Live Request Stream",
+        "background_color": "gray",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 12,
+        "width": 12,
+        "height": 1
+      }
+    },
+    {
+      "id": 11,
+      "definition": {
+        "title": "🔴 Recent Errors (Immediate Attention Required)",
         "title_size": "16",
         "title_align": "left",
         "type": "log_stream",
         "indexes": [],
-        "query": "service:frmWService",
+        "query": "service:frmWService @status:ERROR $action $phase $adjustment_type",
+        "sort": {
+          "column": "time",
+          "order": "desc"
+        },
+        "columns": [
+          "@request_id",
+          "@action",
+          "@phase",
+          "@adjustment_type"
+        ],
+        "show_date_column": true,
+        "show_message_column": false,
+        "message_display": "inline"
+      },
+      "layout": {
+        "x": 0,
+        "y": 13,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "id": 12,
+      "definition": {
+        "title": "📜 All Request Details (Live Feed)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "log_stream",
+        "indexes": [],
+        "query": "service:frmWService $action $status $phase $adjustment_type",
         "sort": {
           "column": "time",
           "order": "desc"
@@ -239,9 +743,28 @@
       },
       "layout": {
         "x": 0,
-        "y": 3,
+        "y": 16,
         "width": 12,
         "height": 4
+      }
+    },
+    {
+      "id": 500,
+      "definition": {
+        "type": "note",
+        "content": "---\n**Dashboard Version:** 2.0 | **Last Updated:** Auto-Refresh | **Owner:** Platform Engineering Team\n\n🔒 *Confidential - Internal Use Only*",
+        "background_color": "gray",
+        "font_size": "12",
+        "text_align": "center",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 20,
+        "width": 12,
+        "height": 1
       }
     }
   ],
@@ -275,4 +798,3 @@
   "notify_list": [],
   "reflow_type": "fixed"
 }
-..fgghggdfg
