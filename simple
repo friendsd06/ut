@@ -496,7 +496,184 @@
     },
     {
       "definition": {
-        "title": "📜 Request Details (Live)",
+        "type": "note",
+        "content": "## 📋 Request Details",
+        "background_color": "gray",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 9,
+        "width": 12,
+        "height": 1
+      }
+    },
+    {
+      "definition": {
+        "title": "📜 Request Details Table",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_table",
+        "requests": [
+          {
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": [
+                  {
+                    "facet": "@request_id",
+                    "limit": 50,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  },
+                  {
+                    "facet": "@action",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  },
+                  {
+                    "facet": "@status",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  },
+                  {
+                    "facet": "@phase",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  },
+                  {
+                    "facet": "@adjustment_type",
+                    "limit": 10,
+                    "sort": {
+                      "aggregation": "count",
+                      "order": "desc"
+                    }
+                  }
+                ],
+                "search": {
+                  "query": "service:frmWService $action $status $phase $adjustment_type"
+                }
+              }
+            ],
+            "response_format": "scalar",
+            "formulas": [
+              {
+                "formula": "query1",
+                "cell_display_mode": "number",
+                "alias": "Count",
+                "conditional_formats": [
+                  {
+                    "comparator": ">",
+                    "value": 5,
+                    "palette": "white_on_green"
+                  },
+                  {
+                    "comparator": ">",
+                    "value": 0,
+                    "palette": "white_on_yellow"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "has_search_bar": "auto"
+      },
+      "layout": {
+        "x": 0,
+        "y": 10,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "note",
+        "content": "## 🔴 Error Logs (Requires Attention)",
+        "background_color": "red",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 14,
+        "width": 12,
+        "height": 1
+      }
+    },
+    {
+      "definition": {
+        "title": "🔴 Recent Errors",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "log_stream",
+        "indexes": [],
+        "query": "service:frmWService @status:ERROR $action $phase $adjustment_type",
+        "sort": {
+          "column": "time",
+          "order": "desc"
+        },
+        "columns": [
+          "@request_id",
+          "@action",
+          "@phase",
+          "@adjustment_type"
+        ],
+        "show_date_column": true,
+        "show_message_column": true,
+        "message_display": "inline"
+      },
+      "layout": {
+        "x": 0,
+        "y": 15,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "definition": {
+        "type": "note",
+        "content": "## 📜 All Logs (Live Stream)",
+        "background_color": "blue",
+        "font_size": "14",
+        "text_align": "left",
+        "vertical_align": "center",
+        "show_tick": false,
+        "has_padding": true
+      },
+      "layout": {
+        "x": 0,
+        "y": 18,
+        "width": 12,
+        "height": 1
+      }
+    },
+    {
+      "definition": {
+        "title": "📜 All Request Logs",
         "title_size": "16",
         "title_align": "left",
         "type": "log_stream",
@@ -519,7 +696,7 @@
       },
       "layout": {
         "x": 0,
-        "y": 9,
+        "y": 19,
         "width": 12,
         "height": 4
       }
