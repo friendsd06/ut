@@ -1,12 +1,12 @@
 {
-  "title": "⚡ frmWService | Request Command Center",
-  "description": "Enterprise Request Processing Intelligence",
+  "title": "frmWService - Request Dashboard",
+  "description": "Request Processing Dashboard",
   "widgets": [
     {
       "definition": {
         "type": "note",
-        "content": "# ⚡ REQUEST COMMAND CENTER\n\n**Service** `frmWService` **|** **Environment** `Production` **|** **Status** `🟢 Online` **|** **Refresh** `Real-Time`",
-        "background_color": "black",
+        "content": "# 📋 Request Processing Dashboard\n**Service:** frmWService",
+        "background_color": "purple",
         "font_size": "16",
         "text_align": "center",
         "vertical_align": "center",
@@ -17,84 +17,12 @@
         "x": 0,
         "y": 0,
         "width": 12,
-        "height": 2
-      }
-    },
-    {
-      "definition": {
-        "type": "note",
-        "content": "## 🔍 FILTERS",
-        "background_color": "vivid_purple",
-        "font_size": "14",
-        "text_align": "center",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 2,
-        "width": 2,
         "height": 1
       }
     },
     {
       "definition": {
-        "type": "note",
-        "content": "**📅 COB Date** ➜ Select date **|** **🏢 Sub-Product** ➜ Filter by product **|** **⚙️ Adjustment** ➜ Filter type **|** **📊 Status** ➜ IN_PROGRESS / COMPLETED / FAILED **|** **🔎 Request ID** ➜ Type to search",
-        "background_color": "gray",
-        "font_size": "13",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 2,
-        "y": 2,
-        "width": 10,
-        "height": 1
-      }
-    },
-    {
-      "definition": {
-        "type": "note",
-        "content": "## 📋 REQUEST LOGS",
-        "background_color": "vivid_blue",
-        "font_size": "14",
-        "text_align": "center",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 3,
-        "width": 2,
-        "height": 1
-      }
-    },
-    {
-      "definition": {
-        "type": "note",
-        "content": "**Live Data Stream** | Filtered by selections above | Sorted by most recent | Click any row to view details",
-        "background_color": "white",
-        "font_size": "13",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 2,
-        "y": 3,
-        "width": 10,
-        "height": 1
-      }
-    },
-    {
-      "definition": {
-        "title": "",
+        "title": "Request Logs",
         "title_size": "16",
         "title_align": "left",
         "type": "log_stream",
@@ -117,27 +45,9 @@
       },
       "layout": {
         "x": 0,
-        "y": 4,
+        "y": 1,
         "width": 12,
-        "height": 9
-      }
-    },
-    {
-      "definition": {
-        "type": "note",
-        "content": "🔒 **CONFIDENTIAL** | Platform Engineering Team | Dashboard v3.0 | © 2024 | For Internal Use Only",
-        "background_color": "black",
-        "font_size": "12",
-        "text_align": "center",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 13,
-        "width": 12,
-        "height": 1
+        "height": 10
       }
     }
   ],
@@ -151,7 +61,7 @@
     {
       "name": "sub_product",
       "prefix": "@sub_product",
-      "available_values": ["EQUITY", "FIXED_INCOME", "DERIVATIVES", "COMMODITIES", "FX"],
+      "available_values": [],
       "default": "*"
     },
     {
