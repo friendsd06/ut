@@ -1,156 +1,309 @@
 {
-  "title": "frmWService - Request Status Dashboard",
-  "description": "Track request processing by COB Date, Sub-Product, Adjustment Type, Status and Request ID",
+  "title": "Request Status Dashboard",
+  "description": "Track request phases and adjustment types",
   "widgets": [
     {
+      "id": 1,
       "definition": {
-        "type": "note",
-        "content": "# 🎯 Request Processing Dashboard\n**Service:** frmWService | **Status:** Live Monitoring",
-        "background_color": "purple",
-        "font_size": "14",
-        "text_align": "center",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
+        "title": "Pending",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:pending cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#c05621"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "timeseries_background": {
+          "type": "area"
+        }
       },
       "layout": {
         "x": 0,
         "y": 0,
-        "width": 12,
-        "height": 1
+        "width": 3,
+        "height": 2
       }
     },
     {
+      "id": 2,
       "definition": {
-        "type": "note",
-        "content": "## 🔴 Failed Requests (Requires Attention)",
-        "background_color": "red",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 1,
-        "width": 12,
-        "height": 1
-      }
-    },
-    {
-      "definition": {
-        "title": "🔴 Failed Request Logs",
+        "title": "In Progress",
         "title_size": "16",
         "title_align": "left",
-        "type": "log_stream",
-        "indexes": [],
-        "query": "service:frmWService @status:FAILED $cob_date $sub_product $adjustment_type $request_id",
-        "sort": {
-          "column": "time",
-          "order": "desc"
-        },
-        "columns": [
-          "@cob_date",
-          "@request_id",
-          "@sub_product",
-          "@adjustment_type",
-          "@status"
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:in-progress cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#2c5282"
+              }
+            ]
+          }
         ],
-        "show_date_column": true,
-        "show_message_column": false,
-        "message_display": "inline"
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 3,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 3,
+      "definition": {
+        "title": "Completed",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:completed cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#22543d"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 6,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 4,
+      "definition": {
+        "title": "Failed",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "queries": [
+              {
+                "data_source": "logs",
+                "name": "query1",
+                "search": {
+                  "query": "status:failed cob_date:$cob_date.value"
+                },
+                "indexes": [
+                  "*"
+                ],
+                "compute": {
+                  "aggregation": "count"
+                },
+                "group_by": []
+              }
+            ],
+            "response_format": "scalar",
+            "conditional_formats": [
+              {
+                "comparator": ">=",
+                "value": 0,
+                "palette": "custom_text",
+                "custom_fg_color": "#c53030"
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": {
+        "x": 9,
+        "y": 0,
+        "width": 3,
+        "height": 2
+      }
+    },
+    {
+      "id": 5,
+      "definition": {
+        "title": "Request Phase Details",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "list_stream",
+        "requests": [
+          {
+            "columns": [
+              {
+                "width": "auto",
+                "field": "@request_id"
+              },
+              {
+                "width": "auto",
+                "field": "@status"
+              },
+              {
+                "width": "auto",
+                "field": "@phase"
+              },
+              {
+                "width": "auto",
+                "field": "@adjustment_type"
+              }
+            ],
+            "query": {
+              "data_source": "logs_stream",
+              "query_string": "cob_date:$cob_date.value request_id:$request_id.value status:$status.value phase:$phase.value adjustment_type:$adjustment_type.value",
+              "indexes": [],
+              "storage": "hot"
+            },
+            "response_format": "event_list"
+          }
+        ],
+        "show_date_column": false,
+        "show_message_column": false
       },
       "layout": {
         "x": 0,
         "y": 2,
         "width": 12,
-        "height": 4
-      }
-    },
-    {
-      "definition": {
-        "type": "note",
-        "content": "## 📜 All Request Logs",
-        "background_color": "blue",
-        "font_size": "14",
-        "text_align": "left",
-        "vertical_align": "center",
-        "show_tick": false,
-        "has_padding": true
-      },
-      "layout": {
-        "x": 0,
-        "y": 6,
-        "width": 12,
-        "height": 1
-      }
-    },
-    {
-      "definition": {
-        "title": "📜 All Request Logs",
-        "title_size": "16",
-        "title_align": "left",
-        "type": "log_stream",
-        "indexes": [],
-        "query": "service:frmWService $cob_date $sub_product $adjustment_type $status $request_id",
-        "sort": {
-          "column": "time",
-          "order": "desc"
-        },
-        "columns": [
-          "@cob_date",
-          "@request_id",
-          "@sub_product",
-          "@adjustment_type",
-          "@status"
-        ],
-        "show_date_column": true,
-        "show_message_column": false,
-        "message_display": "inline"
-      },
-      "layout": {
-        "x": 0,
-        "y": 7,
-        "width": 12,
-        "height": 5
+        "height": 6
       }
     }
   ],
   "template_variables": [
     {
       "name": "cob_date",
-      "prefix": "@cob_date",
+      "prefix": "cob_date",
       "available_values": [],
-      "default": "*"
-    },
-    {
-      "name": "sub_product",
-      "prefix": "@sub_product",
-      "available_values": ["EQUITY", "FIXED_INCOME", "DERIVATIVES", "COMMODITIES", "FX"],
-      "default": "*"
-    },
-    {
-      "name": "adjustment_type",
-      "prefix": "@adjustment_type",
-      "available_values": ["Rate Adjustment", "Type Adjustment", "Manual Override"],
-      "default": "*"
-    },
-    {
-      "name": "status",
-      "prefix": "@status",
-      "available_values": ["IN_PROGRESS", "COMPLETED", "FAILED"],
       "default": "*"
     },
     {
       "name": "request_id",
-      "prefix": "@request_id",
+      "prefix": "request_id",
       "available_values": [],
+      "default": "*"
+    },
+    {
+      "name": "status",
+      "prefix": "status",
+      "available_values": [
+        "pending",
+        "in-progress",
+        "completed",
+        "failed"
+      ],
+      "default": "*"
+    },
+    {
+      "name": "phase",
+      "prefix": "phase",
+      "available_values": [
+        "Phase 1: Initial Review",
+        "Phase 2: Validation",
+        "Phase 3: Processing",
+        "Phase 4: Finalized"
+      ],
+      "default": "*"
+    },
+    {
+      "name": "adjustment_type",
+      "prefix": "adjustment_type",
+      "available_values": [
+        "Rate Adjustment",
+        "Type Adjustment",
+        "Manual Override"
+      ],
       "default": "*"
     }
   ],
   "layout_type": "ordered",
   "notify_list": [],
-  "reflow_type": "fixed"
+  "reflow_type": "fixed",
+  "autogenerated": false
 }
-ffgdfdg
