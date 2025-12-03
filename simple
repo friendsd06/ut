@@ -153,3 +153,31 @@
   "notify_list": [],
   "reflow_type": "fixed"
 }
+
+---------------
+
+COB_DATE|SUB_PRODUCT|ADJUSTMENT_TYPE|STATUS|REQUEST_ID|MESSAGE
+Example:
+2024-11-14|EQUITY|Rate Adjustment|IN_PROGRESS|REQ-2024-10145|Processing request for equity adjustment
+2024-11-14|FIXED_INCOME|Type Adjustment|COMPLETED|REQ-2024-10146|Request completed successfully
+2024-11-15|DERIVATIVES|Manual Override|FAILED|REQ-2024-10147|Validation failed - missing fields
+
+
+ // Log format: COB_DATE|SUB_PRODUCT|ADJUSTMENT_TYPE|STATUS|REQUEST_ID|MESSAGE
+
+        // Log IN_PROGRESS
+        logger.info("{}|{}|{}|IN_PROGRESS|{}|Processing request started",
+            cobDate, subProduct, adjustmentType, requestId);
+
+        try {
+            // Process logic here...
+
+            // Log COMPLETED
+            logger.info("{}|{}|{}|COMPLETED|{}|Request processed successfully",
+                cobDate, subProduct, adjustmentType, requestId);
+
+        } catch (Exception e) {
+            // Log FAILED
+            logger.error("{}|{}|{}|FAILED|{}|Request failed - {}",
+                cobDate, subProduct, adjustmentType, requestId, e.getMessage());
+        }
